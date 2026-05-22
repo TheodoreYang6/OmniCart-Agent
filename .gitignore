@@ -1,0 +1,61 @@
+# ===== 环境变量 & 密钥 =====
+.env
+*.env.local
+*.env.production
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.whl
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== Virtual Environment =====
+venv/
+.venv/
+env/
+.env/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# ===== Android =====
+android-client/.gradle/
+android-client/build/
+android-client/app/build/
+android-client/local.properties
+android-client/*.apk
+android-client/*.aab
+*.apk
+*.aab
+.gradle/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ===== Claude / AI Agent (internal files only) =====
+.claude/
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Database =====
+*.db
+*.sqlite3
+
+# ===== Uploads (generated at runtime) =====
+data/uploads/

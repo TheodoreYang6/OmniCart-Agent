@@ -1,0 +1,52 @@
+# ============================================================
+# OmniCart Agent 模型统一配置
+# 业务代码只通过"能力名"调用，不关心具体模型
+# 修改模型只需改此文件，不动业务代码
+# ============================================================
+
+# API 提供商 (实际值从 .env 读取，此处为默认值)
+provider:
+  qwen:
+    api_key: "${QWEN_API_KEY}"
+    base_url: "https://dashscope.aliyuncs.com/api/v1"
+
+# 能力 → 模型映射
+capabilities:
+
+  # ---- 文本生成类 ----
+  chat_generation:          # 多轮对话、推荐解释、最终回答
+    model: qwen-plus
+    temperature: 0.7
+    max_tokens: 2048
+
+  intent_understanding:     # 购物意图、约束抽取
+    model: qwen-plus
+    temperature: 0.3
+    max_tokens: 1024
+
+  # ---- 视觉理解类 ----
+  visual_understanding:     # 商品图/截图解析 (Qwen-VL)
+    model: qwen-vl-plus
+    temperature: 0.3
+    max_tokens: 2048
+
+  # ---- 向量化类 ----
+  text_embedding:           # 商品文本、评论、FAQ 向量化 (OpenAI 兼容 API)
+    model: text-embedding-v4
+    dimensions: 1024
+
+  vision_embedding:         # 商品图片向量化 (V1-Plus 启用)
+    model: qwen3-vl-embedding
+    dimensions: 1024
+    fallback: text_embedding
+
+  # ---- 精排类 ----
+  text_reranking:           # 候选商品文本精排 (兼容 API)
+    model: qwen3-rerank
+
+  vision_reranking:         # 图文精排 (V1-Plus 启用)
+    model: qwen3-vl-rerank
+    fallback: text_reranking
+
+# 全局开关
+mock_mode: ${OMNICART_MOCK_MODE}

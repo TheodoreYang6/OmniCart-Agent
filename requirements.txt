@@ -1,0 +1,56 @@
+# ============================================================
+# OmniCart Agent 全阶段依赖 (V0 → V1-Advanced)
+# 安装: pip install -r requirements.txt
+# ============================================================
+
+# --- Web 框架 (V0) ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+
+# --- 数据校验 (V0) ---
+pydantic>=2.0.0
+
+# --- HTTP 客户端 (V0, Qwen API 调用) ---
+httpx>=0.28.0
+
+# --- 环境变量 (V0) ---
+python-dotenv>=1.0.0
+
+# --- 文件上传 (V1, FastAPI multipart) ---
+python-multipart>=0.0.18
+
+# --- 图片处理 (V1, Visual Agent) ---
+Pillow>=10.0.0
+
+# --- Qwen API 兼容 SDK (V1, DashScope / OpenAI-compatible) ---
+openai>=1.0.0
+
+# --- 向量数据库 (V1, Qdrant 商品索引) ---
+qdrant-client>=1.12.0
+
+# --- Agent 编排 (V1, LangGraph Workflow) ---
+langgraph>=0.2.0
+langgraph-checkpoint>=2.0.0
+
+# --- 缓存 (V1, Redis 视觉解析/Demo Pack 缓存) ---
+redis>=5.0.0
+
+# --- 结构化存储 (V1, PostgreSQL) ---
+psycopg2-binary>=2.9.0
+
+# --- YAML 配置 (V1, workflow.yaml) ---
+pyyaml>=6.0
+
+# --- 轻量图 (V1, Evidence Graph Lite) ---
+networkx>=3.0
+
+# --- 异步 ORM (V1, SQLAlchemy 2.0 + asyncpg) ---
+sqlalchemy>=2.0.0
+asyncpg>=0.29.0
+alembic>=1.13.0
+nest-asyncio>=1.6.0
+
+# --- 测试 (V0+) ---
+pytest>=9.0.0
+pytest-asyncio>=0.25.0
+pytest-cov>=6.0.0

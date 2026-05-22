@@ -1,0 +1,83 @@
+# OmniCart Agent — 声明式 Workflow 配置
+# 定义 Agent 节点、边和条件分支，修改此文件即可调整工作流，无需改 Python 代码
+
+name: omnicart-shopping-decision
+version: "1.0"
+
+nodes:
+  router:
+    agent: Router Agent
+    description: 意图识别 + 约束抽取 + 检索计划
+  visual:
+    agent: Visual Agent
+    description: Qwen-VL 商品截图解析
+    optional: true
+  retrieval:
+    agent: Retrieval Agent
+    description: 多路证据检索 (text/review/policy)
+  reranker:
+    agent: Qwen Reranker
+    description: 语义精排
+  decision:
+    agent: Decision Agent
+    description: 约束求解 + 评分排序
+  response:
+    agent: Response Agent
+    description: Context Compiler + LLM 回答
+  guard:
+    agent: Response Guard
+    description: 回答守门验证
+
+edges:
+  - from: router
+    to: visual
+    condition: has_image
+  - from: router
+    to: retrieval
+    condition: default
+  - from: visual
+    to: retrieval
+  - from: retrieval
+    to: reranker
+  - from: reranker
+    to: decision
+    condition: has_results
+  - from: reranker
+    to: response
+    condition: empty_results
+  - from: decision
+    to: response
+  - from: response
+    to: guard
+  - from: guard
+    to: END
+
+retrieval:
+  channels:
+    - text
+    - review
+    - policy
+  default_top_k: 5
+  compare_top_k: 10
+
+scoring:
+  weights:
+    budget_fit: 0.22
+    scenario_fit: 0.24
+    spec_match: 0.20
+    review_confidence: 0.14
+    visual_similarity: 0.10
+    availability_score: 0.10
+    risk_penalty: 0.15
+
+guard:
+  checks:
+    - evidence_bound
+    - price_accurate
+    - risk_warned
+    - honest_on_empty
+
+memory:
+  enabled: true
+  backend: in-memory  # V1: in-memory, V2: redis
+  ttl_seconds: 3600

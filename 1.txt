@@ -1,0 +1,126 @@
+请先阅读当前项目中的四个核心文档和现有代码结构：
+
+1. OMNICART_AGENT_COMPLETE_BLUEPRINT.md
+2. DEVELOPMENT_DIRECTORY_STRUCTURE.md
+3. DEVELOPMENT_RULES.md
+4. PRODUCT_FUNCTIONS_AND_USER_GUIDE.md
+
+现在我要把项目放到 GitHub Private Repository 中进行多人协作开发，请你为当前项目生成一份非常详细、适合队友使用的 README.md。
+
+README.md 的目标不是简单介绍项目，而是要让新加入的队友能够：
+
+1. 看懂这个项目是做什么的；
+2. 理解当前项目最终形态；
+3. 知道如何 clone 私有仓库；
+4. 知道如何配置开发环境；
+5. 知道如何启动 FastAPI 后端；
+6. 知道如何运行 Android 原生客户端；
+7. 知道如何配置环境变量；
+8. 知道如何进行 Git 分支协作；
+9. 知道哪些文件不能提交；
+10. 知道如何参与开发、提交代码和记录进度。
+
+请直接创建或重写项目根目录下的 README.md。
+
+README.md 必须包含以下内容：
+
+# OmniCart Agent
+
+## 1. 项目简介
+
+说明：
+
+OmniCart Agent 是一个 Android 原生四 Tab 电商智能导购客户端，后端由 FastAPI Agent Runtime 提供多模态购物决策能力。
+
+当前产品包含四个主页面：
+
+1. 商品展示
+2. 豆仔智能
+3. 购物车
+4. 个人中心
+
+其中“豆仔智能”是核心 AI Agent 页面，负责多模态导购、商品推荐、证据解释、评分、Trace、Harness 展示，并可以通过受控 action 将商品加入购物车。
+
+请强调：
+
+- 本项目不是普通购物 App；
+- 也不是单一聊天机器人；
+- 而是一个具备完整购物链路的 Android 原生智能导购 Agent 产品。
+
+## 2. 项目核心能力
+
+请介绍：
+
+- Android 原生客户端；
+- FastAPI 后端；
+- Qwen-only Model Stack；
+- 多模态 Evidence RAG；
+- 豆仔智能导购 Agent；
+- 商品展示；
+- 购物车；
+- 个人中心；
+- 用户登录；
+- 地址管理；
+- 用户偏好；
+- 模拟结算；
+- Demo Mode / Mock Mode。
+
+## 3. 技术栈
+
+请分别列出：
+
+### Android 客户端
+
+- Kotlin
+- Jetpack Compose
+- Material 3
+- MVVM
+- ViewModel + StateFlow
+- Kotlin Coroutines
+- Retrofit + OkHttp
+- Coil
+- Android Photo Picker
+
+### 后端
+
+- Python
+- FastAPI
+- Pydantic
+- Qwen API
+- Agent Runtime
+- RAG
+- Demo Pack / Mock Mode
+
+### 协作与工程
+
+- Git
+- GitHub Private Repository
+- feature branch workflow
+- .env / .env.example
+- CHANGELOG.md
+- DEVELOPMENT_PROGRESS.md
+- KNOWLEDGE_LOG.md
+- DECISION_LOG.md
+
+## 4. 仓库目录结构
+
+请根据当前实际项目结构生成目录说明，重点解释：
+
+- backend/
+- android-client/
+- data/
+- docs/
+- scripts/
+- tests/
+
+如果当前项目目录还没有完全创建，请根据 DEVELOPMENT_DIRECTORY_STRUCTURE.md 写目标结构，并标明“当前阶段按需创建，禁止一次性创建空壳目录”。
+
+## 5. GitHub 私有仓库协作流程
+
+请写清楚队友如何操作：
+
+### 5.1 克隆仓库
+
+```bash
+git clone <private-repo-url>
+cd <repo-name>
