@@ -121,6 +121,18 @@ interface OmniCartApi {
         @Path("address_id") addressId: String,
         @Query("user_id") userId: String = "demo_user_001",
     ): OkResponse
+
+    // ---- 偏好 ----
+    @GET("api/preferences")
+    suspend fun getPreferences(
+        @Query("session_id") sessionId: String,
+    ): Map<String, Any?>
+
+    @PUT("api/preferences")
+    suspend fun updatePreferences(
+        @Query("session_id") sessionId: String,
+        @Body body: Map<String, Any?>,
+    ): Map<String, Any?>
 }
 
 // ---- Data Classes ----

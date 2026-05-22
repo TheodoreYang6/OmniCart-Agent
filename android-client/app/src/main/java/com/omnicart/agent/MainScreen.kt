@@ -26,6 +26,7 @@ import com.omnicart.agent.feature.shop.ProductListScreen
 import com.omnicart.agent.feature.cart.CartScreen
 import com.omnicart.agent.feature.profile.ProfileScreen
 import com.omnicart.agent.feature.address.AddressScreen
+import com.omnicart.agent.feature.preference.PreferenceScreen
 
 data class BottomTab(val route: String, val label: String, val icon: ImageVector)
 
@@ -52,7 +53,7 @@ fun MainScreen() {
     }
 
     // 隐藏底部 Tab 的页面路由
-    val hideBottomBar = currentDestination?.route in listOf("login", "address")
+    val hideBottomBar = currentDestination?.route in listOf("login", "address", "preference")
 
     Scaffold(
         bottomBar = {
@@ -93,6 +94,7 @@ fun MainScreen() {
                     onLoginClick = { navController.navigate("login") },
                     onLogoutClick = { authViewModel.logout() },
                     onAddressClick = { navController.navigate("address") },
+                    onPreferenceClick = { navController.navigate("preference") },
                 )
             }
             composable("login") {
@@ -103,6 +105,12 @@ fun MainScreen() {
             }
             composable("address") {
                 AddressScreen(onBack = { navController.popBackStack() })
+            }
+            composable("preference") {
+                PreferenceScreen(
+                    sessionId = "demo_session",
+                    onBack = { navController.popBackStack() },
+                )
             }
         }
     }

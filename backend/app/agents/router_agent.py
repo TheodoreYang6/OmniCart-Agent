@@ -16,8 +16,8 @@ _ROUTER_PROMPT = """你是一个购物决策路由Agent。分析用户的购物�
 从用户输入中提取以下信息，只输出JSON，不要多余内容：
 
 {
-  "intent": "recommend|compare|risk_check|compatibility_check|alternative",
-  "category": "数码电子|美妆护肤|服饰运动|食品饮料|null",
+  "intent": "chitchat|recommend|compare|risk_check|compatibility_check|alternative",
+  "category": "数码电子|美妆护肤|服饰运动|食品饮料|null（chitchat时必须为null）",
   "sub_category": "如 真无线耳机、精华、跑步鞋、咖啡 等，不确定则为null",
   "budget_max": 最高预算金额(数字)或null,
   "budget_min": 最低预算金额(数字)或null,
@@ -87,7 +87,9 @@ class RouterAgent(BaseAgent):
         )
 
         channels = merged.get("retrieval_channels", ["text"])
-        if "text" not in channels:
+        if state.intent == "chitchat":
+            channels = []  # 闲聊不需要检索
+        elif "text" not in channels:
             channels.insert(0, "text")
         if merged.get("need_policy_check"):
             if "policy" not in channels:
@@ -140,6 +142,20 @@ def _rule_based_parse(query: str) -> dict:
     }
 
     q = query.lower()
+
+    # 闲聊检测（问候/自我介绍/能力询问/感谢/告别）→ 不走商品检索
+    chitchat_patterns = [
+        "你好", "嗨", "哈喽", "hello", "hi", "在吗", "在不在",
+        "你是谁", "你叫什么", "你的名字", "介绍自己", "自我介绍",
+        "你能做什么", "你会什么", "你有什么功能", "你能帮我什么", "你怎么用",
+        "谢谢", "感谢", "多谢", "辛苦了", "拜拜", "再见", "晚安", "回头见",
+        "什么是", "怎么用", "如何使用", "怎么操作",
+    ]
+    if any(w in q for w in chitchat_patterns):
+        result["intent"] = "chitchat"
+        result["category"] = None
+        result["retrieval_channels"] = []
+        return result
 
     # Intent
     if any(w in q for w in ["对比", "比较", "vs", "哪个好", "选哪个"]):

@@ -4,6 +4,7 @@ import android.net.Uri
 import com.omnicart.agent.core.model.DecisionResult
 import com.omnicart.agent.core.model.EvidenceItem
 import com.omnicart.agent.core.model.Product
+import com.omnicart.agent.core.model.RecommendResponse
 import com.omnicart.agent.core.model.TraceStepItem
 import java.util.UUID
 
@@ -36,6 +37,7 @@ data class ChatUiState(
     val uploadedImageUrl: String? = null,
     val lastSentImageUri: Uri? = null,
     val addToCartSuccess: String? = null,
+    val lastResponse: RecommendResponse? = null,  // V1-Plus: 全部 Agent 数据
 ) {
     val lastUserMessage: ChatMessage?
         get() = messages.lastOrNull { it.role == MessageRole.User }

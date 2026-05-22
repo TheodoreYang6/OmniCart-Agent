@@ -63,6 +63,7 @@ class WorkflowState(BaseModel):
     trace_steps: list[dict] = Field(default_factory=list)
     skill_executions: list[dict] = Field(default_factory=list)
     harness_report: dict = Field(default_factory=dict)
+    sufficiency_report: dict = Field(default_factory=dict)
     fallback_status: dict = Field(default_factory=dict)
 
     # 错误处理

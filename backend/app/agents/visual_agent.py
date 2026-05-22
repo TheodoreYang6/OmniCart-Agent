@@ -126,11 +126,15 @@ class VisualAgent:
         if not isinstance(highlights, list):
             highlights = []
 
+        specs = data.get("specs")
+        if isinstance(specs, list):
+            specs = "，".join(str(s) for s in specs)
+
         return VisualResult(
             product_name=data.get("product_name"),
             brand=data.get("brand"),
             category=data.get("category"),
-            specs=data.get("specs"),
+            specs=specs,
             price=price,
             capacity=data.get("capacity"),
             power=data.get("power"),

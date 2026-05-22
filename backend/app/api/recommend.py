@@ -36,6 +36,9 @@ class RecommendResponse(BaseModel):
     skill_executions: list
     harness_report: dict
     fallback_status: dict
+    retrieval_plan: dict | None = None
+    sufficiency_report: dict | None = None
+    constraints: dict | None = None
 
 
 @router.post("/api/recommend", response_model=RecommendResponse)
@@ -241,6 +244,9 @@ async def recommend_v2(req: RecommendRequest):
         skill_executions=result.skill_executions,
         harness_report=result.harness_report,
         fallback_status=result.fallback_status,
+        retrieval_plan=result.retrieval_plan.model_dump() if result.retrieval_plan else None,
+        sufficiency_report=result.sufficiency_report,
+        constraints=result.constraints.model_dump() if result.constraints else None,
     )
 
 

@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +31,7 @@ import com.omnicart.agent.feature.demo.PlusMenuSheet
 import com.omnicart.agent.feature.product.ProductCard
 import com.omnicart.agent.feature.product.ProductDetailSheet
 import com.omnicart.agent.feature.upload.ImagePreview
+import com.omnicart.agent.feature.panel.AgentInsightSheet
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,7 +44,16 @@ fun ChatScreen(
     val context = LocalContext.current
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var showPlusSheet by remember { mutableStateOf(false) }
+    var showInsight by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val listState = rememberLazyListState()
+
+    // 自动滚动到底部
+    LaunchedEffect(uiState.messages.size, uiState.isLoading) {
+        if (uiState.messages.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.messages.size - 1)
+        }
+    }
 
     // 加购成功提示
     LaunchedEffect(uiState.addToCartSuccess) {
@@ -115,7 +127,7 @@ fun ChatScreen(
         )
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize().imePadding()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 顶栏
             Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
@@ -129,6 +141,15 @@ fun ChatScreen(
                         modifier = Modifier.weight(1f),
                     )
                     if (uiState.messages.isNotEmpty()) {
+                        if (uiState.lastResponse != null) {
+                            IconButton(onClick = { showInsight = true }) {
+                                Icon(
+                                    Icons.Filled.Star,
+                                    contentDescription = "Agent洞察",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
                         IconButton(onClick = { viewModel.onNewConversation() }) {
                             Icon(
                                 Icons.Filled.Add,
@@ -145,6 +166,7 @@ fun ChatScreen(
 
                 if (hasContent) {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
@@ -327,7 +349,6 @@ fun ChatScreen(
                     onPlusClick = { showPlusSheet = true },
                     enabled = !uiState.isLoading,
                     hasImage = uiState.selectedImageUri != null,
-                    modifier = Modifier.imePadding(),
                 )
             }
         }
@@ -335,5 +356,13 @@ fun ChatScreen(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+
+        // V1-Plus: Agent 洞察面板
+        if (showInsight) {
+            AgentInsightSheet(
+                response = uiState.lastResponse,
+                onDismiss = { showInsight = false },
+            )
+        }
     }
 }

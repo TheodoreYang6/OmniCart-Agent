@@ -1,5 +1,80 @@
 # Changelog
 
+## [V1-Core] Phase 5 完成：参赛打磨 — 2026-05-22
+
+### Added
+- State Checkpoint（JSON 文件持久化 8 节点，支持 resume/replay/export）
+- baseline 对比脚本（10 条 golden queries，品类准确率/延迟/结果数评估）
+- Evidence Graph Lite（NetworkX 商品-证据-风险图关系，优雅降级）
+- Visual Evidence Grounding（字段级视觉证据绑定，evidence_id 可追溯）
+- Counterfactual Recommendation（0 结果时反事实建议：放宽预算/品类/标签）
+- Declarative workflow.yaml（更新至 8 节点 + fallback + checkpoint 配置）
+- Tiered Multimodal Fallback（L0 Qwen-VL → L1 Mock → L2 纯文本 3 级降级）
+- Hierarchical Shopping Knowledge Index（品类→子品类→品牌→商品 4 级分层）
+- Decision Harness（7 项统一校验框架，包裹 ResponseGuard + EvidenceChecker）
+- A2A-lite Dispatcher（AgentMessage/Artifact 同进程分发 + Agent 注册）
+- Demo Pack 导出脚本（4 场景：蓝牙耳机/防晒霜/跑步鞋/咖啡）
+- Android MockDemoData（一键 Demo 完整预置数据：Evidence + Trace + Harness 全面板）
+- ChatViewModel Demo 模式升级为 MockDemoData（一次点击展示全部面板）
+- 答辩QA手册扩展至 17 章（含全部 Phase 2-5 新增内容 + 完整代码索引）
+- 4 个面板组件内联到 ChatScreen 豆仔对话流
+
+### Test Results
+- 后端：21/21 单元测试通过
+- Workflow：8 节点正确注册
+- Skill Registry：8 skills / ToolManager：8 tools + 权限 + 记录
+- 13 个新 Phase 5 模块全部导入验证通过
+- Android：BUILD SUCCESSFUL
+
+---
+
+## [V1-Core] Phase 2-4 完成：用户体系 + 证据链 + Agent 面板 — 2026-05-22
+
+### Added
+- 用户登录/注册 API（PBKDF2-SHA256 + Bearer Token + PG/内存双模）
+- 收货地址 CRUD API（省/市/区/详细 + is_default 互斥 + PG/内存双模）
+- 用户偏好 REST API（GET/PUT/DELETE，基于 PreferenceMemory）
+- Evidence Checker 接入 Workflow（新增 evidence_check 节点，Reranker→Decision 之间）
+- Skill Registry（8 内置 Skill：视觉解析/商品检索/评论挖掘/政策检查/兼容性/评分/证据充足性/Demo回放）
+- MCP-compatible ToolManager（8 内置 Tool + 权限控制 + ToolCallRecord + V1 只读）
+- Android 登录/注册页面（LoginScreen + AuthViewModel + AuthManager SharedPreferences）
+- Android 地址管理页面（AddressScreen + 新增/编辑对话框 + 删除/默认标识）
+- Android 偏好设置页面（PreferenceScreen + API 对接）
+- Android EvidencePanel 独立组件（可折叠，按 source_type 分色图标）
+- Android AgentTracePanel 独立组件（可折叠时间轴，状态色点）
+- Android HarnessValidationPanel 独立组件（5 项守门规则 ✅/❌）
+- Android SkillExecutionPanel 独立组件（技能执行状态列表）
+- Android ScoreBreakdown 独立组件（7 维进度条颜色编码）
+- 4 个面板组件集成到 ChatScreen 豆仔对话流
+- 完整 README.md（10 章，面向队友的协作指南）
+- .gitignore（保护 .env API 密钥等敏感文件）
+- 新增 9 个后端单元测试（auth + address）
+- WorkflowState 新增 sufficiency_report 字段
+
+### Changed
+- ChatScreen 豆仔对话下方自动展示 Evidence/Trace/Harness/Score 面板
+- ProfileScreen 登录/未登录双态 + 地址/偏好可点击跳转
+- MainScreen NavHost 新增 login / address / preference 路由
+- OkHttp 添加 Authorization Bearer Token 拦截器
+- ApiClient 新增 10+ API 接口（auth/address/preference）
+- workflow/graph.py 新增 evidence_check 节点（7→8 节点）
+- RecommendationResponse 新增 sufficiency_report 传递
+
+### Fixed
+- Auth API 错误返回 500 → HTTPException (409/401)
+- Preference PUT 后 GET 读到旧数据（mem._sessions 缓存未同步）
+- Address create 缺少 is_default 字段默认值
+- ScoreBreakdown 字段名与实际模型不匹配
+- Panel 组件编译错误（clickable/Box/iconForSource）
+
+### Test Results
+- 后端：21/21 单元测试通过
+- Workflow：8 节点正确注册
+- Skill Registry：8 skills / ToolManager：8 tools 可用
+- Android：BUILD SUCCESSFUL
+
+---
+
 ## [V1-Core] 双数据库架构定型 + Android 四 Tab 闭环 — 2026-05-22
 
 ### Added

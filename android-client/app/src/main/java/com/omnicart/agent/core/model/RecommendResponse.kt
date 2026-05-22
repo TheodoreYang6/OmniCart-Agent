@@ -17,6 +17,16 @@ data class RecommendResponse(
     val traceSteps: List<TraceStepItem> = emptyList(),
     @SerializedName("harness_report")
     val harnessReport: Map<String, Any?>? = null,
+    @SerializedName("visual_result")
+    val visualResult: Map<String, Any?>? = null,
+    @SerializedName("fallback_status")
+    val fallbackStatus: Map<String, Any?>? = null,
+    @SerializedName("retrieval_plan")
+    val retrievalPlan: Map<String, Any?>? = null,
+    @SerializedName("sufficiency_report")
+    val sufficiencyReport: Map<String, Any?>? = null,
+    @SerializedName("constraints")
+    val constraints: Map<String, Any?>? = null,
 )
 
 data class EvidenceItem(

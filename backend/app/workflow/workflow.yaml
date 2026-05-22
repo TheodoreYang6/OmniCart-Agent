@@ -1,32 +1,45 @@
 # OmniCart Agent — 声明式 Workflow 配置
 # 定义 Agent 节点、边和条件分支，修改此文件即可调整工作流，无需改 Python 代码
+# 与 graph.py 中 build_workflow() 保持同步
 
 name: omnicart-shopping-decision
-version: "1.0"
+version: "1.1"
+description: 多模态购物决策工作流 — Router → Visual → Retrieval → Reranker → Evidence Check → Decision → Response → Guard
 
 nodes:
   router:
     agent: Router Agent
-    description: 意图识别 + 约束抽取 + 检索计划
+    description: 意图识别 + 约束抽取 + 检索计划（规则优先 + LLM 增强）
   visual:
     agent: Visual Agent
     description: Qwen-VL 商品截图解析
     optional: true
+    fallback: skip_if_no_image
   retrieval:
     agent: Retrieval Agent
-    description: 多路证据检索 (text/review/policy)
+    description: 多路证据检索 (text/review/policy) — 三通道并行
   reranker:
     agent: Qwen Reranker
-    description: 语义精排
+    description: 语义精排（失败时保持原序）
+    fallback: keep_original_order
+  evidence_check:
+    agent: Evidence Sufficiency Checker
+    description: 证据充足性检查 — 按意图类型检查最少证据类型
+    required:
+      recommend: [text_retrieval, review_positive]
+      risk_check: [review_risk]
+      compare: [text_retrieval, review_positive]
+      compatibility_check: [policy_faq]
+      alternative: [text_retrieval]
   decision:
     agent: Decision Agent
-    description: 约束求解 + 评分排序
+    description: 约束求解 + 7 维评分排序
   response:
     agent: Response Agent
     description: Context Compiler + LLM 回答
   guard:
     agent: Response Guard
-    description: 回答守门验证
+    description: 回答守门验证（5 项）
 
 edges:
   - from: router
@@ -40,9 +53,11 @@ edges:
   - from: retrieval
     to: reranker
   - from: reranker
+    to: evidence_check
+  - from: evidence_check
     to: decision
     condition: has_results
-  - from: reranker
+  - from: evidence_check
     to: response
     condition: empty_results
   - from: decision
@@ -76,8 +91,23 @@ guard:
     - price_accurate
     - risk_warned
     - honest_on_empty
+    - schema_valid
+
+fallback:
+  visual_agent:
+    on_error: skip
+    on_low_confidence: continue_with_text_only
+  reranker:
+    on_error: keep_original_order
+  evidence_check:
+    on_insufficient: flag_in_report
 
 memory:
   enabled: true
-  backend: in-memory  # V1: in-memory, V2: redis
+  backend: in-memory
   ttl_seconds: 3600
+
+checkpoint:
+  enabled: true
+  backend: json_file
+  directory: data/checkpoints/

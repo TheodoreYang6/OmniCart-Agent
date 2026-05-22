@@ -1,532 +1,439 @@
 # OmniCart Agent 答辩 QA 手册
 
 > 适用：字节跳动 Agent 挑战赛答辩 / 技术面试 / 项目汇报
-> 更新：2026-05-22（基于 V1 参赛版当前架构）
+> 更新：2026-05-22（基于 V1 全部完成架构 — P0+P1+P2+V1-Plus = 50/51 项）
 
 ---
 
 ## 一句话定位
 
-> OmniCart Agent 是一个面向购买前决策的 Android 原生多模态购物决策 Agent，融合 Qwen 全栈模型、多路证据 RAG（含 Qdrant 语义向量检索）、LangGraph Multi-Agent 编排、PostgreSQL 持久化与 7 维可解释决策评分。
+> OmniCart Agent 是一个面向购买前决策的 Android 原生多模态购物决策 Agent，融合 Qwen 全栈模型、LLM 查询改写 + Qdrant 语义向量 + jieba 关键词 RRF 混合检索、LangGraph 8 节点 Multi-Agent 编排、PostgreSQL 6 表持久化、7 维可解释决策评分、Skill Registry + MCP-compatible ToolManager、State Checkpoint、Decision Harness 验证框架、闲聊模式 + 完整用户体系 + Android 四 Tab 原生客户端 + V1-Plus Agent 洞察面板。
 
 ---
 
-## 一、系统架构（必问）
-
-### Q: 整体架构
+## 一、系统架构全景
 
 ```
-Android App (Kotlin/Compose/MVVM)
-    │ Retrofit + OkHttp
+Android App (Kotlin/Compose/MVVM) — 四个 Tab + 10 个子页面
+    │ Retrofit + OkHttp + Auth Bearer Token 拦截器
     ▼
-FastAPI Backend (Python 3.11)
+FastAPI Backend (Python 3.11) — 26 个 API 端点
     │
-    ├─ POST /api/recommend/v2 ──→ LangGraph Workflow
-    │   Router → Visual(Qwen-VL) → Retrieval → Reranker → Decision → Response(Qwen) → Guard
-    │       │                           │
-    │       ▼                           ▼
-    │   PreferenceMemory          HybridSearch
-    │   (PostgreSQL)              ├─ Qdrant (1024d ANN)
-    │                             └─ jieba (关键词)
+    ├─ POST /api/recommend/v2 ──→ LangGraph 8 节点 Workflow
+    │   Router → Visual(Qwen-VL) → Retrieval(LLM改写+三通道并行) → Reranker
+    │       → EvidenceCheck → Decision → Response(Qwen) → Guard → Harness
     │
-    ├─ /api/products  ──→ PgProductRepository (100件商品)
-    ├─ /api/cart      ──→ PgCartRepository (PostgreSQL)
-    ├─ /api/checkout  ──→ Mock 结算
-    ├─ /api/agent/action → 豆仔加购
-    └─ /api/upload    ──→ 图片上传 + Qwen-VL 解析
+    ├─ /api/auth/*       ──→ PgUserRepository (PBKDF2 100k + Bearer Token)
+    ├─ /api/addresses/*  ──→ PgAddressRepository (省/市/区/详细 + is_default互斥)
+    ├─ /api/preferences  ──→ PreferenceMemory + PgPreferenceRepository
+    ├─ /api/products     ──→ PgProductRepository (100件商品 JSONB)
+    ├─ /api/cart/*       ──→ PgCartRepository (购物车商品快照)
+    ├─ /api/checkout     ──→ Mock 结算（不接入真实支付）
+    ├─ /api/agent/action ──→ 豆仔加购（受控操作 + ToolCallRecord）
+    └─ /api/upload       ──→ 图片上传 + Qwen-VL 解析
+
+基础设施层:
+    ├─ Skill Registry: 8 Skill（视觉/检索/评论/政策/兼容性/评分/验证/Demo）
+    ├─ ToolManager: 8 Tool + Manifest + 权限控制 + V1 只读强制
+    ├─ State Checkpoint: JSON 文件 8 节点持久化 (resume/replay/export)
+    ├─ Decision Harness: 7 项统一校验框架
+    ├─ Evidence Graph Lite: NetworkX 商品-证据-风险图
+    ├─ A2A-lite Dispatcher: AgentMessage/Artifact 同进程分发
+    ├─ CategoryIndex: 品类→子品类→品牌→商品 4 级分层 + 250+关键词映射
+    ├─ Multimodal Fallback: L0 Qwen-VL → L1 Mock → L2 纯文本 3 级降级
+    ├─ Counterfactual Recommender: 0 结果时智能反事实建议
+    ├─ Visual Grounding: 字段级视觉证据绑定 (evidence_id 可追溯)
+    └─ LLM Query Rewrite: Qwen 口语→搜索关键词 + jieba 单字兜底
 ```
-
-**关键文件：**
-- 工作流：`backend/app/workflow/graph.py`
-- API 入口：`backend/app/api/recommend.py`
-- Android 客户端：`android-client/app/src/main/java/com/omnicart/agent/`
-
-### Q: 为什么用 LangGraph 而不是自己写 if-else 或开放式 ReAct？
-
-购物决策需要 **可控性 + 可追溯 + 安全约束**：
-1. 每一步产出可追踪、可审计、可回放（`trace_steps` 记录每个 Agent 的执行结果）
-2. 每个推荐结论绑定 `evidence_ids`，杜绝 LLM 幻觉
-3. 硬约束（预算超 2 倍/品类不匹配）在 Decision Agent 中规则过滤，LLM 只做回答生成，不做决策判断
-4. 开放式 ReAct 可能死循环或跳过约束检查，不适合生产环境
 
 ---
 
-## 二、数据库架构（重点）
+## 二、Multi-Agent 编排（创新点必问）
 
-### Q: 为什么选 PostgreSQL + Qdrant 双库？
+### Q: 8 个节点做什么？
 
-| 数据库 | 用途 | 选型理由 |
+| # | 节点 | 功能 | 关键技术 |
+|---|------|------|---------|
+| 1 | Router Agent | 意图识别(6种含闲聊) + 约束抽取 + 检索计划 | 规则优先 LLM + 250+关键词 + 16个闲聊检测 + 话题切换 |
+| 2 | Visual Agent | Qwen-VL 商品截图解析 | 3 级降级(L0真实→L1 Mock→L2纯文本) + Visual Grounding |
+| 3 | Retrieval Agent | 三通道并行检索 | **LLM查询改写**(口语→搜索词) + Qdrant 1024d ANN + jieba RRF k=60 |
+| 4 | Reranker | Qwen3-Rerank 语义精排 | 失败保持原序，不阻塞链路 |
+| 5 | Evidence Checker | 按意图类型检查证据充足性 | 5 种意图×最少证据类型矩阵 |
+| 6 | Decision Agent | 硬约束过滤 + 7维加权评分 + 风险标签 | 预算×2/品类不匹配直接排除 |
+| 7 | Response Agent | LLM 回答 + 闲聊/购物双模式 | Context Compiler + 6类闲聊模板兜底 |
+| 8 | Response Guard | 5 项守门验证 | evidence_bound/price_accurate/risk_warned/honest/无依据 |
+
+### Q: Agent 间怎么通信？
+
+LangGraph WorkflowState 全局状态 + A2A-lite Dispatcher（AgentMessage/Artifact）。V2 可升级为标准 A2A Protocol。
+
+### Q: 闲聊怎么处理？
+
+Router 检测 16 个闲聊关键词 → intent=chitchat → **跳过全部检索/评分链**，直接 Response Agent 用独立 Prompt 生成友好文字回复。6 类模板兜底（打招呼/自我介绍/能力说明/感谢/告别/其他）。
+
+### Q: Router Agent 为什么规则优先于 LLM？
+
+**实测发现** Qwen 有时将"买食品"误判为"美妆护肤"、"买鞋"遗漏。合并策略 `{**llm_result, **rule_result}` 确保规则覆盖 LLM，品类/预算/意图以规则为准。
+
+---
+
+## 三、LLM 查询改写（新增核心创新）
+
+### Q: 怎么解决口语查询检索不准？
+
+**两阶段增强**：
+1. **LLM 改写**：Qwen LLM 把"我想买鞋"→"运动鞋 跑步鞋 休闲鞋 鞋"→ 直接命中所有鞋类子品类，score 从 0 飙升到 50-65
+2. **单字拆分兜底**：LLM 不可用时，jieba 分词后多字词拆单字（"买鞋"→["买","鞋"]），单字"鞋"命中子品类 +3.0 分
+
+**效果对比**：
+```
+修改前：查询"我想买鞋" → 所有产品 score=0 → 返回护肤品（默认顺序）
+修改后：查询"我想买鞋" → 9款鞋 score=3.0-65.0 → Top5全是鞋 ✅
+```
+
+### Q: 为什么不能只用 jieba？
+
+jieba 把"我想买鞋"切为"买鞋"（一个词），任何产品都不含"买鞋"，score 全 0。手工维护 250+ 关键词永远有边界 case。LLM 理解"我想买鞋"=要买鞋零成本。
+
+---
+
+## 四、数据库架构
+
+### Q: PostgreSQL + Qdrant 双库设计
+
+| 数据库 | 用途 | 技术亮点 |
 |--------|------|---------|
-| PostgreSQL | 商品、购物车、用户偏好 | JSONB 存嵌套数据、全文搜索 tsvector、ACID 事务、asyncpg 异步驱动 |
-| Qdrant | 语义向量检索 | Rust 实现高性能 ANN、COSINE 距离、本地 Windows 二进制部署零依赖 |
+| PostgreSQL 18 | 6 张表（products/users/addresses/cart_items/user_preferences/checkpoints） | JSONB 嵌套数据 + asyncpg + Alembic |
+| Qdrant 1.18 | 语义向量检索 | Rust 高性能 ANN + 1024d COSINE + 本地部署零依赖 |
+
+### Q: 6 张表设计要点
+
+- **products**：skus + rag_knowledge 用 JSONB（动态属性无需 EAV，100 件规模完美）
+- **users**：PBKDF2-SHA256 100k 迭代 + Bearer Token 每次登录刷新
+- **addresses**：省/市/区/详细 + is_default 互斥逻辑
+- **cart_items**：商品快照反范式（加购时复制 price/title/image，标准做法）
+- **user_preferences**：JSONB + UPSERT ON CONFLICT
+- **checkpoints**：JSON 文件存储（data/checkpoints/{session}_{node}.json）
 
 ### Q: 降级策略
 
 ```
-DATABASE_URL 为空 + QDRANT_URL 为空 → JSON 文件 + jieba 关键词（V0 模式）
-DATABASE_URL 有值 + QDRANT_URL 为空 → PostgreSQL + jieba 关键词
-两个都有值                      → 全功能模式
-任何一个连接失败                 → 自动降级，不阻塞主链路
+DATABASE_URL="" + QDRANT_URL="" → JSON文件 + jieba（V0兼容）
+任一有值                       → 对应功能启用
+任一连接失败                    → 自动降级，不阻塞
 ```
 
-`.env` 中留空连接串即自动降级，无需改代码。开发和参赛 Demo 可分别配置。
+`.env` 留空即降级，无需改代码。6 类 Repository 全部 PG+内存双模 + 工厂注入。
 
-### Q: 三张表设计
+### Q: sync-async 桥接
 
-#### products（100 件商品）
-
-| 列 | 类型 | 说明 |
-|----|------|------|
-| `product_id` | VARCHAR(64) PK | `p_beauty_001` |
-| `title` / `brand` | TEXT / VARCHAR(128) | 商品名 / 品牌 |
-| `category` | VARCHAR(64) INDEX | 美妆护肤/数码电子/服饰运动/食品饮料 |
-| `sub_category` | VARCHAR(64) INDEX | 精华/手机/T恤/咖啡 |
-| `base_price` | NUMERIC(10,2) INDEX | 基准价 |
-| `skus` | JSONB | `[{sku_id, properties, price}]` |
-| `rag_knowledge` | JSONB | marketing_description + official_faq + user_reviews |
-
-**为什么 SKU 和知识库用 JSONB 而不是拆分表？**
-- SKU 属性是动态的（颜色/容量/尺码），无固定 schema，拆表需要 EAV 模式
-- 用户评论和 FAQ 是嵌套数组，拆分需 3+ 关联表，JOIN 开销大
-- JSONB 支持索引和 `->>` 运算符查询，100 件商品规模完全够用
-
-#### cart_items
-
-| 列 | 类型 | 设计要点 |
-|----|------|---------|
-| `cart_item_id` | VARCHAR(64) PK | UUID4 前 8 位 |
-| `user_id` | VARCHAR(64) INDEX | 默认 `demo_user_001` |
-| `title`/`brand`/`price`/`image_url` | — | **反范式化快照**——加购时复制商品信息 |
-
-**为什么反范式化？** 购物车是快照语义——用户加购后，即使商品涨价或下架，购物车记录不变。这是电商系统的标准做法。
-
-#### user_preferences
-
-| 列 | 类型 | 说明 |
-|----|------|------|
-| `session_id` | VARCHAR(64) INDEX | 会话 ID |
-| `preferences` | JSONB | `{category, budget_max, scenario, ...}` |
-| UNIQUE(`session_id`, `user_id`) | — | UPSERT 冲突键 |
-
-### Q: Repository 抽象层怎么设计的
-
-```
-BaseProductRepository (ABC)
-    ├── JsonProductRepository   (JSON 文件，默认)
-    └── PgProductRepository     (PostgreSQL，填串即切)
-
-BaseVectorRepository (ABC)
-    ├── StubVectorRepository    (空操作降级)
-    └── QdrantVectorRepository  (真实 Qdrant ANN)
-```
-
-工厂函数根据 `.env` 自动选择：
-```python
-def get_product_repo():
-    if USE_POSTGRES: return PgProductRepository()
-    return JsonProductRepository()
-```
-
-### Q: 同步 Agent 怎么调用异步 PostgreSQL？
-
-**矛盾**：LangGraph `invoke()` 是同步的，但 SQLAlchemy async 需要事件循环。
-
-**方案**：`nest_asyncio` 允许嵌套事件循环 → `loop.run_until_complete()` 在运行中的 Uvicorn 循环中同步等待异步查询。
-
-```python
-def _run(self, coro):
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)  # 无循环：直接创建
-    
-    nest_asyncio.apply(loop)      # 允许嵌套
-    return loop.run_until_complete(coro)  # 同步等待
-```
-
-### Q: 购物车和偏好也支持 PG/内存双模吗？
-
-是。`PgCartRepository` / `MemCartRepository` 和 `PgPreferenceRepository` / `MemPreferenceRepository`，通过各自 `get_*_repo()` 工厂自动切换。测试环境用 `Mem*` 零依赖，生产环境用 `Pg*` 持久化。
+LangGraph invoke() 同步 + SQLAlchemy async → `nest_asyncio` 允嵌套事件循环 → `loop.run_until_complete()` 桥接。
 
 ---
 
-## 三、RAG 检索 — 多模态证据 RAG（重点必问）
+## 五、RAG 检索体系
 
-### Q: 你们的 RAG 整体架构
-
-三层 RAG，从粗到精：
+### Q: 三层 RAG 架构
 
 ```
-第一层：商品知识库
-  100件商品 JSON → PostgreSQL products 表
-  每件含 rag_knowledge: {营销描述, 官方FAQ, 用户评论(1-5分)}
-  
-第二层：多通道检索（Retrieval Agent 并行）
-  ├─ Text 通道：HybridSearch（Qdrant 向量 + jieba 关键词 RRF 融合）
-  ├─ Review 通道：提取 ≤2★ 差评 + ≥4★ 好评作为正反证据
-  └─ Policy 通道：FAQ 中匹配航空/兼容/敏感/过敏等关键词条
-  
-第三层：精排 + 证据绑定
-  Qwen3-Rerank 语义重排序
-  每条结果绑定 evidence_id: E-MKT-* / R-* / POL-* / V-*
+第一层：LLM查询改写（口语→搜索关键词）
+第二层：三通道并行检索
+  ├─ Text: Qdrant 1024d ANN + jieba关键词 RRF(k=60) 融合
+  ├─ Review: ≤2★差评 + ≥4★好评 正反证据
+  └─ Policy: FAQ航空/兼容/过敏 关键词匹配
+第三层：Qwen3-Rerank 语义精排 + Evidence Sufficiency Checker
 ```
 
-### Q: Hybrid Search 怎么融合向量和关键词？
+### Q: RRF 为什么不是加权求和？
 
-```
-用户查询 "蓝牙耳机降噪好的"
-    │
-    ├──→ Qwen text-embedding-v4 → 1024d 向量 → Qdrant ANN (top_k × 2)
-    │
-    └──→ jieba 分词 → 品类约束过滤 → 关键词全文匹配 (top_k × 2)
-    
-    ↓ RRF 融合 (Reciprocal Rank Fusion, k=60)
-    
-    score = 1/(60 + rank_qdrant) + 1/(60 + rank_text)
-    
-    ↓ 按融合分降序 → Top-K
-```
+两个排序列表分数尺度不同（余弦相似度 0~1 vs 关键词命中次数），RRF 只依赖排名位置无需归一化。业界标准（ES 8.x 也在用）。
 
-**为什么用 RRF 而不是加权求和？**
-- 两个排序列表的分数尺度不同（0~1 的余弦相似度 vs 整数关键词命中次数）
-- RRF 只依赖排名位置，无需归一化
-- 业界标准做法（Elasticsearch 8.x 也在用）
+### Q: 证据怎么绑定？
 
-### Q: Qdrant 怎么配置的？
-
-```
-Collection: products
-维度: 1024（匹配 text-embedding-v4 输出）
-距离度量: COSINE
-索引数据: 100 件商品
-嵌入文本: "product_id | title brand category sub_category marketing_description"
-构建脚本: scripts/seed_qdrant.py
-```
-
-Qdrant 不可用时 `hybrid_search()` 透明降级为纯 jieba 关键词，用户无感知。
-
-### Q: 证据怎么绑定到推荐结果？
-
-每条证据有唯一 ID，可追溯到原始数据：
-
-```
-E-MKT-p_digital_007      → 营销描述证据
-R-p_digital_007-0        → 第 0 条用户评论
-POL-p_digital_007-1      → 第 1 条 FAQ 政策证据
-V-screenshot             → 视觉识别证据
-```
-
-Android 端在 ProductDetailSheet 的证据 Tab 中展示每条证据的类型、来源内容、置信度。
-
-**代码位置：** `backend/app/retrieval/text_retriever.py` — `_product_to_result()`
-**Android 端：** `ProductDetailSheet.kt` — EvidenceTab
+每个推荐结论绑定 `evidence_ids`（如 `E-MKT-p001`/`R-p001-0`/`POL-p001-1`/`V-p001-specs`），可追溯到具体数据源。Android ProductDetailSheet 证据 Tab 展示类型/内容/置信度。
 
 ---
 
-## 四、Multi-Agent 编排（创新点必问）
+## 六、可解释决策评分
 
-### Q: 5 个 Agent 分别做什么？
-
-```
-Router Agent     → 意图识别(5种) + 约束抽取 + 检索计划生成
-                  规则为主(90%+) + LLM增强(Qwen intent_understanding)
-                  
-Visual Agent     → Qwen-VL 商品截图解析
-                  {product_name, brand, category, price, specs, confidence}
-                  
-Retrieval Agent  → 三通道并行检索(text + review + policy)
-                  text通道: HybridSearch(Qdrant+ jieba RRF)
-                  
-Decision Agent   → 硬约束过滤 + 7维加权评分 + 风险标签 + 证据绑定
-                  预算超2倍/品类不匹配 → 直接排除
-                  
-Response Agent   → Context Compiler 编译上下文 → Qwen LLM 生成回答
-                  LLM失败 → 模板兜底
-
-Response Guard   → 5项守门：证据绑定/价格准确/风险提醒/诚实/无依据断言
-```
-
-**每个 Agent 都是一个独立模块，有明确的输入(WorkflowState)→输出(WorkflowState)合约。**
-
-### Q: Agent 之间怎么通信？
-
-通过 LangGraph 的 `WorkflowState` 全局状态传递。Agent 读取 state 中的字段（如 `user_query`、`constraints`、`retrieved_products`），处理后写回新的 state 字段。A2A-lite 的 AgentCard/AgentMessage/Artifact 数据模型已定义，V2 可升级为标准 A2A 协议。
-
-### Q: Router Agent 的意图识别怎么做？
-
-**规则为主 + LLM 增强**混合策略：
-- 规则层 `_rule_based_parse()`：覆盖 90%+ 中文购物表达——品类关键词（250+ 词覆盖 4 大品类）、预算正则（"500以内"/"¥300"）、场景词、意图词
-- LLM 层：Qwen `intent_understanding`（温度 0.3）处理长尾表达
-- 合并策略：**规则优先于 LLM**（防止 LLM 幻觉覆盖品类检测）
-- LLM 不可用时 100% 规则兜底，系统不中断
-
-**为什么规则优先？** 实测发现 Qwen 有时会将"买食品"误判为"美妆护肤"。规则优先保证核心品类/预算/意图不受 LLM 干扰。
-
----
-
-## 五、可解释决策评分（创新点必问）
-
-### Q: 评分公式
-
-7 维加权，每项独立可解释，Android 端以进度条可视化：
+### Q: 7 维公式
 
 ```
-raw = 0.22 × budget_fit       (预算匹配：价格/预算比)
-    + 0.24 × scenario_fit      (场景匹配：最高权重)
-    + 0.20 × spec_match        (规格匹配：关键词命中标题/品类)
-    + 0.14 × review_confidence  (评论置信度：真实 user_reviews 评分)
-    + 0.10 × visual_similarity  (视觉相似度：Qwen-VL 识别结果匹配)
-    + 0.10 × availability_score (可用性：当前固定 1.0)
-    - 0.15 × risk_penalty       (风险扣分：低分评论比例 + 高价惩罚)
+raw = 0.22×budget_fit + 0.24×scenario_fit + 0.20×spec_match
+    + 0.14×review_confidence + 0.10×visual_similarity  
+    + 0.10×availability_score - 0.15×risk_penalty
 
 final = clamp(raw, 0, 1)
-display = final × 10  → 0-10 分展示
+display = final×10（0-10分）
 ```
 
-**权重设计理由**：场景匹配最高（用户需求 > 预算），风险扣分独立（不与其他维度抵消，差评多就扣分）。
+场景匹配权重最高，风险扣分独立不抵消。Android 端 ScoreBreakdown 7 维进度条颜色编码展示，每项可独立解释。
 
-### Q: 评论置信度怎么算
+---
 
-用数据集真实 `user_reviews[].rating`（1-5 分）：
+## 七、用户体系
 
-```python
-avg_rating = sum(ratings) / len(ratings)
-normalized = avg_rating / 5.0           # 归一化到 0-1
-count_bonus = min(0.15, len(reviews) × 0.03)  # 评分数多更可信
-review_confidence = min(1.0, normalized + count_bonus)
+### Q: 认证方案
+
+PBKDF2-SHA256 100k 迭代（纯标准库，零外部依赖）+ Bearer Token。Android AuthManager SharedPreferences 持久化 + OkHttp 拦截器自动注入 `Authorization: Bearer <token>`。
+
+### Q: 为什么不用 JWT？
+
+比赛场景无需过期/刷新/黑名单等 JWT 复杂度。Bearer Token 每次登录刷新，足够安全。
+
+### Q: 地址管理的默认地址互斥
+
+数据库 + 仓库层双向保证：新增/修改默认地址时，自动清除同用户其他地址的 `is_default` 标记。
+
+---
+
+## 八、多模态 + 降级
+
+### Q: 图片识别三级降级
+
+```
+L0: Qwen-VL 真实推理 → L1: Mock视觉解析 → L2: 纯文本模式
+```
+
+每级记录 `fallback_status`（level + attempts + description）。Visual Agent 输出 specs 为列表时自动 join 为字符串（适配 Qwen-VL 返回格式变化）。
+
+### Q: Visual Evidence Grounding
+
+Visual Agent 的每个字段（商品名/品牌/品类/规格×颜色/容量...）绑定独立 `evidence_id`（如 `V-p001-specs-颜色`），实现字段级视觉证据可追溯。
+
+---
+
+## 九、Skill Registry + ToolManager
+
+### Q: Skill 和 Tool 什么关系？
+
+| 概念 | 粒度 | 示例 |
+|------|------|------|
+| Skill | 组合能力（编排多个 Tool） | product_retrieve = text_search + vector_search + structured_filter |
+| Tool | 原子能力 | product_text_search（jieba关键词检索） |
+
+### Q: 安全机制
+
+- Manifest 强制（input/output schema + permission_level + risk_level）
+- Agent 权限检查（`can_agent_use(tool, agent)`）
+- V1 只读强制（`permission_level != "read"` 直接拒绝）
+- ToolCallRecord 全量记录（call_id/tool/agent/latency/status）
+
+---
+
+## 十、State Checkpoint + Decision Harness + Evidence Graph
+
+### Q: Checkpoint 做什么？
+
+JSON 文件持久化 8 节点状态 → 支持 resume（断点续跑）、replay（链路回放）、export（Demo Pack 导出）。
+
+### Q: Harness 7 项校验
+
+schema_valid / evidence_bound / score_recalculable / policy_cited / risk_warning / sufficiency_check / no_empty_answer
+
+Android HarnessTab 智能展示：布尔值 ✅/❌，列表显示条目数+内容，嵌套字典展开子项。
+
+### Q: Evidence Graph
+
+NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` / `get_risk_tags(product_id)` / `get_evidence_path(from, to)`。无 NetworkX 时优雅降级。
+
+---
+
+## 十一、Android 客户端全景
+
+### Q: 四 Tab + 子页面
+
+| Tab | 子页面 | 关键能力 |
+|-----|--------|---------|
+| 商品 | 品类筛选 + 商品列表 + 商品详情弹窗 6 Tab | 推荐/证据/评分/链路/技能/验证 |
+| **豆仔** | 多轮对话 + 图片上传 + 加购 + Agent洞察10Tab | LLM改写检索 + 闲聊模式 + 自动滚动 + ⭐Agent洞察 |
+| 购物车 | 增删改查 + 全选/多选 + 模拟结算 | 商品快照 + cartRefreshKey + LaunchedEffect |
+| 我的 | 登录/注册 + 地址管理 + 偏好设置 | AuthManager + Token拦截器 + 默认地址互斥 |
+
+### Q: 豆仔页面交互
+
+- **文本输入**：LLM 查询改写 → 精准检索 → 7 维评分 → 证据绑定回答 → ProductCard + ProductDetailSheet（点击卡片）
+- **图片识别**：Photo Picker → Qwen-VL → 三级降级 → 增强文字查询 → 卡片始终有加购按钮
+- **闲聊模式**：自动检测 16 个闲聊词 → 跳过检索 → 纯文字友好回复 → 6 类模板兜底
+- **Agent 洞察**：顶栏 ⭐ → AgentInsightSheet → 10 个 Tab（上下文/检索计划/证据图/降级/工具/反事实/视觉绑定/偏好/基准/摘要）
+- **Demo 模式**：一键展示完整证据+链路+Harness+评分面板数据
+- **自动滚动**：新消息自动滚动到底部
+- **键盘**：imePadding() 根 Box 层无缝推升
+
+### Q: ProductDetailSheet 6 Tab
+
+推荐 → 证据列表 → 评分细分 → Agent 链路 → Skill 技能 → Harness 验证 ✅/❌
+
+### Q: AgentInsightSheet 10 Tab（V1-Plus）
+
+上下文 → 检索计划 → 证据图 → 降级状态 → 工具治理 → 反事实推荐 → 视觉绑定 → 偏好记忆 → 基准评测 → 摘要
+
+---
+
+## 十二、Counterfactual + Knowledge Index（进阶）
+
+### Q: 0 结果时怎么办？
+
+`CounterfactualRecommender` 三级建议：
+```
+结果=0 → 放宽预算 + 放宽品类 + 去除标签 + 重新措辞
+结果≤2 → 展示热门 + 标注"不完全匹配"
+结果≥3 → 正常展示
+```
+
+### Q: Knowledge Index 做什么？
+
+250+ 关键词→品类映射 + 品类→子品类→品牌→商品 4 级分层。Router 意图识别和检索品类过滤的加速索引。
+
+---
+
+## 十三、Mock Mode / Demo Pack
+
+### Q: 一键 Demo 怎么工作？
+
+- Android Demo Mode 开关 → `MockDemoData` 提供完整预置数据：2 商品 + 2 决策结果 + 4 证据 + 7 条 Trace + 完整 Harness + AgentInsightSheet 全部数据
+- 后端 Mock Mode：`.env` 中 `OMNICART_MOCK_MODE=true` → 所有 LLM 调用返回预置结果
+- Demo Pack 导出：`scripts/export_demo_pack.py` — 4 场景（蓝牙耳机/防晒霜/跑步鞋/咖啡）
+
+---
+
+## 十四、全链路数据流（最新版）
+
+```
+1. 用户输入"推荐一款500以内的降噪蓝牙耳机"或拍照上传
+2. Router Agent → 闲聊检测(16词) or 购物意图(6种)，约束抽取
+3. PreferenceMemory → 合并/清除历史偏好（话题切换自动清除）
+4. [可选] Visual Agent → Qwen-VL → 三级降级 → Visual Grounding字段绑定
+5. Retrieval Agent → LLM提取关键词"蓝牙耳机 降噪 500元 无线"
+   ├─ Text: Qdrant 1024d ANN + jieba RRF k=60 → 候选商品
+   ├─ Review: ≤2★差评 + ≥4★好评 → 证据
+   └─ Policy: FAQ关键词匹配 → 证据
+6. Reranker → Qwen3-Rerank 语义精排（失败保持原序）
+7. Evidence Checker → 按intent检查证据充足性 → sufficiency_report
+8. Decision Agent → 硬约束过滤 + 7维评分 + 风险标签 + evidence绑定
+9. Context Compiler → 编译结构化上下文（含Counterfactual反事实建议）
+10. Response Agent → 闲聊独立Prompt or 购物LLM回答生成 + 模板兜底
+11. Response Guard → 5项守门验证 → guard_warnings
+12. Decision Harness → 7项统一校验 → harness_report
+13. State Checkpoint → JSON文件持久化guard节点
+14. Android展示: MessageBubble + ProductCard(始终有加购按钮) + ProductDetailSheet(6Tab) + AgentInsightSheet(10Tab)
 ```
 
 ---
 
-## 六、多轮对话记忆
+## 十五、关键 Bug 及修复（答辩时可展示工程能力）
 
-### Q: 怎么记住用户之前说的偏好？
-
-`PreferenceMemory` — 会话级多轮记忆，内存 + PostgreSQL 双存储：
-
-```
-第 1 轮: "推荐蓝牙耳机" → Router 检测 category=数码电子 → 存储
-第 2 轮: "500以内的"    → Router 检测 budget_max=500   → 合并存储
-第 3 轮: "推荐咖啡"     → Router 检测 category=食品饮料 → 话题切换 → 清除旧约束
-第 4 轮: "那降噪好的呢" → 保留 budget+category，追加 must_tag=降噪
-```
-
-**话题切换检测**：新旧 category 不同 → `forget()` 清空全部旧约束，从头开始。新 query 未检测到品类但旧约束存在 → 清除旧品类，避免"想买鞋但还是搜数码"的问题。
-
-Android 端通过持久 `session_id` 关联同一会话。点击「新对话」按钮重置 session。
+| # | 问题 | 根因 | 修复 |
+|---|------|------|------|
+| 1 | "买鞋"搜不到鞋 | jieba"买鞋"一词0匹配 | LLM查询改写 + 单字拆分兜底 |
+| 2 | 拍照识图 500 错误 | Qwen-VL specs 返回 list，schema 要求 str | visual_agent join 列表转字符串 |
+| 3 | 拍照商品无加购按钮 | 按钮在 decisionResult?.let 块内 | 移到外部始终渲染 |
+| 4 | 面板点击闪退 | LazyColumn 嵌套 | 内层改为 Column + for 循环 |
+| 5 | 键盘上升有空白 | imePadding 位置不当 | 移到根 Box 层 |
+| 6 | 注册 422 | password min_length=4 | 改为 1 |
+| 7 | Harness 全部 ❌ | 列表/字典值被 Boolean 判断误判 | 按类型分渲染 |
+| 8 | sync-async 桥接 | LangGraph 同步 + SQLAlchemy async | nest_asyncio 嵌套事件循环 |
+| 9 | 话题切换品类残留 | merge_constraints 操作副本 | 同时清除原始 session 数据 |
+| 10 | 购物车切换不刷新 | restoreState=true 冲突 | cartRefreshKey + LaunchedEffect |
 
 ---
 
-## 七、多模态识别（创新点必问）
-
-### Q: 图片识别流程
-
-```
-用户拍照/选图 (Android Photo Picker)
-  → ContentResolver 读字节 → OkHttp MultipartBody
-  → POST /api/upload → 保存 data/uploads/
-  → POST /api/recommend/v2 { user_query, image_url }
-  → LangGraph: Visual Agent → Qwen-VL API
-  → 提取 JSON {product_name, brand, category, price, specs, confidence}
-  → 识别结果注入搜索查询 → 增强检索精准度
-```
-
-### Q: 识别不准怎么降级
-
-三级降级：
-1. Qwen-VL 正常识别（confidence > 0.5）→ 增强查询
-2. 识别低置信度 → 保留原始查询词，不注入识别结果
-3. 完全失败 → Response Agent 提示用户补充文字描述
-
-**fallback_level 字段追踪每次识别的降级状态。**
-
----
-
-## 八、LLM 管理（必问）
-
-### Q: 用了哪些 Qwen 模型？怎么管理的？
-
-通过 **Model Gateway** 统一调用，业务代码只写能力名不写模型名：
-
-| 能力 | 模型 | 参数 | 用途 |
-|------|------|------|------|
-| `chat_generation` | qwen-plus | temp=0.7, 2048t | 回答生成 |
-| `intent_understanding` | qwen-plus | temp=0.3, 1024t | Router 意图识别 |
-| `visual_understanding` | qwen-vl-plus | temp=0.3, 2048t | 商品截图解析 |
-| `text_embedding` | text-embedding-v4 | 1024dim | Qdrant 向量检索 |
-| `text_reranking` | qwen3-rerank | — | 语义精排 |
-
-配置集中在 `model_config.yaml`，换模型只需改 YAML，业务代码不动。
-
-### Q: Mock Mode 是什么？
-
-`.env` 中 `OMNICART_MOCK_MODE=true` → 所有 LLM 调用返回预置假数据：
-- MockChat → 固定文本
-- MockEmbedding → MD5 哈希伪向量（128dim）
-- MockReranker → 保持原始顺序
-
-用途：离线开发、现场 Demo 网络不可用时一键切换，保证演示不中断。
-
----
-
-## 九、Android 客户端（必问）
-
-### Q: 技术栈
-
-```
-Kotlin + Jetpack Compose + Material 3
-MVVM (ViewModel + StateFlow)
-Retrofit + OkHttp + Gson (网络)
-Coil (图片加载)
-Coroutines (异步)
-Navigation Compose (四 Tab 路由)
-```
-
-### Q: 四 Tab 架构
-
-| Tab | 功能 | 后端 API |
-|-----|------|---------|
-| 商品 | 品类筛选 + 商品列表 + 详情弹窗 | `GET /api/products` |
-| 豆仔 | 多轮对话推荐 + 图片上传 + 加入购物车 | `POST /api/recommend/v2` + `POST /api/agent/action` |
-| 购物车 | 增减/全选/删除/结算 | `GET/POST/PUT/DELETE /api/cart` + `POST /api/checkout` |
-| 我的 | 个人信息 + 偏好 + 地址（静态占位） | 待实现 |
-
-### Q: 手机怎么连后端？
-
-ADB 反向隧道：`adb reverse tcp:8006 tcp:8006`
-手机访问 `127.0.0.1:8006` → 自动转发到电脑 `localhost:8006`
-
-`AppConfig.kt` → `BASE_URL = "http://127.0.0.1:8006/"`
-双击 `connect.bat` 一键建立隧道。
-
-### Q: 加入购物车后购物车 Tab 怎么刷新？
-
-MainScreen 点击购物车 Tab 时累加 `cartRefreshKey` → 传给 CartScreen → `LaunchedEffect(refreshKey)` 检测到变化 → 调用 `loadCart()` 重新拉取 `/api/cart`。
-
----
-
-## 十、Context Compiler（进阶问）
-
-### Q: LLM 的 prompt 怎么组织的？
-
-不是把原始数据直接丢给 LLM。先用 Context Compiler 编译成结构化上下文：
-
-```
-用户需求 + 约束条件
-    ↓
-图片识别结果（如有）
-    ↓
-候选商品（含评分/风险/推荐理由）
-    ↓
-证据摘要（按类型统计 + 关键证据摘录）
-    ↓
-反事实建议（0 结果时提示放宽条件）
-    ↓
-→ 编译为 LLM Prompt
-```
-
-**代码位置：** `backend/app/context/compiler.py`
-
----
-
-## 十一、数据流全景（完整请求链路）
-
-```
-1. 用户输入 "推荐一款500以内的降噪蓝牙耳机"
-2. Router Agent → intent=recommend, category=数码电子, budget=500
-3. PreferenceMemory → 合并历史偏好（如有话题切换则清除）
-4. [可选] Visual Agent → Qwen-VL 解析图片
-5. Retrieval Agent → 三通道并行:
-   ├─ text: Qdrant ANN + jieba 关键词 → RRF 融合
-   ├─ review: 提取差评证据 + 好评证据
-   └─ policy: FAQ 匹配关键规则
-6. Reranker → Qwen3-Rerank 语义精排
-7. Decision Agent → 硬约束过滤 + 7维评分 + 证据绑定 + 风险标签
-8. Context Compiler → 编译结构化上下文
-9. Response Agent → Qwen LLM 生成自然语言回答（含证据引用）
-10. Response Guard → 5项验证 → harness_report
-11. Android 展示: MessageBubble + ProductCard + ProductDetailSheet(6 Tab)
-```
-
-**文本链路约 3-5 秒，含图片约 5-8 秒（含 Qwen-VL API 调用）。**
-
----
-
-## 十二、常见追问
+## 十六、常见追问
 
 ### Q: 怎么保证推荐不是胡说？
 
-三层保障：
-1. **证据绑定**：每个结论绑定 `evidence_ids`，来源可追溯到具体商品/评论/FAQ
-2. **硬约束过滤**：预算超 2 倍/品类不匹配直接排除，LLM 不参与约束判断
-3. **Response Guard**：5 项规则（证据/价格/风险/诚实/无依据）拦截无依据断言
+四层保障：evidence_ids 绑定 → 硬约束过滤(LLM不参与) → Response Guard 5项守门 → Decision Harness 7项校验。
 
-### Q: 和普通电商导购的区别
+### Q: 和普通导购的区别
 
-| 普通导购 | OmniCart Agent |
-|---------|---------------|
-| 黑盒推荐 | 7 维可解释评分 + 证据溯源 |
-| 单一文本匹配 | 多模态 RAG（文本+图片+评论+政策+FAQ 向量） |
-| 单次问答 | Multi-Agent 决策链路，每步可追踪 `trace_steps` |
-| 无法验证 | Response Guard 自动验证 + `harness_report` |
-| 无记忆 | 多轮偏好记忆 + 话题切换检测 |
+| 普通 | OmniCart |
+|------|---------|
+| 黑盒 | 7维可解释 + evidence溯源 + 风险标签 |
+| 单一文本 | 多模态RAG(文本+图片+评论+政策+向量) |
+| 单次问答 | 8节点 Multi-Agent + trace_steps + checkpoint |
+| 无法验证 | Guard + Harness + 闲聊检测 |
+| 无记忆 | 多轮偏好 + 话题切换 + REST API |
 
 ### Q: 系统局限性
 
-1. 数据集仅 100 件旗舰产品，低价/长尾查询可能 0 结果（已用反事实建议提示放宽条件）
-2. Qwen-VL 返回英文名与中文数据集标题可能有匹配落差
-3. 多轮记忆基于 session 级，跨会话需 V2 用户系统
-4. 嵌入 API 依赖 Qwen 云端（DashScope），网络不可用时语义检索降级为关键词
-
-### Q: V2 计划做什么？
-
-1. Redis 缓存（视觉解析/Demo Pack 缓存）
-2. 用户系统（登录注册 + 跨会话记忆）
-3. 多模态分层索引（图片向量 + 文本向量双 Qdrant Collection）
-4. Evidence Graph Lite（NetworkX 构建商品-参数-评论图关系）
-5. A2A 标准协议升级
-6. iOS SwiftUI 客户端
+1. 100 件商品规模（但有 Counterfactual 兜底 + 4 级分层索引）
+2. Qwen-VL 中文匹配有落差（Visual Grounding 缓解 + LLM 改写增强）
+3. session 级记忆（V2 跨会话长期偏好）
+4. 嵌入 API 依赖云端（降级为 jieba + 单字拆分，基本可用）
 
 ---
 
-## 十三、技术亮点总结（答辩开场或收尾用）
+## 十七、技术亮点总结（答辩收尾）
 
 | # | 亮点 | 一句话 |
 |---|------|--------|
-| 1 | 双数据库自动降级 | PG+Qdrant 填串即用，留空自动回退 JSON+jieba，零破坏 |
-| 2 | RRF 混合检索 | 语义向量 + 关键词双重召回融合，任一通道失败自动降级 |
-| 3 | 仓库抽象工厂 | ABC + 工厂注入，测试/开发/生产三套配置随时切换 |
-| 4 | 可解释决策 | 7 维评分 + evidence_ids 溯源 + 风险标签，彻底告别黑盒 |
-| 5 | 规则优先 LLM | Router 品类/预算/意图以规则为准，LLM 只做补充，防幻觉 |
-| 6 | 同步-异步桥接 | nest_asyncio 让同步 Agent 调用异步数据库，无需全链路重构 |
-| 7 | MCP-compatible | Agent 不直接操作 DB，所有动作通过受控 API，可审计可追溯 |
+| 1 | LLM 查询改写 | Qwen 口语→搜索关键词 + jieba 单字兜底，精准命中 |
+| 2 | 闲聊模式 | 16 词检测 → 跳过检索 → 6 类模板，纯文字友好交互 |
+| 3 | 双库降级 | PG+Qdrant 填串即用，留空回退 JSON+jieba，零破坏 |
+| 4 | RRF 混合检索 | 语义向量 + 关键词双重召回，任一通道失败自动降级 |
+| 5 | 6 类仓库工厂 | ABC + PG/内存双模 + 工厂注入，测试/开发/生产即时切换 |
+| 6 | 可解释决策 | 7 维评分 + evidence_ids 溯源 + 风险标签 + 进度条可视化 |
+| 7 | 规则优先 LLM | 品类/预算/意图以规则为准，防幻觉 |
+| 8 | Skill+Tool 双层 | 8 Skill(组合) + 8 Tool(原子) + Manifest + V1 只读 |
+| 9 | Harness 7 项校验 | schema/证据/评分/政策/风险/充足性/非空 自动验证 |
+| 10 | Checkpoint 持久化 | 8 节点 JSON 文件，支持 resume/replay/export |
+| 11 | 三级多模态降级 | L0 Qwen-VL → L1 Mock → L2 纯文本 |
+| 12 | Counterfactual | 0 结果时智能建议放宽约束 |
+| 13 | Android 面板体系 | 6Tab(商品) + 10Tab(Agent洞察) + Demo 一键展示 |
+| 14 | 用户体系完整 | 注册/登录/地址/偏好 + Token + 默认地址互斥 |
+| 15 | sync-async 桥接 | nest_asyncio 让同步 Agent 调异步 PG/Qdrant |
+| 16 | 闲聊+购物双模 | 日常对话不推商品，购物意图精准推荐 |
+| 17 | Visual Grounding | 字段级视觉证据绑定，像素到数据可追溯 |
 
 ---
 
-## 附录：核心代码快速索引
+## 附录：核心代码索引
 
-| 你想找什么 | 去这里 |
-|-----------|--------|
-| 工作流编排 | `backend/app/workflow/graph.py` |
-| Hybrid 混合检索 | `backend/app/retrieval/text_retriever.py:hybrid_search()` |
-| 7 维评分公式 | `backend/app/decision/scoring.py` |
-| Router 规则引擎 | `backend/app/agents/router_agent.py:_rule_based_parse()` |
-| Visual 图片解析 | `backend/app/agents/visual_agent.py` |
-| 回复生成 + 模板兜底 | `backend/app/agents/response_agent.py` |
-| Response Guard 5 项守门 | `backend/app/verification/response_guard.py` |
-| Context Compiler | `backend/app/context/compiler.py` |
-| Preference 多轮记忆 | `backend/app/memory/preference_memory.py` |
-| Model Gateway | `backend/app/model_gateway/gateway.py` |
-| PG 仓库（sync-async 桥接） | `backend/app/repositories/pg_product_repo.py` |
-| Qdrant 向量仓库 | `backend/app/repositories/qdrant_vector_repo.py` |
-| 仓库抽象基类 + 工厂 | `backend/app/repositories/base_product_repo.py` + `product_repo.py` |
-| 三张表 ORM 模型 | `backend/app/models/product.py` / `cart_item.py` / `user_preference.py` |
-| Alembic 迁移 | `alembic/versions/001_initial.py` |
-| 种子脚本 | `scripts/seed_postgresql.py` / `scripts/seed_qdrant.py` |
-| Android 四 Tab 主框架 | `MainScreen.kt` |
-| Android 对话 + 加购 | `ChatScreen.kt` + `ChatViewModel.kt` |
-| Android 购物车 | `CartScreen.kt` + `CartViewModel.kt` |
-| Android 商品详情 6 Tab | `ProductDetailSheet.kt` |
-| Android 网络层 | `OmniCartApi.kt` + `ApiClient.kt` |
-| .env 配置 | 项目根目录 `.env` |
-| 100 件商品数据 | `ecommerce_agent_dataset/` |
+### 工作流
+| 文件 | 职责 |
+|------|------|
+| `workflow/graph.py` | 8 节点 LangGraph + chitchat 边缘 |
+| `workflow/checkpoint.py` | State Checkpoint JSON 持久化 |
+| `workflow/workflow.yaml` | 声明式配置 |
+
+### Agent
+| 文件 | 职责 |
+|------|------|
+| `agents/router_agent.py` | 意图识别(6种) + 约束 + 闲聊检测(16词) |
+| `agents/visual_agent.py` | Qwen-VL 解析 + specs list→str |
+| `agents/retrieval_agent.py` | LLM 查询改写 + 三通道并行 |
+| `agents/decision_agent.py` | 硬约束 + 7 维评分 |
+| `agents/response_agent.py` | 闲聊 Prompt + 购物 Prompt + 6 类模板 |
+
+### 检索
+| 文件 | 职责 |
+|------|------|
+| `retrieval/text_retriever.py` | HybridSearch(Qdrant+jieba RRF) + 单字拆分 |
+
+### 基础设施
+| 文件 | 职责 |
+|------|------|
+| `skills/registry.py` | Skill Registry 8 Skill |
+| `tools/manager.py` | ToolManager 8 Tool + 权限 + V1 只读 |
+| `graph/evidence_graph.py` | NetworkX 证据图 |
+| `vision/visual_grounding.py` | 字段级视觉证据绑定 |
+| `vision/multimodal_fallback.py` | 三级降级 |
+| `decision/counterfactual.py` | 反事实建议 |
+| `indexing/category_index.py` | 4 级分层品类索引 |
+| `harness/decision_harness.py` | 7 项校验框架 |
+| `a2a/dispatcher.py` | AgentMessage/Artifact 分发 |
+| `memory/preference_memory.py` | 多轮记忆 + 话题切换 |
+
+### Android
+| 文件 | 职责 |
+|------|------|
+| `MainScreen.kt` | 四 Tab + NavHost(10 路由) |
+| `feature/chat/ChatScreen.kt` | 豆仔对话 + 面板 + 键盘 + 自动滚动 |
+| `feature/product/ProductCard.kt` | 卡片 + 评分 + 加购(始终显示) |
+| `feature/product/ProductDetailSheet.kt` | 6 Tab 详情弹窗 |
+| `feature/panel/AgentInsightSheet.kt` | V1-Plus 10 Tab Agent 洞察 |
+| `feature/auth/*` | 登录/注册 + AuthManager |
+| `feature/address/*` | 地址管理 CRUD |
+| `feature/preference/*` | 偏好设置 |
+| `feature/demo/MockDemoData.kt` | 一键 Demo 预置数据 |
+| `core/network/OmniCartApi.kt` | 26+ API 端点 + 数据类 |

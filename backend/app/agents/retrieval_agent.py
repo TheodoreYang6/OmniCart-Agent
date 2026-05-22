@@ -1,10 +1,11 @@
 """V1 Retrieval Agent — 根据 RetrievalPlan 执行多路证据检索（并行）。
 
 检索渠道:
-- text: 商品文本关键词检索（标题+描述+FAQ+评论全文）— 先执行获取商品ID
+- text: 商品文本关键词检索（LLM查询改写 + jieba兜底）
 - review / policy: 基于text结果并行执行
 """
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from app.agents.base import BaseAgent
@@ -12,6 +13,8 @@ from app.repositories.product_repo import ProductRepository
 from app.retrieval.text_retriever import TextRetriever
 from app.schemas.a2a import AgentCard
 from app.schemas.workflow import WorkflowState
+
+logger = logging.getLogger(__name__)
 
 
 class RetrievalAgent(BaseAgent):
@@ -76,11 +79,44 @@ class RetrievalAgent(BaseAgent):
         except Exception as e:
             return self._error_trace(state, str(e))
 
+    def _llm_extract_keywords(self, user_query: str) -> str:
+        """用 Qwen LLM 从口语查询中提取搜索关键词。失败时退回原 query。"""
+        prompt = (
+            "你是一个搜索关键词提取器。将用户的购物口语转化为商品搜索引擎友好的关键词，"
+            "用空格分隔。提取品类、品牌、属性、场景等核心词。最多输出10个词。\n\n"
+            f"用户说：{user_query}\n关键词："
+        )
+        try:
+            from app.model_gateway.gateway import get_model_gateway
+            gateway = get_model_gateway()
+            result = gateway.chat("chat_generation", prompt)
+            keywords = result.strip()
+            if keywords and len(keywords) >= 2:
+                logger.info(f"LLM keywords: {user_query!r} → {keywords!r}")
+                return keywords
+        except Exception as e:
+            logger.warning(f"LLM keyword extraction failed: {e}")
+        return user_query
+
     def _text_channel(self, state: WorkflowState) -> tuple[list[dict], list[dict]]:
-        """商品文本检索 — 复用现有 TextRetriever"""
+        """商品文本检索 — LLM查询改写 + jieba兜底"""
         constraints = state.constraints
+
+        # LLM 提取搜索关键词，失败时退回原 query
+        search_query = self._llm_extract_keywords(state.user_query)
+        if search_query != state.user_query:
+            state.trace_steps.append({
+                "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                "agent_name": "Retrieval Agent (LLM Rewrite)",
+                "action": "query_rewrite",
+                "input_summary": state.user_query[:60],
+                "output_summary": search_query[:80],
+                "latency_ms": 0,
+                "status": "success",
+            })
+
         results = self._text_retriever.search(
-            query=state.user_query,
+            query=search_query,
             top_k=state.retrieval_plan.top_k,
             category=constraints.category or state.retrieval_plan.category,
             sub_category=constraints.sub_category or state.retrieval_plan.sub_category,

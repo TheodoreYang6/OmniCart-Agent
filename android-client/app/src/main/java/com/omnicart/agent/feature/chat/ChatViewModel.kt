@@ -14,6 +14,8 @@ import com.omnicart.agent.core.model.RecommendRequest
 import com.omnicart.agent.core.model.ScoreBreakdown
 import com.omnicart.agent.core.network.AgentActionRequest
 import com.omnicart.agent.core.network.ApiClient
+import com.omnicart.agent.core.model.RecommendResponse
+import com.omnicart.agent.feature.demo.MockDemoData
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -96,6 +98,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         isLoading = false,
                         messages = it.messages + assistantMessage,
+                        lastResponse = response,
                     )
                 }
             } catch (e: Exception) {
@@ -189,71 +192,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadDemoData(query: String) {
-        val demoProducts = listOf(
-            Product(
-                productId = "p_digital_007",
-                title = "Apple AirPods Pro 3 主动降噪真无线蓝牙耳机",
-                brand = "Apple", category = "数码电子", subCategory = "真无线耳机",
-                price = 1899.0,
-                imageUrls = listOf("https://picsum.photos/seed/earphone1/400/400"),
-                skus = listOf(Sku("s1", mapOf("颜色" to "白色"), 1899.0), Sku("s2", mapOf("颜色" to "黑色"), 1899.0)),
-                ragKnowledge = RagKnowledge(
-                    marketingDescription = "Apple旗舰TWS耳机，H3芯片，自适应降噪",
-                    userReviews = listOf(ReviewItem("小明", 5, "降噪效果一流"), ReviewItem("小红", 4, "音质不错但价格偏高"), ReviewItem("小刚", 5, "苹果生态无缝切换"))
-                ),
-                description = "Apple旗舰TWS耳机，H3芯片，自适应降噪"
-            ),
-            Product(
-                productId = "p_digital_009",
-                title = "华为 FreeBuds Pro 5 主动降噪真无线蓝牙耳机",
-                brand = "华为", category = "数码电子", subCategory = "真无线耳机",
-                price = 1499.0,
-                imageUrls = listOf("https://picsum.photos/seed/earphone2/400/400"),
-                skus = listOf(Sku("s1", mapOf("颜色" to "陶瓷白"), 1499.0), Sku("s2", mapOf("颜色" to "冰霜银"), 1599.0)),
-                ragKnowledge = RagKnowledge(
-                    marketingDescription = "华为旗舰TWS，静谧通话3.0，Hi-Res认证",
-                    userReviews = listOf(ReviewItem("Alice", 5, "通话质量极好"), ReviewItem("Bob", 4, "续航不错"), ReviewItem("Charlie", 5, "性价比高"))
-                ),
-                description = "华为旗舰TWS，静谧通话3.0，Hi-Res认证"
-            ),
-            Product(
-                productId = "p_digital_011",
-                title = "小米 Buds 5 Pro 降噪蓝牙耳机",
-                brand = "小米", category = "数码电子", subCategory = "真无线耳机",
-                price = 799.0,
-                imageUrls = listOf("https://picsum.photos/seed/earphone3/400/400"),
-                skus = listOf(Sku("s1", mapOf("颜色" to "黑色"), 799.0)),
-                ragKnowledge = RagKnowledge(
-                    marketingDescription = "小米旗舰TWS，50dB深度降噪，空间音频",
-                    userReviews = listOf(ReviewItem("Dave", 4, "价格亲民"), ReviewItem("Eve", 5, "降噪很强"))
-                ),
-                description = "小米旗舰TWS，50dB深度降噪，空间音频"
-            )
-        )
-
-        val demoDecisions = listOf(
-            DecisionResult("p_digital_007", 0.89, 8.9,
-                ScoreBreakdown(0.80, 0.95, 0.90, 0.93, 0.80, 1.0, 0.15),
-                listOf("E-MKT-p_digital_007", "R-p_digital_007-0"),
-                listOf("价格较高", "仅适配苹果生态"), "苹果生态最佳TWS，H3芯片+自适应降噪"),
-            DecisionResult("p_digital_009", 0.86, 8.6,
-                ScoreBreakdown(0.88, 0.90, 0.88, 0.87, 0.75, 1.0, 0.12),
-                listOf("E-MKT-p_digital_009", "R-p_digital_009-0"),
-                listOf("部分用户反馈佩戴不稳"), "华为旗舰TWS，Hi-Res认证+静谧通话"),
-            DecisionResult("p_digital_011", 0.83, 8.3,
-                ScoreBreakdown(0.95, 0.85, 0.82, 0.82, 0.72, 1.0, 0.08),
-                listOf("E-MKT-p_digital_011", "R-p_digital_011-0"),
-                listOf("高频表现一般"), "799元50dB降噪，性价比炸裂")
-        )
-
         val assistantMessage = ChatMessage(
             role = MessageRole.Assistant,
-            text = "以下是为您推荐的蓝牙耳机（Demo 模式）：",
-            products = demoProducts,
-            decisionResults = demoDecisions,
+            text = "以下是为您推荐的蓝牙耳机（Demo 一键演示模式）：",
+            products = MockDemoData.buildDemoProducts(),
+            decisionResults = MockDemoData.buildDemoDecisions(),
+            evidenceList = MockDemoData.buildDemoEvidence(),
+            traceSteps = MockDemoData.buildDemoTraces(),
+            harnessReport = MockDemoData.buildDemoHarness(),
+        )
+        val demoResponse = RecommendResponse(
+            sessionId = _uiState.value.sessionId,
+            answer = assistantMessage.text,
+            products = MockDemoData.buildDemoProducts(),
+            decisionResults = MockDemoData.buildDemoDecisions(),
+            evidenceList = MockDemoData.buildDemoEvidence(),
+            traceSteps = MockDemoData.buildDemoTraces(),
+            harnessReport = MockDemoData.buildDemoHarness(),
+            retrievalPlan = mapOf("intent" to "recommend", "channels" to listOf("text", "review", "policy"), "category" to "数码电子", "top_k" to 10, "priority" to "balanced"),
+            constraints = mapOf("category" to "数码电子", "budget_max" to 2000.0, "scenario" to "commute"),
+            sufficiencyReport = mapOf("total_evidence" to 4, "sufficient" to true, "evidence_types" to listOf("text_retrieval", "review_positive", "review_risk", "policy_faq")),
+            fallbackStatus = mapOf("level" to 0, "description" to "全链路正常运行"),
         )
         _uiState.update {
-            it.copy(isLoading = false, messages = it.messages + assistantMessage)
+            it.copy(isLoading = false, messages = it.messages + assistantMessage, lastResponse = demoResponse)
         }
     }
 }

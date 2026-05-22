@@ -15,6 +15,8 @@ from app.agents.decision_agent import DecisionAgent
 from app.agents.response_agent import ResponseAgent
 from app.model_gateway.gateway import get_model_gateway
 from app.verification.response_guard import ResponseGuard
+from app.verification.evidence_checker import EvidenceSufficiencyChecker
+from app.workflow.checkpoint import get_checkpoint_store
 from app.memory.preference_memory import get_memory
 from app.repositories.product_repo import get_product_repo
 from app.schemas.workflow import WorkflowState
@@ -28,6 +30,7 @@ _decision = DecisionAgent(repo=_product_repo)
 _response = ResponseAgent()
 _gateway = get_model_gateway()
 _guard = ResponseGuard()
+_evidence_checker = EvidenceSufficiencyChecker()
 
 
 def _node_router(state: WorkflowState) -> WorkflowState:
@@ -129,12 +132,32 @@ def _node_response(state: WorkflowState) -> WorkflowState:
     return _response.execute(state)
 
 
+def _node_evidence_check(state: WorkflowState) -> WorkflowState:
+    """证据充足性检查：在 Reranker 之后、Decision 之前执行。"""
+    state.sufficiency_report = _evidence_checker.check(state)
+    step_num = len(state.trace_steps) + 1
+    state.trace_steps.append({
+        "step_id": f"T{step_num:03d}",
+        "agent_name": "Evidence Sufficiency Checker",
+        "action": "evidence_check",
+        "input_summary": f"{state.sufficiency_report.get('total_evidence', 0)} evidence items",
+        "output_summary": "sufficient" if state.sufficiency_report.get("sufficient")
+                          else f"missing: {state.sufficiency_report.get('missing_types', [])}",
+        "latency_ms": 0,
+        "status": "pass" if state.sufficiency_report.get("sufficient") else "insufficient",
+    })
+    return state
+
+
 def _node_guard(state: WorkflowState) -> WorkflowState:
     _guard.check(state)
     return state
 
 
-def _has_image(state: WorkflowState) -> str:
+def _router_next(state: WorkflowState) -> str:
+    """Router 后决定下一节点：闲聊→直接回复，有图→视觉解析，否则→检索"""
+    if state.intent == "chitchat":
+        return "response"
     return "visual" if state.image_url else "retrieval"
 
 
@@ -149,17 +172,19 @@ def build_workflow() -> StateGraph:
     workflow.add_node("visual", _node_visual)
     workflow.add_node("retrieval", _node_retrieval)
     workflow.add_node("reranker", _node_reranker)
+    workflow.add_node("evidence_check", _node_evidence_check)
     workflow.add_node("decision", _node_decision)
     workflow.add_node("response", _node_response)
     workflow.add_node("guard", _node_guard)
 
     workflow.set_entry_point("router")
 
-    workflow.add_conditional_edges("router", _has_image,
-                                   {"visual": "visual", "retrieval": "retrieval"})
+    workflow.add_conditional_edges("router", _router_next,
+                                   {"visual": "visual", "retrieval": "retrieval", "response": "response"})
     workflow.add_edge("visual", "retrieval")
     workflow.add_edge("retrieval", "reranker")
-    workflow.add_conditional_edges("reranker", _has_results,
+    workflow.add_edge("reranker", "evidence_check")
+    workflow.add_conditional_edges("evidence_check", _has_results,
                                    {"decision": "decision", "response": "response"})
     workflow.add_edge("decision", "response")
     workflow.add_edge("response", "guard")
@@ -178,10 +203,35 @@ def get_workflow():
     return _compiled
 
 
-async def run_workflow(user_query: str, image_url: str | None = None, session_id: str = "") -> WorkflowState:
+async def run_workflow(user_query: str, image_url: str | None = None, session_id: str = "",
+                      enable_checkpoint: bool = True) -> WorkflowState:
     state = WorkflowState(session_id=session_id or "", user_query=user_query, image_url=image_url)
     wf = get_workflow()
+
+    if enable_checkpoint and state.session_id:
+        try:
+            ckpt = get_checkpoint_store()
+            # 尝试从 checkpoint 恢复（仅当 session 已存在 checkpoint 时）
+            restored = ckpt.load(state.session_id)
+            if restored and restored.user_query == user_query:
+                logger = __import__('logging').getLogger(__name__)
+                logger.info(f"Resumed from checkpoint: {state.session_id}")
+                state = restored
+                # 继续运行（LangGraph 会从当前状态继续）
+        except Exception:
+            pass
+
     result_dict = wf.invoke(state)
     if isinstance(result_dict, dict):
-        return WorkflowState(**result_dict)
-    return result_dict
+        result = WorkflowState(**result_dict)
+    else:
+        result = result_dict
+
+    if enable_checkpoint and state.session_id:
+        try:
+            ckpt = get_checkpoint_store()
+            ckpt.save(result.session_id, "guard", result)
+        except Exception:
+            pass
+
+    return result

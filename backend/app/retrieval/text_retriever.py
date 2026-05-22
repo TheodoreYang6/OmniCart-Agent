@@ -214,7 +214,7 @@ class TextRetriever:
         title_lower = product.title.lower()
 
         # jieba 分词提取查询关键词（过滤停用词和单字）
-        keywords = [w.strip() for w in jieba.cut(query) if len(w.strip()) >= 2 and w.strip() not in _QUERY_STOP_WORDS]
+        keywords = [w.strip() for w in jieba.cut(query) if w.strip() and w.strip() not in _QUERY_STOP_WORDS]
 
         if not keywords:
             keywords = [query]
@@ -225,16 +225,22 @@ class TextRetriever:
             kw_lower = kw.lower()
             count = full_text.count(kw_lower)
             if count > 0:
-                # 在产品全文中的命中次数
                 score += min(count, 10) * 0.8
 
-            # 标题命中额外加分
             title_count = title_lower.count(kw_lower)
             if title_count > 0:
                 score += title_count * 2.0
 
-            # 品类/子类精确匹配高分
             if kw_lower in product.category or kw_lower in product.sub_category:
                 score += 5.0
+
+            # 多字词拆单字筛选：如"买鞋"→["买","鞋"]，单字"鞋"精准命中子品类
+            if len(kw) >= 2:
+                for ch in kw:
+                    ch_lower = ch.lower()
+                    if ch_lower in product.sub_category:
+                        score += 3.0
+                    elif ch_lower in product.category:
+                        score += 1.5
 
         return score

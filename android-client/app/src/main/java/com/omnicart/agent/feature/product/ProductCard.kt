@@ -97,106 +97,53 @@ fun ProductCard(
                 }
             }
 
+            // 决策评分区
             decisionResult?.let { result ->
                 Spacer(modifier = Modifier.height(10.dp))
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "综合评分",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text("综合评分", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (result.recommendationReason.isNotEmpty()) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "— ${result.recommendationReason}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("— ${result.recommendationReason}", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                         }
                     }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    val score = result.displayScore
-                    val scoreColor = when {
-                        score >= 8.0 -> ScoreHigh
-                        score >= 6.0 -> ScoreMedium
-                        else -> ScoreLow
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = scoreColor.copy(alpha = 0.12f)
-                    ) {
-                        Text(
-                            text = "${result.displayScore}",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = scoreColor,
-                            fontWeight = FontWeight.Bold
-                        )
+                    Spacer(Modifier.width(8.dp))
+                    val scoreColor = when { result.displayScore >= 8.0 -> ScoreHigh; result.displayScore >= 6.0 -> ScoreMedium; else -> ScoreLow }
+                    Surface(shape = RoundedCornerShape(6.dp), color = scoreColor.copy(alpha = 0.12f)) {
+                        Text("${result.displayScore}", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.titleMedium, color = scoreColor, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 if (result.riskFactors.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         result.riskFactors.forEach { risk ->
-                            Surface(
-                                color = RiskTagBg,
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = "⚠ $risk",
-                                    modifier = Modifier.padding(
-                                        horizontal = 6.dp,
-                                        vertical = 2.dp
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = RiskTagText
-                                )
+                            Surface(color = RiskTagBg, shape = RoundedCornerShape(4.dp)) {
+                                Text("⚠ $risk", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall, color = RiskTagText)
                             }
                         }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "查看详情 →",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    if (onAddToCart != null) {
-                        Surface(
-                            onClick = onAddToCart,
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                        ) {
-                            Text(
-                                text = "加入购物车",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        }
+            // 操作栏 — 始终显示（不受 decisionResult 影响）
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("查看详情 →", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                if (onAddToCart != null) {
+                    Surface(onClick = onAddToCart, shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primary) {
+                        Text("加入购物车", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }

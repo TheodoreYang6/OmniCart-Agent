@@ -25,6 +25,7 @@ fun ProfileScreen(
     onLoginClick: () -> Unit = {},
     onLogoutClick: () -> Unit = {},
     onAddressClick: () -> Unit = {},
+    onPreferenceClick: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -85,7 +86,7 @@ fun ProfileScreen(
         ProfileItem(Icons.Filled.ShoppingBag, "我的订单", "查看订单历史")
         ProfileItem(Icons.Filled.LocationOn, "收货地址", if (isLoggedIn) "管理收货地址" else "登录后管理收货地址", onClick = onAddressClick)
         ProfileItem(Icons.Filled.Favorite, "我的收藏", "暂无收藏商品")
-        ProfileItem(Icons.Filled.Settings, "偏好设置", if (isLoggedIn) "自定义购物偏好" else "登录后设置购物偏好")
+        ProfileItem(Icons.Filled.Settings, "偏好设置", if (isLoggedIn) "自定义购物偏好" else "登录后设置购物偏好", onClick = onPreferenceClick)
         ProfileItem(Icons.Filled.Info, "关于豆仔", "V1 参赛版 · 字节跳动 Agent 挑战赛")
     }
 }

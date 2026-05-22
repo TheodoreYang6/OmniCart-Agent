@@ -2,7 +2,7 @@
 
 > Android 原生四 Tab 电商智能导购客户端 | FastAPI Agent Runtime 多模态购物决策后端
 >
-> **字节跳动 Agent 挑战赛参赛项目** · V1 阶段 · 私有仓库
+> **字节跳动 Agent 挑战赛参赛项目** · V1 全部完成 (50/51) · 私有仓库
 
 ---
 
@@ -29,56 +29,59 @@ OmniCart Agent 是一个**具备完整购物链路的 Android 原生智能导购
 
 ### Android 原生客户端
 - Kotlin + Jetpack Compose + Material 3 + MVVM
-- 底部四 Tab 导航：商品 / 豆仔 / 购物车 / 我的
+- 底部四 Tab 导航 + 10 个子路由：商品 / **豆仔（含 Agent 洞察 10 Tab）** / 购物车 / 我的（含登录/地址/偏好）
 - 图片选择（Photo Picker）+ 图片上传 + 图片预览
-- Demo Mode 本地假数据离线展示
+- **ProductDetailSheet 6 Tab**（推荐/证据/评分/链路/技能/验证）
+- **AgentInsightSheet 10 Tab**（上下文/检索计划/证据图/降级/工具/反事实/视觉绑定/偏好/基准/摘要）
+- Demo Mode 一键展示完整 Agent 链路数据
 
 ### FastAPI 后端 Agent Runtime
-- 5 Agent LangGraph Workflow：Router → Visual → Retrieval → Decision → Response
+- **8 节点 LangGraph Workflow**：Router → Visual → Retrieval → Reranker → EvidenceCheck → Decision → Response → Guard
+- **LLM 查询改写**：Qwen 口语→搜索关键词（"我想买鞋"→"运动鞋 跑步鞋 休闲鞋"），jieba 单字拆分兜底
+- **闲聊模式**：16 词检测 → 跳过全部检索链 → 纯文字友好回复 + 6 类模板兜底
 - Qwen-only Model Stack（Chat / Vision / Embedding / Reranker）
-- PostgreSQL 18 + Qdrant 1.18 双数据库架构
-- Repository 抽象层（ABC + JSON/PG 双实现 + 工厂注入）
-- Hybrid Search（Qdrant 向量 ANN + jieba 关键词 RRF 融合 + 透明降级）
+- PostgreSQL 18（6 张表）+ Qdrant 1.18（1024d COSINE）双数据库架构
+- **6 类 Repository** 全部 PG+内存双实现 + 工厂注入 + 透明降级
+- **State Checkpoint**：JSON 文件 8 节点持久化（resume/replay/export）
+- **Skill Registry**：8 内置 Skill（组合能力，编排原子 Tool）
+- **MCP-compatible ToolManager**：8 内置 Tool + Manifest + 权限 + V1 只读强制
 
 ### 多模态 Evidence RAG
-- 商品文本检索：jieba 中文分词 + 停用词过滤 + rag_knowledge 全文
-- 用户评论挖掘：低分评论风险提取
+- **LLM 查询改写 + jieba 单字拆分**：口语精准转化为搜索关键词
+- Hybrid Search（Qdrant 1024d ANN + jieba 关键词 RRF k=60 融合 + 透明降级）
+- 用户评论挖掘：低分评论风险提取 + 好评证据
 - 政策/规则查询：购物政策、航空携带规则等
-- 7 维 Decision Scoring（文本匹配 / 评论置信度 / 评分 / 政策合规 / 兼容性 / 直方图多样性 / 风险惩罚）
-- Qwen Reranker 精排节点
+- 7 维 Decision Scoring + Qwen Reranker 精排
+- **Visual Evidence Grounding**：字段级视觉证据绑定
+- **Evidence Graph Lite**：NetworkX 商品-证据-风险图关系
+- **Counterfactual Recommendation**：0 结果时智能反事实建议
+- **Hierarchical Knowledge Index**：品类→子品类→品牌→商品 4 级分层 + 250+ 关键词
 
 ### 豆仔智能导购 Agent
-- Router Agent：规则优先 + LLM 增强混合意图识别
-- Visual Agent：截图 → 结构化商品参数提取
-- Retrieval Agent：三通道并行证据检索（text / review / policy）
-- Decision Agent：硬约束过滤 + 7 维加权评分 + 风险标签
-- Response Agent：LLM 证据引用回答 + 模板兜底
-- Context Compiler：结构化编译决策上下文
-- Response Guard：5 项回答守门规则 → harness_report
-- Evidence Sufficiency Checker：按意图类型检查证据充足性
-- Preference Memory：多轮对话约束合并 + 话题切换检测
+- Router Agent：规则优先 LLM + 6 种意图（含闲聊） + 16 词闲聊检测
+- Visual Agent：截图→结构化参数 + 三级降级（L0 真实→L1 Mock→L2 纯文本）
+- Retrieval Agent：**LLM 改写** + 三通道并行（text/review/policy）
+- Decision Agent：硬约束过滤（预算×2 排除）+ 7 维评分 + 风险标签
+- Response Agent：**闲聊/购物双模式 Prompt** + 6 类模板兜底
+- Response Guard + Evidence Checker + Decision Harness（7 项校验）
+- Preference Memory：多轮约束合并 + 话题切换自动清除 + REST API
 
 ### 商品展示
 - 100 件官方数据集商品（美妆护肤 / 数码电子 / 服饰运动 / 食品饮料）
 - 品类筛选 + 子品类展示 + SKU 价格区间 + 用户评分
-- Coil 图片加载（自动拼接 BASE_URL）
 
 ### 购物车
-- PostgreSQL/内存双模持久化
-- 增删改查 + 多选/全选 + 商品快照（denormalized）
-- 豆仔推荐加入标识
-- 模拟结算（mock checkout，不接入真实支付）
+- PG/内存双模 + 商品快照（加购时锁定价格）
+- 增删改查 + 多选/全选 + 模拟结算（不接入真实支付）
 
 ### 个人中心
-- 用户注册/登录（PBKDF2-SHA256 密码哈希 + Bearer Token）
+- 用户注册/登录（PBKDF2-SHA256 100k 迭代 + Bearer Token，每次登录刷新）
 - 收货地址 CRUD（省/市/区/详细 + 默认地址互斥）
-- 用户偏好读写（品类/预算/标签/场景，PG 持久化 + 内存缓存）
-- Demo 用户一键体验
+- 用户偏好 REST API（品类/预算/标签/场景）
 
 ### Demo Mode / Mock Mode
-- 本地假数据（3 款蓝牙耳机 + 完整 DecisionResult）
-- 真实 API → Mock 透明切换
-- 离线可展示完整 UI
+- 一键 Demo 完整数据：2 商品 + 4 证据 + 7 条 Trace + 完整 Harness + Agent 洞察全部数据
+- 真实 API → Mock 透明切换，离线可展示
 
 ---
 
@@ -102,8 +105,8 @@ OmniCart Agent 是一个**具备完整购物链路的 Android 原生智能导购
 |------|------|
 | 语言 | Python 3.11 |
 | 框架 | FastAPI + Pydantic v2 |
-| Agent | LangGraph StateGraph (5-Agent Workflow) |
-| 数据库 | PostgreSQL 18 + SQLAlchemy 2.0 (async) |
+| Agent | LangGraph StateGraph (8 节点 Workflow) |
+| 数据库 | PostgreSQL 18 (6 表) + SQLAlchemy 2.0 (async) |
 | 向量库 | Qdrant 1.18 (1024d COSINE) |
 | 模型 | Qwen (Chat / Vision / Embedding / Reranker) |
 | 分词 | jieba 中文分词 |
@@ -118,7 +121,7 @@ OmniCart Agent 是一个**具备完整购物链路的 Android 原生智能导购
 | 分支策略 | feature branch workflow |
 | 环境管理 | Conda (omnicart 环境) + pip |
 | 配置 | .env / .env.example |
-| 文档 | 蓝图 / 开发规则 / 进度 / 知识 / 决策 / 变更日志 |
+| 文档 | 蓝图 / 开发规则 / 进度 / 知识 / 决策 / 变更日志 / 答辩QA手册(17章) / 数据库设计详解 |
 
 ---
 
@@ -417,7 +420,7 @@ docs: 更新答辩QA手册
 
 ---
 
-## 6. API 端点总览
+## 6. API 端点总览（26 个）
 
 ### 健康检查
 ```
@@ -543,7 +546,7 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 3. 配置环境变量
 cp .env.example .env
-# 编辑 .env，设置 OMNICART_MOCK_MODE=true
+# 编辑 .env，设置 OMNICART_MOCK_MODE=true，OMNICART_PORT=8006
 
 # 4. 启动后端
 python run.py
