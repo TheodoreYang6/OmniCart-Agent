@@ -177,6 +177,143 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedImageUri = null, uploadedImageUrl = null) }
     }
 
+    // ---- 语音 ----
+
+    private val voiceRecorder = VoiceRecorder(getApplication())
+    private var recordingTimer: kotlinx.coroutines.Job? = null
+
+    fun startRecording() {
+        if (voiceRecorder.isRecording) return
+        try {
+            voiceRecorder.start()
+            _uiState.update { it.copy(isRecording = true, recordingSeconds = 0, showVoiceOverlay = true) }
+            // 启动计时器
+            recordingTimer = viewModelScope.launch {
+                while (voiceRecorder.isRecording) {
+                    kotlinx.coroutines.delay(1000)
+                    _uiState.update { it.copy(recordingSeconds = it.recordingSeconds + 1) }
+                }
+            }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(errorMessage = "录音启动失败: ${e.message}") }
+        }
+    }
+
+    fun stopRecordingAndSend() {
+        if (!voiceRecorder.isRecording) return
+        recordingTimer?.cancel()
+        val file = voiceRecorder.stop() ?: return
+        _uiState.update { it.copy(isRecording = false, showVoiceOverlay = false) }
+
+        viewModelScope.launch {
+            try {
+                val bytes = file.readBytes()
+                if (bytes.size < 100) {
+                    _uiState.update {
+                        it.copy(errorMessage = "录音太短，请至少录制1秒")
+                    }
+                    return@launch
+                }
+
+                // Step 0: 立即显示"语音识别中"占位消息，让用户知道在处理
+                val pendingId = java.util.UUID.randomUUID().toString()
+                val pendingMsg = ChatMessage(
+                    id = pendingId,
+                    role = MessageRole.User,
+                    text = "",
+                    isVoice = true,
+                    isTranscribing = true,
+                )
+                _uiState.update {
+                    it.copy(messages = it.messages + pendingMsg)
+                }
+
+                val audioBody = okhttp3.RequestBody.create(
+                    "audio/m4a".toMediaTypeOrNull(), bytes
+                )
+                val audioPart = okhttp3.MultipartBody.Part.createFormData(
+                    "audio", "voice.m4a", audioBody
+                )
+
+                // Step 1: ASR 转文字
+                val asr = ApiClient.api.voiceTranscribe(audioPart)
+                val transcribed = if (asr.fallback || asr.text.isBlank()) {
+                    "[语音消息]"
+                } else {
+                    asr.text.trim()
+                }
+
+                // Step 2: 替换占位消息为真实转写文字 + 开启 loading
+                val userMsg = ChatMessage(
+                    role = MessageRole.User,
+                    text = transcribed,
+                    isVoice = true,
+                )
+                _uiState.update {
+                    it.copy(
+                        isLoading = true,
+                        messages = it.messages.map { m -> if (m.id == pendingId) userMsg else m },
+                        queryText = "",
+                        errorMessage = null,
+                    )
+                }
+
+                // Step 3: 走推荐链路（跟文字输入一致）
+                val response = ApiClient.api.recommend(
+                    RecommendRequest(
+                        userQuery = transcribed,
+                        imageUrl = null,
+                        sessionId = _uiState.value.sessionId,
+                    )
+                )
+                val assistantMsg = ChatMessage(
+                    role = MessageRole.Assistant,
+                    text = response.answer.ifBlank { "好的，请告诉我你想买什么~" },
+                    products = response.products,
+                    decisionResults = response.decisionResults,
+                    evidenceList = response.evidenceList,
+                    traceSteps = response.traceSteps,
+                    harnessReport = response.harnessReport?.mapValues { it.value },
+                )
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        messages = it.messages + assistantMsg,
+                        lastResponse = response,
+                    )
+                }
+            } catch (e: Exception) {
+                // 替换占位消息为错误提示
+                _uiState.update {
+                    val cleaned = it.messages.map { m ->
+                        if (m.isTranscribing) m.copy(text = "[语音识别失败]", isTranscribing = false) else m
+                    }
+                    it.copy(
+                        isLoading = false,
+                        showVoiceOverlay = false,
+                        messages = cleaned,
+                    )
+                }
+            } finally {
+                file.delete()
+            }
+        }
+    }
+
+    fun cancelRecording() {
+        recordingTimer?.cancel()
+        voiceRecorder.cancel()
+        _uiState.update { it.copy(isRecording = false, showVoiceOverlay = false) }
+    }
+
+    fun dismissVoiceOverlay() {
+        _uiState.update { it.copy(showVoiceOverlay = false) }
+    }
+
+    fun clearVoiceAudio() {
+        _uiState.update { it.copy(voiceAudioUrl = null) }
+    }
+
     fun toggleDemoMode(enabled: Boolean) {
         _uiState.update {
             it.copy(

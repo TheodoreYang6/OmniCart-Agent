@@ -43,3 +43,23 @@ async def reset_preferences(session_id: str):
     mem = get_memory()
     mem.forget(session_id)
     return {"ok": True, "session_id": session_id}
+
+
+# ---- V2: Long-Term Preference Memory ----
+
+@router.get("/api/preferences/long-term/{user_id}")
+async def get_long_term_profile(user_id: str):
+    """获取用户的长期偏好画像（跨会话学习结果）"""
+    from app.memory.long_term import get_long_term_memory
+    ltm = get_long_term_memory()
+    profile = await ltm.get_profile(user_id)
+    return profile.to_storable()
+
+
+@router.delete("/api/preferences/long-term/{user_id}")
+async def reset_long_term_profile(user_id: str):
+    """重置用户的长期偏好画像"""
+    from app.memory.long_term import get_long_term_memory
+    ltm = get_long_term_memory()
+    ltm.forget(user_id)
+    return {"ok": True, "user_id": user_id}

@@ -13,6 +13,8 @@ from app.repositories.product_repo import ProductRepository
 from app.retrieval.text_retriever import TextRetriever
 from app.schemas.a2a import AgentCard
 from app.schemas.workflow import WorkflowState
+from app.core.cache import cached, make_key
+from app.core.config import REDIS_CACHE_TTL_REWRITE
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ class RetrievalAgent(BaseAgent):
             output_schema={"retrieved_products": "list[dict]", "evidence_list": "list[dict]"},
         )
 
-    def execute(self, state: WorkflowState) -> WorkflowState:
+    async def execute(self, state: WorkflowState) -> WorkflowState:
         action = "multi_channel_retrieval"
         plan = state.retrieval_plan
         self._start_trace(state, action,
@@ -46,7 +48,7 @@ class RetrievalAgent(BaseAgent):
 
             # Phase 1: text 通道先执行（必须拿到商品ID才能评论/政策检索）
             if "text" in plan.channels:
-                prods, evs = self._text_channel(state)
+                prods, evs = await self._text_channel(state)
                 products.extend(prods)
                 evidence.extend(evs)
 
@@ -79,31 +81,36 @@ class RetrievalAgent(BaseAgent):
         except Exception as e:
             return self._error_trace(state, str(e))
 
-    def _llm_extract_keywords(self, user_query: str) -> str:
-        """用 Qwen LLM 从口语查询中提取搜索关键词。失败时退回原 query。"""
-        prompt = (
-            "你是一个搜索关键词提取器。将用户的购物口语转化为商品搜索引擎友好的关键词，"
-            "用空格分隔。提取品类、品牌、属性、场景等核心词。最多输出10个词。\n\n"
-            f"用户说：{user_query}\n关键词："
-        )
-        try:
-            from app.model_gateway.gateway import get_model_gateway
-            gateway = get_model_gateway()
-            result = gateway.chat("chat_generation", prompt)
-            keywords = result.strip()
-            if keywords and len(keywords) >= 2:
-                logger.info(f"LLM keywords: {user_query!r} → {keywords!r}")
-                return keywords
-        except Exception as e:
-            logger.warning(f"LLM keyword extraction failed: {e}")
-        return user_query
+    async def _llm_extract_keywords(self, user_query: str) -> str:
+        """用 Qwen LLM 从口语查询中提取搜索关键词。失败时退回原 query。结果缓存 30 分钟。"""
+        cache_key = make_key("rewrite", user_query)
 
-    def _text_channel(self, state: WorkflowState) -> tuple[list[dict], list[dict]]:
+        async def _do_rewrite() -> str:
+            prompt = (
+                "你是一个搜索关键词提取器。将用户的购物口语转化为商品搜索引擎友好的关键词，"
+                "用空格分隔。提取品类、品牌、属性、场景等核心词。最多输出10个词。\n\n"
+                f"用户说：{user_query}\n关键词："
+            )
+            try:
+                from app.model_gateway.gateway import get_model_gateway
+                gateway = get_model_gateway()
+                result = await gateway.chat("chat_generation", prompt)
+                keywords = result.strip()
+                if keywords and len(keywords) >= 2:
+                    logger.info(f"LLM keywords: {user_query!r} → {keywords!r}")
+                    return keywords
+            except Exception as e:
+                logger.warning(f"LLM keyword extraction failed: {e}")
+            return user_query
+
+        return await cached(cache_key, REDIS_CACHE_TTL_REWRITE, _do_rewrite)
+
+    async def _text_channel(self, state: WorkflowState) -> tuple[list[dict], list[dict]]:
         """商品文本检索 — LLM查询改写 + jieba兜底"""
         constraints = state.constraints
 
         # LLM 提取搜索关键词，失败时退回原 query
-        search_query = self._llm_extract_keywords(state.user_query)
+        search_query = await self._llm_extract_keywords(state.user_query)
         if search_query != state.user_query:
             state.trace_steps.append({
                 "step_id": f"T{len(state.trace_steps) + 1:03d}",
@@ -115,7 +122,7 @@ class RetrievalAgent(BaseAgent):
                 "status": "success",
             })
 
-        results = self._text_retriever.search(
+        results = await self._text_retriever.search(
             query=search_query,
             top_k=state.retrieval_plan.top_k,
             category=constraints.category or state.retrieval_plan.category,

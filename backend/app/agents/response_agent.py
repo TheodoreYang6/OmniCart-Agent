@@ -52,18 +52,18 @@ class ResponseAgent(BaseAgent):
             output_schema={"answer": "string"},
         )
 
-    def execute(self, state: WorkflowState) -> WorkflowState:
+    async def execute(self, state: WorkflowState) -> WorkflowState:
         action = "generate_answer"
         self._start_trace(state, action, f"intent={state.intent}, products={len(state.decision_results)}")
 
         try:
             if state.intent == "chitchat":
-                state.answer = self._handle_chitchat(state.user_query)
+                state.answer = await self._handle_chitchat(state.user_query)
             else:
                 context = compile_context(state)
                 prompt = _RESPONSE_PROMPT.format(context=context)
                 gateway = get_model_gateway()
-                answer = gateway.chat("chat_generation", prompt)
+                answer = await gateway.chat("chat_generation", prompt)
                 if not answer or len(answer.strip()) < 10:
                     answer = self._generate_template(state)
                 state.answer = answer
@@ -77,12 +77,12 @@ class ResponseAgent(BaseAgent):
                 state.answer = self._generate_template(state)
             return self._finish_trace(state, "fallback", status="fallback")
 
-    def _handle_chitchat(self, query: str) -> str:
+    async def _handle_chitchat(self, query: str) -> str:
         """闲聊回复 — 用 LLM 生成友好介绍，失败时用模板兜底"""
         try:
             gateway = get_model_gateway()
             prompt = _CHITCHAT_PROMPT.format(query=query)
-            answer = gateway.chat("chat_generation", prompt)
+            answer = await gateway.chat("chat_generation", prompt)
             if answer and len(answer.strip()) >= 5:
                 return answer
         except Exception:

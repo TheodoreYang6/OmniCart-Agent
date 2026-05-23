@@ -20,6 +20,9 @@ data class ChatMessage(
     val traceSteps: List<TraceStepItem> = emptyList(),
     val harnessReport: Map<String, Any?>? = null,
     val timestamp: Long = System.currentTimeMillis(),
+    val isVoice: Boolean = false,
+    val isTranscribing: Boolean = false,
+    val voiceAudioUrl: String? = null,
 ) {
     val hasProducts: Boolean get() = products.isNotEmpty()
 }
@@ -37,7 +40,13 @@ data class ChatUiState(
     val uploadedImageUrl: String? = null,
     val lastSentImageUri: Uri? = null,
     val addToCartSuccess: String? = null,
-    val lastResponse: RecommendResponse? = null,  // V1-Plus: 全部 Agent 数据
+    val lastResponse: RecommendResponse? = null,
+    // 语音状态
+    val isRecording: Boolean = false,
+    val showVoiceOverlay: Boolean = false,
+    val recordingSeconds: Int = 0,
+    val voiceAudioUrl: String? = null,
+    val voicePlaying: Boolean = false,
 ) {
     val lastUserMessage: ChatMessage?
         get() = messages.lastOrNull { it.role == MessageRole.User }

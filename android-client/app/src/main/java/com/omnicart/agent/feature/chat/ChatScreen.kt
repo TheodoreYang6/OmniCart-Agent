@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -83,9 +84,22 @@ fun ChatScreen(
         }
     }
 
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) viewModel.startRecording() }
+
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted -> if (granted) cameraLauncher.launch(null) }
+
+    fun launchVoice() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            viewModel.startRecording()
+        } else {
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     fun launchCamera() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
@@ -181,6 +195,23 @@ fun ChatScreen(
                             when (message.role) {
                                 MessageRole.User -> {
                                     Column(horizontalAlignment = Alignment.End) {
+                                        if (message.isTranscribing) {
+                                            // 语音转写中 loading 指示器
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(14.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    "语音识别中...",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                        }
                                         // 用户已发送图片
                                         uiState.lastSentImageUri?.let { imgUri ->
                                             AsyncImage(
@@ -192,6 +223,24 @@ fun ChatScreen(
                                                 contentScale = ContentScale.Crop,
                                             )
                                             Spacer(modifier = Modifier.height(6.dp))
+                                        }
+                                        if (message.isVoice) {
+                                            // 语音消息标识
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    Icons.Filled.Mic,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    "语音输入",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                            Spacer(Modifier.height(2.dp))
                                         }
                                         MessageBubble(
                                             text = message.text,
@@ -347,8 +396,12 @@ fun ChatScreen(
                     onSend = viewModel::onSend,
                     onCameraClick = { showImageSourceDialog = true },
                     onPlusClick = { showPlusSheet = true },
+                    onVoiceStart = { launchVoice() },
+                    onVoiceEnd = { viewModel.stopRecordingAndSend() },
+                    onVoiceCancel = { viewModel.cancelRecording() },
                     enabled = !uiState.isLoading,
                     hasImage = uiState.selectedImageUri != null,
+                    isRecording = uiState.isRecording,
                 )
             }
         }
@@ -362,6 +415,18 @@ fun ChatScreen(
             AgentInsightSheet(
                 response = uiState.lastResponse,
                 onDismiss = { showInsight = false },
+            )
+        }
+
+        // 全屏语音输入覆盖层
+        if (uiState.showVoiceOverlay) {
+            VoiceInputOverlay(
+                isRecording = uiState.isRecording,
+                recordingSeconds = uiState.recordingSeconds,
+                onCancel = { viewModel.cancelRecording() },
+                onSwitchToKeyboard = {
+                    viewModel.cancelRecording()
+                },
             )
         }
     }

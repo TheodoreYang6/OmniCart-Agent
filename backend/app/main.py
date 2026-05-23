@@ -15,7 +15,11 @@ from app.api.agent_actions import router as agent_actions_router
 from app.api.auth import router as auth_router
 from app.api.address import router as address_router
 from app.api.preference import router as preference_router
-from app.core.config import SERVICE_NAME, SERVICE_VERSION, DEMO_DATA_DIR, USE_POSTGRES, USE_QDRANT
+from app.api.observability import router as observability_router
+from app.api.voice import router as voice_router
+from app.api.eval import router as eval_router
+from app.api.eval_dashboard import router as dashboard_router
+from app.core.config import SERVICE_NAME, SERVICE_VERSION, DEMO_DATA_DIR, USE_POSTGRES, USE_QDRANT, USE_REDIS
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +38,11 @@ UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / DEMO_DATA_DIR / "up
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
+# 语音文件
+VOICE_DIR = UPLOAD_DIR / "voice"
+VOICE_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/api/uploads/voice", StaticFiles(directory=str(VOICE_DIR)), name="voice_uploads")
+
 # 静态文件 — 官方数据集图片
 DATASET_DIR = Path(__file__).resolve().parent.parent.parent / "ecommerce_agent_dataset"
 if DATASET_DIR.is_dir():
@@ -50,6 +59,10 @@ app.include_router(agent_actions_router)
 app.include_router(auth_router)
 app.include_router(address_router)
 app.include_router(preference_router)
+app.include_router(observability_router)
+app.include_router(voice_router)
+app.include_router(eval_router)
+app.include_router(dashboard_router)
 
 
 @app.on_event("startup")
@@ -75,6 +88,13 @@ async def on_startup():
     else:
         logger.info("Qdrant not configured — using jieba keyword mode")
 
+    if USE_REDIS:
+        try:
+            from app.core.redis_client import init_redis
+            await init_redis()
+        except Exception as e:
+            logger.warning(f"Redis init failed: {e} — cache disabled")
+
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -92,6 +112,13 @@ async def on_shutdown():
             from app.core.qdrant_client import close_qdrant
             await close_qdrant()
             logger.info("Qdrant connection closed")
+        except Exception:
+            pass
+
+    if USE_REDIS:
+        try:
+            from app.core.redis_client import close_redis
+            await close_redis()
         except Exception:
             pass
 

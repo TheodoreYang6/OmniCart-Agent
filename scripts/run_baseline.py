@@ -8,6 +8,7 @@
 """
 
 import argparse
+import asyncio
 import json
 import time
 import sys
@@ -49,7 +50,7 @@ def evaluate(results: list[dict]) -> dict:
     }
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description="OmniCart Agent Baseline 评测")
     parser.add_argument("--limit", type=int, default=0, help="最多测试 N 条 query")
     parser.add_argument("--scenario", type=str, default="", help="只测特定场景")
@@ -74,15 +75,15 @@ def main():
         t0 = time.time()
         try:
             from app.repositories.product_repo import get_product_repo
-            from app.retrieval.text_retriever import HybridRetriever
+            from app.retrieval.text_retriever import TextRetriever
             from app.model_gateway.gateway import get_model_gateway
 
             repo = get_product_repo()
-            retriever = HybridRetriever(repo)
+            retriever = TextRetriever(repo)
             gateway = get_model_gateway()
 
             # OmniCart: Hybrid Search
-            retrieved = retriever.hybrid_search(query, top_k=10)
+            retrieved = await retriever.hybrid_search(query, top_k=10)
             latency = (time.time() - t0) * 1000
 
             # 品类匹配检查
@@ -132,4 +133,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

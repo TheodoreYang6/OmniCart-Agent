@@ -23,6 +23,7 @@ class RecommendRequest(BaseModel):
     image_url: Optional[str] = None
     demo_mode: bool = False
     session_id: str = ""
+    user_id: str = ""  # V2: 关联长期偏好记忆
 
 
 class RecommendResponse(BaseModel):
@@ -50,7 +51,7 @@ async def recommend(req: RecommendRequest):
     # ---- Image parse (if provided) ----
     if req.image_url:
         t0 = time.perf_counter()
-        visual_result = _visual_agent.parse(req.image_url, req.user_query)
+        visual_result = await _visual_agent.parse(req.image_url, req.user_query)
         elapsed = round((time.perf_counter() - t0) * 1000)
         trace_steps.append({
             "step_id": "T001",
@@ -84,7 +85,7 @@ async def recommend(req: RecommendRequest):
     if visual_result and visual_result.product_name:
         search_query = f"{req.user_query} {visual_result.product_name} {visual_result.brand or ''}"
 
-    retrieved = _retriever.search(
+    retrieved = await _retriever.search(
         query=search_query,
         top_k=10,
         category=constraints.get("category"),
@@ -230,6 +231,7 @@ async def recommend_v2(req: RecommendRequest):
         user_query=req.user_query,
         image_url=req.image_url,
         session_id=session_id,
+        user_id=req.user_id,
     )
     result.session_id = session_id
 

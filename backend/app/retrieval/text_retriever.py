@@ -1,7 +1,8 @@
 import logging
 import jieba
 
-from app.core.config import DEFAULT_TOP_K
+from app.core.config import DEFAULT_TOP_K, REDIS_CACHE_TTL_SEARCH
+from app.core.cache import cached, make_key
 from app.repositories.product_repo import ProductRepository
 from app.repositories.vector_repo import get_vector_repo
 from app.model_gateway.gateway import get_model_gateway
@@ -24,7 +25,25 @@ class TextRetriever:
     def __init__(self, product_repo: ProductRepository | None = None):
         self._repo = product_repo or ProductRepository()
 
-    def search(
+    async def search(
+        self,
+        query: str,
+        top_k: int = DEFAULT_TOP_K,
+        category: str | None = None,
+        sub_category: str | None = None,
+        price_max: float | None = None,
+        price_min: float | None = None,
+    ) -> list[dict]:
+        """文本检索 + Redis 缓存。相同查询+筛选条件 5 分钟内直接返回。"""
+        cache_key = make_key("search", query, category or "", sub_category or "",
+                             str(price_max or ""), str(price_min or ""), str(top_k))
+
+        async def _do_search() -> list[dict]:
+            return self._search_sync(query, top_k, category, sub_category, price_max, price_min)
+
+        return await cached(cache_key, REDIS_CACHE_TTL_SEARCH, _do_search)
+
+    def _search_sync(
         self,
         query: str,
         top_k: int = DEFAULT_TOP_K,
@@ -87,7 +106,7 @@ class TextRetriever:
 
         return results
 
-    def hybrid_search(
+    async def hybrid_search(
         self,
         query: str,
         top_k: int = DEFAULT_TOP_K,
@@ -101,14 +120,14 @@ class TextRetriever:
         Qdrant 不可用时透明降级为纯关键词搜索。
         """
         vector_repo = get_vector_repo()
-        text_results = self.search(query, top_k * 2, category, sub_category, price_max, price_min)
+        text_results = await self.search(query, top_k * 2, category, sub_category, price_max, price_min)
 
         if not vector_repo.health_check():
             return text_results[:top_k]
 
         try:
             gateway = get_model_gateway()
-            query_embedding = gateway.embed([query], "text_embedding")[0]
+            query_embedding = (await gateway.embed([query], "text_embedding"))[0]
             vector_results = vector_repo.search_similar(query_embedding, top_k * 2)
         except Exception as e:
             logger.warning(f"向量搜索失败，降级为纯关键词: {e}")

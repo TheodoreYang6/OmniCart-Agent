@@ -1,11 +1,14 @@
 """Visual Agent — 调用 Qwen-VL 解析商品截图，输出结构化 VisualResult"""
 
+import hashlib
 import json
 import re
 from pathlib import Path
 
 from app.model_gateway.gateway import get_model_gateway
 from app.schemas.visual import VisualResult, VisualEvidence
+from app.core.cache import cached, make_key
+from app.core.config import REDIS_CACHE_TTL_VISUAL
 
 _UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "uploads"
 
@@ -36,18 +39,13 @@ class VisualAgent:
     def __init__(self):
         self._gateway = get_model_gateway()
 
-    def parse(self, image_url: str, user_query: str = "") -> VisualResult:
+    async def parse(self, image_url: str, user_query: str = "") -> VisualResult:
         # 将 /api/uploads/xxx.png 转为本地路径
         filename = image_url.rsplit("/", 1)[-1]
         filepath = _UPLOAD_DIR / filename
 
-        # 读取图片
         if not filepath.exists():
-            return VisualResult(
-                confidence=0.0,
-                raw_response="",
-                fallback_level=4,
-            )
+            return VisualResult(confidence=0.0, raw_response="", fallback_level=4)
 
         image_bytes = filepath.read_bytes()
         ext = filepath.suffix.lower()
@@ -56,28 +54,30 @@ class VisualAgent:
             ".webp": "image/webp", ".gif": "image/gif",
         }.get(ext, "image/png")
 
-        prompt = PROMPT_USER
-        if user_query:
-            prompt = f"用户问题：{user_query}\n\n" + PROMPT_USER
+        # 缓存键：视觉解析结果由图片内容 + 用户问题决定
+        img_hash = hashlib.md5(image_bytes).hexdigest()[:12]
+        cache_key = make_key("visual", img_hash, user_query[:80])
 
-        try:
-            raw = self._gateway.vision(
-                capability="visual_understanding",
-                image_bytes=image_bytes,
-                content_type=content_type,
-                prompt=prompt,
-                system=PROMPT_SYSTEM,
-            )
-        except Exception:
-            return VisualResult(
-                confidence=0.0,
-                raw_response="",
-                fallback_level=3,
-            )
+        async def _do_parse() -> VisualResult:
+            prompt = PROMPT_USER
+            if user_query:
+                prompt = f"用户问题：{user_query}\n\n" + PROMPT_USER
+            try:
+                raw = await self._gateway.vision(
+                    capability="visual_understanding",
+                    image_bytes=image_bytes,
+                    content_type=content_type,
+                    prompt=prompt,
+                    system=PROMPT_SYSTEM,
+                )
+            except Exception:
+                return VisualResult(confidence=0.0, raw_response="", fallback_level=3)
 
-        result = self._parse_json(raw)
-        result.raw_response = raw
-        return result
+            result = self._parse_json(raw)
+            result.raw_response = raw
+            return result
+
+        return await cached(cache_key, REDIS_CACHE_TTL_VISUAL, _do_parse)
 
     def _parse_json(self, raw: str) -> VisualResult:
         # 尝试提取 JSON（可能被 markdown 代码块包裹）

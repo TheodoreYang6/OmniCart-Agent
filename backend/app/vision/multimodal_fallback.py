@@ -30,7 +30,7 @@ class MultimodalFallback:
             2: "Text-only mode (image ignored)",
         }.get(self._level, "unknown")
 
-    def try_visual_parse(self, image_url: str, user_query: str) -> tuple[Optional[dict], dict]:
+    async def try_visual_parse(self, image_url: str, user_query: str) -> tuple[Optional[dict], dict]:
         """尝试三级降级的视觉解析。"""
         status = {"level": self._level, "description": self.level_description, "attempts": []}
 
@@ -39,7 +39,7 @@ class MultimodalFallback:
         try:
             from app.model_gateway.gateway import get_model_gateway
             gateway = get_model_gateway()
-            result = gateway.vision(image_url, user_query)
+            result = await gateway.vision(image_url, user_query)
             if result and result.get("product_name"):
                 status["attempts"].append("level_0_success")
                 return result, status

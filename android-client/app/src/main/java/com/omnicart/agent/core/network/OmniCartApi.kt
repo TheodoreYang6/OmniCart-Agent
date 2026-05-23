@@ -1,9 +1,12 @@
 package com.omnicart.agent.core.network
 
 import com.google.gson.annotations.SerializedName
+import com.omnicart.agent.core.model.DecisionResult
+import com.omnicart.agent.core.model.EvidenceItem
 import com.omnicart.agent.core.model.Product
 import com.omnicart.agent.core.model.RecommendRequest
 import com.omnicart.agent.core.model.RecommendResponse
+import com.omnicart.agent.core.model.TraceStepItem
 import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -126,14 +129,66 @@ interface OmniCartApi {
     @GET("api/preferences")
     suspend fun getPreferences(
         @Query("session_id") sessionId: String,
-    ): Map<String, Any?>
+    ): Map<@JvmSuppressWildcards String, @JvmSuppressWildcards Any?>
 
     @PUT("api/preferences")
     suspend fun updatePreferences(
         @Query("session_id") sessionId: String,
-        @Body body: Map<String, Any?>,
-    ): Map<String, Any?>
+        @Body body: Map<@JvmSuppressWildcards String, @JvmSuppressWildcards Any?>,
+    ): Map<@JvmSuppressWildcards String, @JvmSuppressWildcards Any?>
+
+    // ---- 语音 ----
+    @Multipart
+    @POST("api/voice/transcribe")
+    suspend fun voiceTranscribe(
+        @Part audio: MultipartBody.Part,
+    ): TranscribeResponse
+
+    @Multipart
+    @POST("api/voice/chat/v2")
+    suspend fun voiceChat(
+        @Part audio: MultipartBody.Part,
+        @Part("query") query: okhttp3.RequestBody,
+    ): VoiceChatResponse
 }
+
+// ---- Voice ----
+
+data class TranscribeResponse(
+    val text: String = "",
+    val fallback: Boolean = false,
+)
+
+// ---- Voice ----
+
+data class VoiceChatResponse(
+    @SerializedName("session_id")
+    val sessionId: String = "",
+    val text: String = "",
+    @SerializedName("audio_url")
+    val audioUrl: String = "",
+    @SerializedName("audio_format")
+    val audioFormat: String = "wav",
+    val voice: String = "",
+    @SerializedName("tokens_input")
+    val tokensInput: Int = 0,
+    @SerializedName("tokens_output")
+    val tokensOutput: Int = 0,
+    @SerializedName("latency_ms")
+    val latencyMs: Int = 0,
+    val fallback: Boolean = false,
+    @SerializedName("fallback_reason")
+    val fallbackReason: String = "",
+    @SerializedName("transcribed_text")
+    val transcribedText: String = "",
+    val products: List<Product> = emptyList(),
+    @SerializedName("decision_results")
+    val decisionResults: List<DecisionResult> = emptyList(),
+    @SerializedName("evidence_list")
+    val evidenceList: List<EvidenceItem> = emptyList(),
+    @SerializedName("trace_steps")
+    val traceSteps: List<TraceStepItem> = emptyList(),
+)
 
 // ---- Data Classes ----
 

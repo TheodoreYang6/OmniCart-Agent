@@ -1,6 +1,10 @@
 package com.omnicart.agent.feature.chat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -8,10 +12,12 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -21,8 +27,12 @@ fun ChatInputBar(
     onSend: () -> Unit,
     onCameraClick: () -> Unit,
     onPlusClick: () -> Unit,
+    onVoiceStart: () -> Unit,
+    onVoiceEnd: () -> Unit,
+    onVoiceCancel: () -> Unit,
     enabled: Boolean,
     hasImage: Boolean = false,
+    isRecording: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val canSend = queryText.isNotBlank() || hasImage
@@ -85,12 +95,41 @@ fun ChatInputBar(
                 )
             } else {
                 // 无内容时显示语音 + 加号
-                FlatIconButton(
-                    icon = Icons.Filled.Mic,
-                    onClick = { /* V2 语音功能 */ },
-                    enabled = enabled,
-                    contentDescription = "语音输入",
-                )
+                var pressStartTime by remember { mutableLongStateOf(0L) }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isRecording) MaterialTheme.colorScheme.errorContainer
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        )
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = {
+                                    pressStartTime = System.currentTimeMillis()
+                                    onVoiceStart()
+                                    tryAwaitRelease()
+                                    if (System.currentTimeMillis() - pressStartTime > 400) {
+                                        onVoiceEnd()
+                                    } else {
+                                        onVoiceCancel()
+                                    }
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Mic,
+                        contentDescription = if (isRecording) "松开发送" else "长按录音",
+                        tint = if (isRecording)
+                            MaterialTheme.colorScheme.error
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
                 FlatIconButton(
                     icon = Icons.Filled.Add,
                     onClick = onPlusClick,

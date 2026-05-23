@@ -14,17 +14,19 @@ class TestRouterAgent:
         assert agent.card.name == "Router Agent"
         assert "intent_recognition" in agent.card.capabilities
 
-    def test_execute_recommend(self):
+    @pytest.mark.asyncio
+    async def test_execute_recommend(self):
         agent = RouterAgent()
         state = WorkflowState(session_id="t1", user_query="推荐一款蓝牙耳机")
-        result = agent.execute(state)
+        result = await agent.execute(state)
         assert result.intent in ("recommend", "compare", "alternative", "risk_check", "compatibility_check")
         assert len(result.trace_steps) >= 1
 
-    def test_execute_risk_check(self):
+    @pytest.mark.asyncio
+    async def test_execute_risk_check(self):
         agent = RouterAgent()
         state = WorkflowState(session_id="t2", user_query="这个精华对敏感肌安全吗")
-        result = agent.execute(state)
+        result = await agent.execute(state)
         assert result.intent == "risk_check"
         assert "review" in result.retrieval_plan.channels
 
@@ -39,7 +41,8 @@ class TestRetrievalAgent:
         agent = RetrievalAgent()
         assert agent.card.name == "Retrieval Agent"
 
-    def test_execute(self):
+    @pytest.mark.asyncio
+    async def test_execute(self):
         agent = RetrievalAgent()
         state = WorkflowState(
             session_id="t1",
@@ -47,7 +50,7 @@ class TestRetrievalAgent:
             constraints=Constraints(category="数码电子"),
             retrieval_plan=RetrievalPlan(channels=["text"], category="数码电子", top_k=3),
         )
-        result = agent.execute(state)
+        result = await agent.execute(state)
         assert len(result.retrieved_products) > 0
         assert len(result.evidence_list) > 0
         assert result.trace_steps[-1]["status"] == "success"
@@ -78,7 +81,8 @@ class TestResponseAgent:
         agent = ResponseAgent()
         assert agent.card.name == "Response Agent"
 
-    def test_execute_empty(self):
+    @pytest.mark.asyncio
+    async def test_execute_empty(self):
         agent = ResponseAgent()
         state = WorkflowState(
             session_id="t1",
@@ -86,6 +90,6 @@ class TestResponseAgent:
             retrieved_products=[],
             decision_results=[],
         )
-        result = agent.execute(state)
+        result = await agent.execute(state)
         assert len(result.answer) > 0
         assert result.trace_steps[-1]["status"] in ("success", "fallback")

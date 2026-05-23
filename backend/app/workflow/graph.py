@@ -20,6 +20,8 @@ from app.workflow.checkpoint import get_checkpoint_store
 from app.memory.preference_memory import get_memory
 from app.repositories.product_repo import get_product_repo
 from app.schemas.workflow import WorkflowState
+from app.core.cache import cached, make_key, cache_set
+from app.core.config import REDIS_CACHE_TTL_WORKFLOW
 
 # 全局单例 — 通过 factory 注入 repo，PG/JSON 自动切换
 _product_repo = get_product_repo()
@@ -33,19 +35,45 @@ _guard = ResponseGuard()
 _evidence_checker = EvidenceSufficiencyChecker()
 
 
-def _node_router(state: WorkflowState) -> WorkflowState:
-    state = _router.execute(state)
+async async def _node_router(state: WorkflowState) -> WorkflowState:
+    state = await _router.execute(state)
+
     # 合并多轮记忆中的偏好
     mem = get_memory()
     state.constraints = mem.merge_constraints(state.session_id, state.constraints)
     mem.update(state.session_id, state.constraints)
+
+    # V2: 合并长期偏好记忆（跨会话学习）
+    if state.user_id:
+        try:
+            from app.memory.long_term import get_long_term_memory
+            ltm = get_long_term_memory()
+            lt_defaults = ltm.merge_with_session(state.user_id, state.constraints)
+            if lt_defaults:
+                # 长期偏好的默认值不覆盖当前会话的明确约束
+                if not state.constraints.category and lt_defaults.get("category"):
+                    state.constraints.category = lt_defaults["category"]
+                if state.constraints.budget_max is None and lt_defaults.get("budget_max"):
+                    state.constraints.budget_max = lt_defaults["budget_max"]
+                if not state.constraints.scenario and lt_defaults.get("scenario"):
+                    state.constraints.scenario = lt_defaults["scenario"]
+            # 记录这次搜索行为
+            await ltm.record_search(
+                user_id=state.user_id,
+                query=state.user_query,
+                category=state.constraints.category or "",
+                sub_category=state.constraints.sub_category or "",
+            )
+        except Exception:
+            pass  # 长期记忆失败不影响主链路
+
     return state
 
 
-def _node_visual(state: WorkflowState) -> WorkflowState:
+async def _node_visual(state: WorkflowState) -> WorkflowState:
     if not state.image_url:
         return state
-    result = _visual.parse(state.image_url, state.user_query)
+    result = await _visual.parse(state.image_url, state.user_query)
     if result:
         state.visual_result = result.model_dump()
         extra_info = []
@@ -73,11 +101,11 @@ def _node_visual(state: WorkflowState) -> WorkflowState:
     return state
 
 
-def _node_retrieval(state: WorkflowState) -> WorkflowState:
-    return _retrieval.execute(state)
+async def _node_retrieval(state: WorkflowState) -> WorkflowState:
+    return await _retrieval.execute(state)
 
 
-def _node_reranker(state: WorkflowState) -> WorkflowState:
+async def _node_reranker(state: WorkflowState) -> WorkflowState:
     """Qwen Reranker 精排：对 jieba 粗排结果进行语义重排序"""
     products = state.retrieved_products
     if len(products) <= 1:
@@ -92,7 +120,7 @@ def _node_reranker(state: WorkflowState) -> WorkflowState:
                 doc += f" {desc[:200]}"
             documents.append(doc)
 
-        ranked = _gateway.rerank(
+        ranked = await _gateway.rerank(
             query=state.user_query,
             documents=documents,
             top_n=len(products),
@@ -128,8 +156,8 @@ def _node_decision(state: WorkflowState) -> WorkflowState:
     return _decision.execute(state)
 
 
-def _node_response(state: WorkflowState) -> WorkflowState:
-    return _response.execute(state)
+async def _node_response(state: WorkflowState) -> WorkflowState:
+    return await _response.execute(state)
 
 
 def _node_evidence_check(state: WorkflowState) -> WorkflowState:
@@ -204,24 +232,39 @@ def get_workflow():
 
 
 async def run_workflow(user_query: str, image_url: str | None = None, session_id: str = "",
-                      enable_checkpoint: bool = True) -> WorkflowState:
-    state = WorkflowState(session_id=session_id or "", user_query=user_query, image_url=image_url)
+                      user_id: str = "", enable_checkpoint: bool = True) -> WorkflowState:
     wf = get_workflow()
+
+    # ---- Workflow 级缓存：相同 query + image 在 TTL 内直接返回 ----
+    cache_key = make_key("workflow", user_query, image_url or "noimg")
+    if not enable_checkpoint:
+        state = await _run_uncached(user_query, image_url, session_id, user_id, wf, enable_checkpoint)
+    else:
+        async def _do_run():
+            return await _run_uncached(user_query, image_url, session_id, user_id, wf, enable_checkpoint)
+
+        state = await cached(cache_key, REDIS_CACHE_TTL_WORKFLOW, _do_run)
+
+    return state
+
+
+async def _run_uncached(user_query: str, image_url: str | None, session_id: str,
+                        user_id: str, wf, enable_checkpoint: bool) -> WorkflowState:
+    state = WorkflowState(session_id=session_id or "", user_id=user_id, user_query=user_query, image_url=image_url)
 
     if enable_checkpoint and state.session_id:
         try:
             ckpt = get_checkpoint_store()
-            # 尝试从 checkpoint 恢复（仅当 session 已存在 checkpoint 时）
             restored = ckpt.load(state.session_id)
             if restored and restored.user_query == user_query:
                 logger = __import__('logging').getLogger(__name__)
                 logger.info(f"Resumed from checkpoint: {state.session_id}")
                 state = restored
-                # 继续运行（LangGraph 会从当前状态继续）
         except Exception:
             pass
 
-    result_dict = wf.invoke(state)
+    # 使用 ainvoke 以支持 async node（Visual / Retrieval）
+    result_dict = await wf.ainvoke(state)
     if isinstance(result_dict, dict):
         result = WorkflowState(**result_dict)
     else:

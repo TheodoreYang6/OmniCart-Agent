@@ -6,6 +6,7 @@ import os
 # 必须在任何 app 导入之前设置
 os.environ["DATABASE_URL"] = ""
 os.environ["QDRANT_URL"] = ""
+os.environ["REDIS_URL"] = ""
 os.environ["OMNICART_MOCK_MODE"] = "true"
 
 import pytest

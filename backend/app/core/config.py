@@ -35,3 +35,11 @@ QDRANT_URL: str = _env("QDRANT_URL", "")
 QDRANT_COLLECTION_NAME: str = _env("QDRANT_COLLECTION_NAME", "products")
 EMBEDDING_DIMENSION: int = int(_env("EMBEDDING_DIMENSION", "1024"))
 USE_QDRANT: bool = bool(QDRANT_URL)
+
+# ---- Redis ----
+REDIS_URL: str = _env("REDIS_URL", "redis://localhost:6379/0")
+REDIS_CACHE_TTL_VISUAL: int = int(_env("REDIS_CACHE_TTL_VISUAL", "3600"))
+REDIS_CACHE_TTL_SEARCH: int = int(_env("REDIS_CACHE_TTL_SEARCH", "300"))
+REDIS_CACHE_TTL_REWRITE: int = int(_env("REDIS_CACHE_TTL_REWRITE", "1800"))
+REDIS_CACHE_TTL_WORKFLOW: int = int(_env("REDIS_CACHE_TTL_WORKFLOW", "300"))
+USE_REDIS: bool = _env("REDIS_URL", "").strip() != ""

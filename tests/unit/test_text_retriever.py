@@ -1,19 +1,22 @@
+import pytest
 from app.repositories.product_repo import ProductRepository
 from app.retrieval.text_retriever import TextRetriever
 
 
-def test_retriever_returns_results():
+@pytest.mark.asyncio
+async def test_retriever_returns_results():
     repo = ProductRepository()
     retriever = TextRetriever(repo)
-    results = retriever.search("蓝牙耳机", top_k=5)
+    results = await retriever.search("蓝牙耳机", top_k=5)
     assert len(results) > 0
     assert len(results) <= 5
 
 
-def test_retriever_result_has_required_fields():
+@pytest.mark.asyncio
+async def test_retriever_result_has_required_fields():
     repo = ProductRepository()
     retriever = TextRetriever(repo)
-    results = retriever.search("蓝牙耳机", top_k=3)
+    results = await retriever.search("蓝牙耳机", top_k=3)
     for r in results:
         assert "product_id" in r
         assert "title" in r
@@ -23,24 +26,27 @@ def test_retriever_result_has_required_fields():
         assert "image_urls" in r
 
 
-def test_retriever_price_filter():
+@pytest.mark.asyncio
+async def test_retriever_price_filter():
     repo = ProductRepository()
     retriever = TextRetriever(repo)
-    results = retriever.search("蓝牙耳机", top_k=20, price_max=200)
+    results = await retriever.search("蓝牙耳机", top_k=20, price_max=200)
     for r in results:
         assert r["price"] <= 200
 
 
-def test_retriever_category_filter():
+@pytest.mark.asyncio
+async def test_retriever_category_filter():
     repo = ProductRepository()
     retriever = TextRetriever(repo)
-    results = retriever.search("保湿精华", top_k=10, category="美妆护肤")
+    results = await retriever.search("保湿精华", top_k=10, category="美妆护肤")
     for r in results:
         assert r["category"] == "美妆护肤"
 
 
-def test_retriever_empty_on_mismatch():
+@pytest.mark.asyncio
+async def test_retriever_empty_on_mismatch():
     repo = ProductRepository()
     retriever = TextRetriever(repo)
-    results = retriever.search("蓝牙耳机", top_k=20, price_max=1)
+    results = await retriever.search("蓝牙耳机", top_k=20, price_max=1)
     assert results == []

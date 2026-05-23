@@ -36,6 +36,21 @@ async def agent_action(req: AgentActionRequest):
             image_url=repo.resolve_image_url(product.product_id),
         )
         cart = cart_repo.get_cart(req.user_id)
+
+        # V2: 记录长期偏好（加购行为）
+        try:
+            from app.memory.long_term import get_long_term_memory
+            ltm = get_long_term_memory()
+            await ltm.record_add_to_cart(
+                user_id=req.user_id,
+                product_id=req.product_id,
+                category=product.category,
+                brand=product.brand,
+                price=product.base_price,
+            )
+        except Exception:
+            pass
+
         return {
             "status": "ok",
             "action": "add_to_cart",

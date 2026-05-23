@@ -38,6 +38,7 @@ class TraceStep(BaseModel):
 class WorkflowState(BaseModel):
     """LangGraph 工作流全局状态"""
     session_id: str = ""
+    user_id: str = ""  # V2: 关联用户长期偏好记忆
     user_query: str = ""
     image_url: str | None = None
 

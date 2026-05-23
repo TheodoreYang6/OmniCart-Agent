@@ -54,7 +54,7 @@ class RouterAgent(BaseAgent):
             output_schema={"intent": "string", "constraints": "object", "retrieval_plan": "object"},
         )
 
-    def execute(self, state: WorkflowState) -> WorkflowState:
+    async def execute(self, state: WorkflowState) -> WorkflowState:
         action = "intent_and_constraints"
         self._start_trace(state, action, state.user_query[:120])
 
@@ -66,7 +66,7 @@ class RouterAgent(BaseAgent):
         try:
             gateway = get_model_gateway()
             prompt = _ROUTER_PROMPT.format(query=state.user_query)
-            raw = gateway.chat("intent_understanding", prompt)
+            raw = await gateway.chat("intent_understanding", prompt)
             llm_result = self._parse_llm(raw)
         except Exception:
             pass  # LLM 不可用时静默降级
