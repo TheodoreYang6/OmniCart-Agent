@@ -2,7 +2,7 @@
 
 > Android 原生四 Tab 电商智能导购客户端 | FastAPI Agent Runtime 多模态购物决策后端
 >
-> **字节跳动 Agent 挑战赛参赛项目** · V1 全部完成 (50/51) · 私有仓库
+> **字节跳动 Agent 挑战赛参赛项目** · V2 扩展中 (6/13) · 私有仓库
 
 ---
 
@@ -44,7 +44,13 @@ OmniCart Agent 是一个**具备完整购物链路的 Android 原生智能导购
 - **6 类 Repository** 全部 PG+内存双实现 + 工厂注入 + 透明降级
 - **State Checkpoint**：JSON 文件 8 节点持久化（resume/replay/export）
 - **Skill Registry**：8 内置 Skill（组合能力，编排原子 Tool）
-- **MCP-compatible ToolManager**：8 内置 Tool + Manifest + 权限 + V1 只读强制
+- **标准 MCP Server**：8 Tool JSON-RPC 2.0 + stdio/SSE 双传输 + Claude Desktop/Cursor 可接入
+- **ToolManager**：8 内置 Tool + Manifest + 权限 + V1 只读强制
+- **Redis 四级缓存**：Visual(1h)/Search(5min)/Rewrite(30min)/Workflow(5min) + 透明降级
+- **LLM 全链路可观测性**：Gateway 全量追踪 + Token 统计 + P50/P95 + 聚合 API
+- **Qwen-Omni 语音导购**：ASR→Agent→TTS + Android 全屏语音输入
+- **用户长期偏好记忆**：跨会话 UserProfile + 行为信号学习 + 时间衰减 + PG/JSON 双持久化
+- **Evaluation Dashboard**：Web 可视化评测面板 + Chart.js + 10 golden queries + 历史趋势
 
 ### 多模态 Evidence RAG
 - **LLM 查询改写 + jieba 单字拆分**：口语精准转化为搜索关键词
@@ -108,7 +114,9 @@ OmniCart Agent 是一个**具备完整购物链路的 Android 原生智能导购
 | Agent | LangGraph StateGraph (8 节点 Workflow) |
 | 数据库 | PostgreSQL 18 (6 表) + SQLAlchemy 2.0 (async) |
 | 向量库 | Qdrant 1.18 (1024d COSINE) |
-| 模型 | Qwen (Chat / Vision / Embedding / Reranker) |
+| 缓存 | Redis 7 + redis-py async (四级缓存 + 透明降级) |
+| 模型 | Qwen (Chat / Vision / Embedding / Reranker / Omni) |
+| MCP | mcp 1.27 (JSON-RPC 2.0 over stdio/SSE) |
 | 分词 | jieba 中文分词 |
 | 检索融合 | RRF (Reciprocal Rank Fusion, k=60) |
 | 迁移 | Alembic |
@@ -121,7 +129,7 @@ OmniCart Agent 是一个**具备完整购物链路的 Android 原生智能导购
 | 分支策略 | feature branch workflow |
 | 环境管理 | Conda (omnicart 环境) + pip |
 | 配置 | .env / .env.example |
-| 文档 | 蓝图 / 开发规则 / 进度 / 知识 / 决策 / 变更日志 / 答辩QA手册(17章) / 数据库设计详解 |
+| 文档 | 蓝图 / 开发规则 / 进度 / 知识 / 决策 / 变更日志 / 答辩QA手册(20章+附录) / 数据库设计详解 |
 
 ---
 
@@ -200,7 +208,13 @@ OmniCart-Agent/
 │   │   ├── context/                # 上下文编译器
 │   │   │   └── compiler.py         # 结构化编译决策上下文
 │   │   ├── memory/                 # 偏好记忆
-│   │   │   └── preference_memory.py # 多轮对话约束合并 + 话题切换检测
+│   │   │   ├── preference_memory.py # 多轮对话约束合并 + 话题切换检测
+│   │   │   └── long_term.py         # V2 长期偏好记忆 (跨会话学习)
+│   │   ├── mcp/                     # V2 标准 MCP Server
+│   │   │   ├── server.py            # MCP Server (stdio + SSE)
+│   │   │   └── tools.py             # 8 Tool 定义 + Handler
+│   │   ├── observability/           # V2 可观测性
+│   │   │   └── collector.py         # TraceCollector + LLMSpan
 │   │   └── verification/           # 验证层
 │   │       ├── evidence_checker.py # 证据充足性检查
 │   │       └── response_guard.py   # 5 项回答守门规则
@@ -420,7 +434,7 @@ docs: 更新答辩QA手册
 
 ---
 
-## 6. API 端点总览（26 个）
+## 6. API 端点总览（30+ 个）
 
 ### 健康检查
 ```
@@ -483,6 +497,33 @@ POST /api/checkout                    # 模拟结算（mock checkout，不接入
 ### Agent 受控操作
 ```
 POST /api/agent/action                # 豆仔受控操作（add_to_cart 等）
+```
+
+### 语音导购（V2）
+```
+POST /api/voice/transcribe            # ASR 纯转写
+POST /api/voice/chat/v2               # ASR → Agent → TTS 完整链路
+```
+
+### 评测（V2）
+```
+GET  /eval                            # HTML 可视化评测面板
+POST /api/eval/run                    # 运行 golden query 评测
+GET  /api/eval/results                # 历史评测记录
+GET  /api/eval/results/{run_id}       # 单次评测详情
+```
+
+### 可观测性（V2）
+```
+GET  /api/observability/traces        # LLM 调用追踪列表
+GET  /api/observability/stats         # 聚合统计（Token/延迟/错误率）
+GET  /api/cache/stats                 # Redis 缓存命中率
+```
+
+### 长期偏好（V2）
+```
+GET    /api/preferences/long-term/{user_id}   # 获取长期偏好画像
+DELETE /api/preferences/long-term/{user_id}   # 重置长期偏好
 ```
 
 ---

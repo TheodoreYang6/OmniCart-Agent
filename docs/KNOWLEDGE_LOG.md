@@ -1,5 +1,53 @@
 # OmniCart Agent 知识日志
 
+## V2-3: 用户长期偏好记忆
+
+完成时间：2026-05-23 | 验证：8 步行为模拟测试 + 31/31 单元测试
+
+### 核心知识
+- **三级行为信号**: 搜索(weight=1) < 加购(weight=3) < 结账(weight=5)
+- **时间衰减**: 30 天半衰期, `0.5^(days/30)`, 旧偏好自动淡化
+- **预算学习**: EMA 指数移动平均, 购买权重高于浏览 2 倍
+- **合并策略**: Session 明确值 > 长期默认值, 不覆盖用户当前意图
+- **持久化**: PG JSONB (user_preferences 表, key=`ltm:{user_id}`) + JSON 文件双模式
+- `UserProfile` dataclass: 品类/品牌/场景/标签 各 Top-N 截断, 归一化 0-1
+
+### 文件清单
+- `memory/long_term.py` — LongTermMemory 类 + UserProfile
+- `workflow/graph.py` — Router 节点接入 LT merge + search recording
+- `schemas/workflow.py` — WorkflowState 新增 user_id
+- `api/preference.py` — 新增 GET/DELETE long-term profile API
+- `api/agent_actions.py` — 加购自动记录
+
+## V2-4: Evaluation Dashboard
+
+完成时间：2026-05-23 | 验证：5/5 golden queries 全部命中
+
+### 核心知识
+- 10 条 golden queries 覆盖 4 品类, 每次评测保存到 `data/eval_runs/{run_id}.json`
+- Dashboard: Chart.js 双图表 (Bar + Doughnut) + 统计卡片 + 明细表格 + 历史趋势
+- API: POST /api/eval/run, GET /api/eval/results, GET /api/eval/results/{id}, GET /api/eval/golden
+
+### 文件清单
+- `api/eval.py` — 评测 API
+- `api/eval_dashboard.py` — HTML Dashboard (单文件自包含)
+
+---
+
+## V2-1: 标准 MCP Server/Client 实现
+
+完成时间：2026-05-23 | 验证：8/8 Tool 连通性测试 + 31/31 单元测试
+
+### 核心知识
+- **MCP (Model Context Protocol)** 是 Anthropic 发布的开放标准
+- 架构：Client ↔ Server，JSON-RPC 2.0 over stdio 或 HTTP/SSE
+- Python SDK: `mcp>=1.27`
+
+### 文件清单
+- `app/mcp/server.py` / `app/mcp/tools.py` / `scripts/run_mcp_server.py` / `scripts/test_mcp.py`
+
+---
+
 ## V1-Core-7: 7 节点工作流升级（Reranker + Context Compiler + Guard + Memory + Async）
 
 完成时间：2026-05-22

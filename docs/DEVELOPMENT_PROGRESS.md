@@ -1,8 +1,8 @@
 # OmniCart Agent 开发进度
 
-更新时间：2026-05-22
-当前阶段：**V1 全部完成 (50/51项)，~99%**
-当前重点：APK Release 打包（最后一项）
+更新时间：2026-05-23
+当前阶段：**V2 扩展 (6/13)**
+当前重点：Docker 环境搭建 + APK 打包收尾
 当前阻塞：无
 
 ## 进度总览
@@ -11,51 +11,53 @@
 |------|------|--------|
 | V0-Core | 完成 | 100% |
 | V0-Android | 完成 | 100% |
-| V1-Core 后端 P0 | 完成 | 13/13 (100%) |
-| V1-Core 后端 P1 | 完成 | 8/8 (100%) |
-| V1-Core 后端 P2 | 完成 | 10/10 (100%) |
-| V1-Core Android P1 | 完成 | 6/6 (100%) |
-| V1-Core Android P2 | 完成 | 4/4 (100%) |
+| V1-Core (P0+P1+P2) | 完成 | 31/31 (100%) |
+| V1-Android (P1+P2) | 完成 | 10/10 (100%) |
 | V1-Plus | 完成 | 10/10 (100%) |
 | V1-Android P0 (APK) | 待开始 | 0/1 |
-| V2 | 待开始 | 0/12 |
+| V2 | 进行中 | 6/13 |
 
-## V1 已完成 50 项明细
+## V2 已完成 6 项
 
-### P0 阻塞完赛（13项）
-PostgreSQL+Qdrant双库、Repository抽象层、HybridSearch、5Agent Workflow、/api/recommend/v2、/api/products、/api/cart CRUD、/api/checkout、/api/agent/action、PreferenceMemory、ContextCompiler、ResponseGuard、QwenReranker
+| # | 任务 | 日期 |
+|---|------|------|
+| 47 | **Redis 四级缓存** — Visual(1h)/Search(5min)/Rewrite(30min)/Workflow(5min) + 优雅降级 | 2026-05-23 |
+| 49 | **LLM 全链路可观测性** — Gateway 全量追踪 4 方法 + Token 统计 + P50/P95 + 聚合 API | 2026-05-23 |
+| 43 | **Qwen-Omni 语音导购** — ASR→Agent→TTS + Android 全屏语音 + 长按录音 + 文字清洗 | 2026-05-23 |
+| 40 | **标准 MCP Server/Client** — 8 Tool JSON-RPC 2.0 + stdio/SSE 双传输 + Claude Desktop 可接入 | 2026-05-23 |
+| 46 | **用户长期偏好记忆** — 跨会话 UserProfile + 行为信号(搜索/加购/结账) + 时间衰减 + PG/JSON | 2026-05-23 |
+| 51 | **Evaluation Dashboard** — Web 可视化面板 + Chart.js + 10 golden queries + 历史趋势 | 2026-05-23 |
 
-### P1 质量线（8后端+6Android=14项）
-用户登录/注册API、收货地址CRUD API、用户偏好REST API、EvidenceChecker接入Workflow、SkillRegistry、ToolManager、StateCheckpoint、baseline脚本
-+ Android登录/注册、地址管理、偏好设置、EvidencePanel、AgentTracePanel、HarnessValidationPanel
+## V2 待完成 7 项
 
-### P2 参赛打磨（10后端+4Android=14项）
-EvidenceGraph Lite、VisualGrounding、Counterfactual、workflow.yaml、TieredFallback、HierarchicalIndex、DecisionHarness、A2A-lite集成、DemoPack导出、MockDemoData
-+ SkillExecutionPanel、ScoreBreakdown、MockMode一键演示、主Demo数据
-
-### V1-Plus 加分面板（10项）
-RetrievalPlanPanel、ContextPanel、PreferenceMemoryCard、VisualGrounding可视化、Counterfactual展示、EvidenceGraphPath、ToolGovernance、FallbackStatus、DemoPack增强、Baseline展示
-
-### 后端优化
-LLM查询改写、jieba单字拆分、闲聊模式、Visual Agent specs修复、RecommendResponse扩展字段
-
-### Android优化
-ProductCard加购按钮修复、HarnessTab智能展示、键盘无缝推升、自动滚动、面板嵌套崩溃修复、AgentInsightSheet 10Tab
+| # | 任务 | 说明 |
+|---|------|------|
+| 19 | APK Release 打包 | Release 签名 + assembleRelease |
+| 41 | 标准 A2A Protocol | 经分析跳过 — 同进程 LangGraph 不需要跨框架通信 |
+| 42 | Neo4j GraphRAG | 经分析跳过 — NetworkX 已足够，V3 可升级 |
+| 44 | iOS SwiftUI 客户端 | 经分析跳过 — 比赛交付端是 Android |
+| 45 | Computer Use / Browser Use | 经分析跳过 — Demo 不可控风险高 |
+| 48 | 在线反馈学习 / Bandit | 可选 — 需行为数据积累 |
+| 50 | 大规模商品数据（1000+ 件） | 👤 队友负责 |
+| 52 | Docker 开发环境搭建 | 📋 待办 |
 
 ## 基础设施
-- 后端API端点：26个
-- 后端测试：21/21通过
+
+- 后端 API 端点：30+ 个
+- 后端测试：31/31 通过
 - Android：BUILD SUCCESSFUL（多次编译通过）
-- Workflow：8节点（含evidence_check + chitchat边缘）
-- SkillRegistry：8skills / ToolManager：8tools
+- Workflow：8 节点 LangGraph
+- Skill Registry：8 skills / ToolManager：8 tools
+- MCP Server：8 Tool JSON-RPC 2.0
+- 数据集：100 件商品（含 2026-05-23 新增 5 件平价数码）
 - 代码仓库：GitHub (TheodoreYang6/OmniCart-Agent)
 
 ## 文档
-- 答辩QA手册.md：17章，覆盖全部50项
-- README.md：10章，面向队友
-- CHANGELOG.md：完整变更记录
-- TASK_LIST.md：51项任务跟踪
 
-## 下一步
-1. #19 APK Release 打包
-2. V2 扩展规划（12项，比赛后）
+- 答辩QA手册.md：20 章 + 附录，覆盖全部技术点
+- README.md：面向队友
+- CHANGELOG.md：完整变更记录
+- TASK_LIST.md：任务跟踪
+- DATABASE_DESIGN.md：数据库设计
+- KNOWLEDGE_LOG.md：知识节点
+- DECISION_LOG.md：技术决策

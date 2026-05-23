@@ -127,22 +127,23 @@
 
 ---
 
-## V2/V3（扩展规划，0/12 完成）
+## V2/V3（扩展规划，6/13 完成）
 
 | # | 任务 | 说明 |
 |---|------|------|
-| 40 | 标准 MCP Server/Client | 当前只做了 MCP-compatible |
+| 40 | 标准 MCP Server/Client | 8 Tool + JSON Schema + stdio/SSE双传输 + Claude Desktop可接入 | ✅ 完成 (2026-05-23) |
 | 41 | 标准 A2A Protocol | 当前只做了 A2A-lite Schema |
 | 42 | Neo4j GraphRAG | 替代 NetworkX 轻量图 |
-| 43 | Qwen-Omni 语音导购 | 多模态语音交互 |
+| 43 | Qwen-Omni 语音导购 | 音频输入+文字输出+TTS语音回复+Android长按录音 | ✅ 完成 (2026-05-23) |
 | 44 | iOS SwiftUI 客户端 | 第二交付端 |
 | 45 | Computer Use / Browser Use | 真实网页操作 |
-| 46 | 用户长期偏好记忆 | 跨会话持久化 |
-| 47 | Redis 缓存层 | 视觉解析/Demo Pack 缓存 |
+| 46 | 用户长期偏好记忆 | 跨会话UserProfile + 行为信号(搜索/加购/结账) + 时间衰减 + PG/JSON双持久化 | ✅ 完成 (2026-05-23) |
+| 47 | Redis 缓存层 | 视觉解析/检索/改写/Workflow 四级缓存 | ✅ 完成 (2026-05-23) |
 | 48 | 在线反馈学习 / Bandit 排序 | 用户行为学习 |
-| 49 | Langfuse / Phoenix 可观测性 | LLM 调用追踪 |
-| 50 | 大规模商品数据（1000+ 件） | 扩展数据集 |
-| 51 | Evaluation Dashboard | 完整评估面板 |
+| 49 | Langfuse / Phoenix 可观测性 | LLM 全链路追踪 + 本地存储 + 统计 API + Gateway 全量接入 | ✅ 完成 (2026-05-23) |
+| 50 | 大规模商品数据（1000+ 件） | 扩展数据集 | 👤 队友负责 |
+| 51 | Evaluation Dashboard | Web可视化面板 + Chart.js + 10 golden queries + 历史趋势 | ✅ 完成 (2026-05-23) |
+| 52 | Docker 开发环境搭建 | Desktop + PostgreSQL + Qdrant + Redis 容器化 | 📋 待办 |
 
 ---
 

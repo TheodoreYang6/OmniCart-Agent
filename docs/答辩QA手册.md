@@ -1,13 +1,13 @@
 # OmniCart Agent 答辩 QA 手册
 
 > 适用：字节跳动 Agent 挑战赛答辩 / 技术面试 / 项目汇报
-> 更新：2026-05-22（基于 V1 全部完成架构 — P0+P1+P2+V1-Plus = 50/51 项）
+> 更新：2026-05-23（基于 V1 全部完成架构 — 51/51 项，含 Redis 四级缓存体系）
 
 ---
 
 ## 一句话定位
 
-> OmniCart Agent 是一个面向购买前决策的 Android 原生多模态购物决策 Agent，融合 Qwen 全栈模型、LLM 查询改写 + Qdrant 语义向量 + jieba 关键词 RRF 混合检索、LangGraph 8 节点 Multi-Agent 编排、PostgreSQL 6 表持久化、7 维可解释决策评分、Skill Registry + MCP-compatible ToolManager、State Checkpoint、Decision Harness 验证框架、闲聊模式 + 完整用户体系 + Android 四 Tab 原生客户端 + V1-Plus Agent 洞察面板。
+> OmniCart Agent 是一个面向购买前决策的 Android 原生多模态购物决策 Agent，融合 Qwen 全栈模型、LLM 查询改写 + Qdrant 语义向量 + jieba 关键词 RRF 混合检索、LangGraph 8 节点 Multi-Agent 编排、PostgreSQL 6 表持久化、7 维可解释决策评分、标准 MCP Protocol 8 Tool + JSON-RPC 2.0 + Skill Registry + ToolManager、State Checkpoint、Decision Harness 验证框架、Redis 四级缓存、LLM 全链路可观测性、Qwen-Omni 语音导购、闲聊模式 + 完整用户体系 + Android 四 Tab 原生客户端 + V1-Plus Agent 洞察面板。
 
 ---
 
@@ -33,6 +33,9 @@ FastAPI Backend (Python 3.11) — 26 个 API 端点
     └─ /api/upload       ──→ 图片上传 + Qwen-VL 解析
 
 基础设施层:
+    ├─ **Redis 四级缓存**: Visual(1h) / Search(5min) / LLM Rewrite(30min) / Workflow(5min)
+    ├─ **LLM 可观测性**: Gateway 全量追踪 + 本地 JSON 存储 + 聚合统计 API
+    ├─ **MCP Server**: 8 Tool + JSON-RPC 2.0 + stdio/SSE 双传输 + Claude Desktop 可接入
     ├─ Skill Registry: 8 Skill（视觉/检索/评论/政策/兼容性/评分/验证/Demo）
     ├─ ToolManager: 8 Tool + Manifest + 权限控制 + V1 只读强制
     ├─ State Checkpoint: JSON 文件 8 节点持久化 (resume/replay/export)
@@ -221,7 +224,201 @@ Visual Agent 的每个字段（商品名/品牌/品类/规格×颜色/容量...�
 
 ---
 
-## 十、State Checkpoint + Decision Harness + Evidence Graph
+## 十、标准 MCP Server/Client（Agent 领域核心考点）
+
+### Q: 什么是 MCP（Model Context Protocol）？
+
+MCP 是 Anthropic 于 2024 年底发布的开放标准协议，定义了 AI 应用与外部工具/数据源之间的统一通信方式。可以类比为 **LLM 世界的 USB-C 接口** — 任何 MCP Server 暴露的工具，任何 MCP Client（Claude Desktop、Cursor、VS Code 等）都能即插即用。
+
+### Q: MCP 的架构模型
+
+```
+┌──────────────────────┐
+│   MCP Client         │  Claude Desktop / Cursor / VS Code / 自定义App
+│   (Host)             │
+└──────┬───────────────┘
+       │ JSON-RPC 2.0
+       │ over stdio / SSE
+┌──────▼───────────────┐
+│   MCP Server         │  OmniCart Agent
+│                      │
+│  ┌─── Tool 1: product_text_search
+│  ├─── Tool 2: product_detail
+│  ├─── Tool 3: review_search
+│  ├─── Tool 4: policy_lookup
+│  ├─── Tool 5: compatibility_check
+│  ├─── Tool 6: structured_filter
+│  ├─── Tool 7: decision_score
+│  └─── Tool 8: list_categories
+└──────────────────────┘
+```
+
+**三大核心概念：**
+
+| 概念 | 说明 | OmniCart 实现 |
+|------|------|-------------|
+| **Tools** | 可被 LLM 调用的函数，有明确的输入 Schema 和输出格式 | 8 个购物工具，每个都有 `inputSchema` JSON Schema 定义 |
+| **Resources** | 可被 LLM 读取的数据源（文件、数据库等） | 商品数据集（100+ 件）、评论、政策 FAQ |
+| **Prompts** | 预定义的 Prompt 模板 | 购物推荐、风险检查、兼容性检查等场景 Prompt |
+
+### Q: MCP 的通信协议
+
+```
+Client                          Server
+  │                                │
+  │── initialize ────────────────→│  握手：交换能力描述
+  │←─ capabilities ──────────────│
+  │                                │
+  │── tools/list ────────────────→│  列出所有可用工具
+  │←─ [Tool, Tool, ...] ─────────│
+  │                                │
+  │── tools/call ────────────────→│  调用具体工具
+  │   {"name":"product_text_search",│
+  │    "arguments":{"query":"蓝牙耳机"}}│
+  │←─ {"total":3, "products":[...]}│
+  │                                │
+```
+
+基于 **JSON-RPC 2.0**，所有消息都是结构化的请求/响应。传输层支持两种模式：
+
+| 传输方式 | 适用场景 | OmniCart 支持 |
+|----------|---------|-------------|
+| **stdio** | Claude Desktop 等本地客户端 | ✅ `python -m app.mcp.server` |
+| **HTTP/SSE** | 浏览器端、Web 客户端 | ✅ `python scripts/run_mcp_server.py --http --port 8007` |
+
+### Q: 为什么 MCP 是 Agent 领域重点？
+
+1. **互操作性**：不同团队开发的工具可以通过统一协议被任何 LLM 调用，避免厂商锁定
+2. **安全边界**：工具执行在 Server 端完成，Client 只看到声明的 Schema，无法越权
+3. **可组合性**：多个 MCP Server 可以叠加，LLM 同时拥有文件系统、数据库、API 等多种工具
+4. **标准化**：取代了早期每个 Agent 框架各自定义 Tool Schema 的碎片化局面
+
+### Q: OmniCart 的 MCP 实现架构
+
+```
+backend/app/mcp/
+├── __init__.py         模块入口
+├── server.py           MCP Server 核心（stdio + SSE 双传输）
+├── tools.py            8 个 Tool 定义 + handler 实现
+└── __main__.py         python -m 入口（Claude Desktop 用）
+
+scripts/
+├── run_mcp_server.py   启动脚本（--http 切换传输模式）
+└── test_mcp.py         8 Tool 连通性测试
+```
+
+### Q: 和之前的 ToolManager 什么关系？
+
+| 维度 | 旧 ToolManager（MCP-compatible） | 新 MCP Server（标准协议） |
+|------|------|------|
+| 协议 | 自定义 Python API | JSON-RPC 2.0 标准协议 |
+| Schema | Pydantic `ToolManifest` | JSON Schema（MCP 标准格式） |
+| 传输 | 仅内部调用 | stdio + SSE/HTTP 双模式 |
+| 互操作 | 只能 OmniCart 自己用 | Claude Desktop / Cursor / VS Code 均可接入 |
+| 工具数量 | 8 个 | 8 个（功能完全一致） |
+
+**两者共存不冲突**：`ToolManager` 是内部实现细节（Agent Workflow 内调用），MCP Server 是对外标准接口（外部 LLM 客户端接入）。
+
+### Q: Tool Schema 示例
+
+```json
+{
+  "name": "product_text_search",
+  "description": "使用 jieba 中文分词 + 关键词匹配检索商品",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": {"type": "string", "description": "搜索关键词"},
+      "category": {"type": "string", "description": "品类过滤"},
+      "top_k": {"type": "integer", "default": 10},
+      "price_max": {"type": "number"},
+      "price_min": {"type": "number"}
+    },
+    "required": ["query"]
+  }
+}
+```
+
+### Q: 怎么验证 MCP 工具可用？
+
+```bash
+# 快速测试所有 8 个工具
+python scripts/test_mcp.py
+
+# 输出示例：
+#   [PASS] product_text_search({"query": "蓝牙耳机", "top_k": 3})
+#   [PASS] product_detail({"product_id": "p_digital_007"})
+#   [PASS] decision_score({"product_id": "p_digital_026", "budget_max": 200})
+#   8/8 tools passed
+```
+
+### Q: Claude Desktop 如何接入 OmniCart MCP？
+
+在 Claude Desktop 配置文件中添加：
+
+```json
+{
+  "mcpServers": {
+    "omnicart": {
+      "command": "python",
+      "args": ["-m", "app.mcp.server"],
+      "cwd": "/path/to/OmniCart-Agent/backend"
+    }
+  }
+}
+```
+
+配置后，Claude Desktop 启动时自动连接 OmniCart MCP Server，可以直接调用 8 个购物工具查询商品、对比评分、检查兼容性。
+
+### Q: MCP Server 代码核心实现
+
+```python
+# backend/app/mcp/server.py — 核心 20 行
+from mcp.server import Server, NotificationOptions
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool
+from app.mcp.tools import TOOL_DEFINITIONS, handle_tool
+
+server = Server("omnicart-agent")
+
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    return [Tool(**td) for td in TOOL_DEFINITIONS]
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    result = await handle_tool(name, arguments)
+    return [TextContent(type="text", text=result)]
+
+# stdio 模式启动
+async with stdio_server() as (read, write):
+    await server.run(read, write, capabilities)
+```
+
+### Q: 答辩可能追问
+
+**Q: 为什么不用 LangChain Tool 而是 MCP？**
+
+LangChain Tool 是 LangChain 生态内部的概念，换到 LlamaIndex/AutoGen 就不能用了。MCP 是**生态无关**的开放标准，任何支持 JSON-RPC 的客户端都能接入。
+
+**Q: 8 个工具够吗？**
+
+比赛阶段 8 个工具覆盖了商品搜索、详情查看、评分分析、政策查询、兼容性检查等核心购物决策链路。标准协议的优势在于：需要新工具时只需加一个 Tool 定义和 handler，不改协议。
+
+**Q: MCP 和 A2A（Agent-to-Agent）的区别？**
+
+| MCP | A2A |
+|-----|-----|
+| LLM ↔ 工具/数据 | Agent ↔ Agent |
+| 暴露能力（Tools） | 委托任务（Tasks） |
+| JSON-RPC over stdio/SSE | JSON-RPC over HTTP |
+| Claude 主导 | Google 主导 |
+
+两者互补：MCP 管"用什么工具"，A2A 管"多个 Agent 怎么协作"。OmniCart 两套都做了（MCP 标准协议 + A2A-lite）。
+
+---
+
+## 十一、State Checkpoint + Decision Harness + Evidence Graph
 
 ### Q: Checkpoint 做什么？
 
@@ -239,7 +436,7 @@ NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` /
 
 ---
 
-## 十一、Android 客户端全景
+## 十二、Android 客户端全景
 
 ### Q: 四 Tab + 子页面
 
@@ -270,7 +467,7 @@ NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` /
 
 ---
 
-## 十二、Counterfactual + Knowledge Index（进阶）
+## 十三、Counterfactual + Knowledge Index（进阶）
 
 ### Q: 0 结果时怎么办？
 
@@ -287,7 +484,7 @@ NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` /
 
 ---
 
-## 十三、Mock Mode / Demo Pack
+## 十四、Mock Mode / Demo Pack
 
 ### Q: 一键 Demo 怎么工作？
 
@@ -297,31 +494,291 @@ NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` /
 
 ---
 
-## 十四、全链路数据流（最新版）
+## 十五、Redis 四级缓存体系（新增 V2 基础设施）
+
+### Q: 为什么需要缓存？
+
+OmniCart 全链路涉及 3 次 LLM API 调用（Qwen-VL 视觉解析 + Qwen Chat 查询改写 + Qwen Chat 回答生成）+ 向量检索 + RRF 融合 + Rerank 精排，一次请求延迟 3-10 秒。相同图片/查询反复发时，每次重算浪费 API 调用量且影响用户体验。
+
+### Q: 四级缓存架构
+
+```
+用户请求
+  │
+  ├─ L1: Workflow 全链路缓存   TTL 5min   key=MD5(query+image)
+  │   └─ 命中 → 直接返回完整推荐结果，跳过全部 8 个 Agent 节点
+  │
+  ├─ L2: Visual 视觉解析缓存   TTL 1h     key=MD5(图片MD5+query)
+  │   └─ 命中 → 跳过 Qwen-VL API 调用（最贵操作，2-5s→0ms）
+  │
+  ├─ L3: LLM 查询改写缓存      TTL 30min  key=MD5(原始查询)
+  │   └─ 命中 → 跳过 Qwen Chat 调用，"推荐蓝牙耳机"→"蓝牙耳机" 确定性映射
+  │
+  └─ L4: 文本检索缓存          TTL 5min   key=MD5(查询+品类+价格+top_k)
+      └─ 命中 → 跳过 jieba+Qdrant+Embedding 全流程，200-1000ms→0ms
+```
+
+### Q: 缓存键设计
+
+| 层级 | Key 模式 | TTL | 设计理由 |
+|------|----------|-----|---------|
+| L1 Workflow | `omnicart:workflow:{md5(query+image)}` | 5min | 完整结果不变，短期有效 |
+| L2 Visual | `omnicart:visual:{md5(图片MD5+query前80字)}` | 1h | 商品图不会变，最稳定 |
+| L3 Rewrite | `omnicart:rewrite:{md5(原始查询)}` | 30min | 同查询→同关键词 |
+| L4 Search | `omnicart:search:{md5(query+品类+价格区间+top_k)}` | 5min | 商品库相对稳定 |
+
+关键设计：Visual 层用**图片内容 MD5**而非 URL，因为同一张图可能走不同路径上传。
+
+### Q: 核心实现 — get-or-compute 模式
+
+```python
+# backend/app/core/cache.py — 核心 15 行
+async def cached(key: str, ttl: int, factory: Callable) -> Any:
+    redis = await get_redis()
+    if redis is None:               # Redis 不可用 → 透明跳过
+        return await factory()
+
+    raw = await redis.get(key)      # 查缓存
+    if raw is not None:
+        _stats["hits"] += 1          # 命中
+        return json.loads(raw)
+
+    _stats["misses"] += 1
+    result = await factory()        # 未命中 → 调真实逻辑
+    await redis.setex(key, ttl, json.dumps(result))  # 异步写入
+    return result
+```
+
+**设计要点**：
+- `factory` 是 async callable，只在 cache miss 时调用 — 零预热、零空跑
+- Redis 连接失败 → `get_redis()` 返回 `None` → 直接调 factory — 完全不影响业务
+- `json.dumps(result, default=str)` 兼容任何 Pydantic/ORM 对象序列化
+
+### Q: Visual Agent 缓存接入（最贵操作优化）
+
+```python
+# backend/app/agents/visual_agent.py — parse() 改为 async
+async def parse(self, image_url: str, user_query: str = "") -> VisualResult:
+    image_bytes = filepath.read_bytes()
+    img_hash = hashlib.md5(image_bytes).hexdigest()[:12]  # 图片指纹
+    cache_key = make_key("visual", img_hash, user_query[:80])
+
+    async def _do_parse():
+        # 原始 Qwen-VL API 调用逻辑（不变）
+        raw = self._gateway.vision(...)
+        return self._parse_json(raw)
+
+    return await cached(cache_key, REDIS_CACHE_TTL_VISUAL, _do_parse)
+```
+
+`parse()` 从同步改为 async，调用方（graph.py / recommend.py）统一用 `await`。LangGraph 从 `invoke()` 改为 `ainvoke()` 以支持异步节点，可与同步节点混合编排。
+
+### Q: 优雅降级策略
+
+```
+.env 中 REDIS_URL 留空
+  → USE_REDIS = False
+  → get_redis() 直接返回 None
+  → 所有 cached() 调用直接执行 factory
+  → 业务逻辑不受任何影响
+  → 日志：Redis disabled — no performance boost
+
+Redis 中途宕机
+  → redis.get() / redis.setex() 抛异常
+  → except 捕获 → 返回 factory() 结果
+  → 写入失败 → 日志记录，下次请求仍 miss
+  → 不抛异常到上层
+
+Redis 恢复
+  → 下次请求自动重连
+  → 冷启动 → 逐步填充缓存
+```
+
+**零破坏原则**：缓存层对业务完全透明，Redis 不存在或不稳定的情况下，系统行为与未加缓存时完全一致。
+
+### Q: 命中率监控
+
+```bash
+# 实时查看缓存统计
+curl http://localhost:8006/api/cache/stats
+# → {"redis": true, "stats": {"hits": 142, "misses": 38, "hit_rate": 0.789}}
+```
+
+`/api/cache/stats` 端点内置在 health 模块中，返回 Redis 连接状态 + 命中/未命中计数 + 命中率，无需额外监控面板。
+
+### Q: 连接管理
+
+- **连接池**：`redis.asyncio.from_url(url, max_connections=20)`，复用连接不频繁握手
+- **超时**：`socket_connect_timeout=2, socket_timeout=2`，2 秒连不上视为不可用
+- **生命周期**：FastAPI startup → `init_redis()`，shutdown → `close_redis()`，跟随应用启停
+- **序列化**：`decode_responses=True` + JSON，人类可读，方便 `redis-cli` 直接调试
+
+### Q: TTL 为什么这样定？
+
+| 层级 | TTL | 决策依据 |
+|------|-----|---------|
+| Visual | 3600s (1h) | 商品图片是静态资源，更改频率极低 |
+| Search | 300s (5min) | 商品库不会频繁变更，但 5 分钟容忍新增/调价 |
+| Rewrite | 1800s (30min) | 同查询→同关键词是确定性映射，半小时内完全可复用 |
+| Workflow | 300s (5min) | 包含多种子结果，TTL 不宜过长以保证新鲜度 |
+
+所有 TTL 可通过 `.env` 环境变量单独配置，无需改代码。
+
+### Q: 为什么不用内存缓存（functools.lru_cache）？
+
+| 维度 | Redis | LRU 内存缓存 |
+|------|-------|-------------|
+| 跨请求共享 | ✅ 所有 worker/进程共享 | ❌ 进程隔离，命中率低 |
+| 持久化 | ✅ 重启不丢失 | ❌ 重启清空 |
+| 内存管理 | Redis 独立内存，不抢应用 | 和应用抢内存 |
+| 分布式 | 天然支持多实例 | 不支持 |
+| 监控 | redis-cli / MONITOR 命令 | 无 |
+
+参赛项目用 Redis 也体现工程素养，比 `lru_cache` 更专业。
+
+### Q: async 改造的范围
+
+原系统中 `visual_agent.parse()`、`retrieval_agent.execute()`、`text_retriever.search()` 等核心方法均为同步。为接入 async Redis 缓存，做了最小化 async 改造：
+
+| 方法 | 原 | 改后 | 影响范围 |
+|------|----|------|---------|
+| `VisualAgent.parse()` | sync | async | graph.py 节点 + recommend.py |
+| `RetrievalAgent._llm_extract_keywords()` | sync | async | retrieval_agent 内部 |
+| `RetrievalAgent.execute()` | sync | async | graph.py 节点 |
+| `TextRetriever.search()` | sync | async | retrieval_agent + recommend.py |
+| `TextRetriever.hybrid_search()` | sync | async | retrieval_agent + baseline 脚本 |
+| `run_workflow()` | async→`invoke` | async→`ainvoke` | recommend.py v2 端点 |
+
+LangGraph 支持 sync/async 节点混合编排 — Router、Decision、Response 等节点保持同步不变。31 个单元测试全部适配 `@pytest.mark.asyncio`，0 失败。
+
+---
+
+## 十六、全链路数据流（最新版）
 
 ```
 1. 用户输入"推荐一款500以内的降噪蓝牙耳机"或拍照上传
-2. Router Agent → 闲聊检测(16词) or 购物意图(6种)，约束抽取
-3. PreferenceMemory → 合并/清除历史偏好（话题切换自动清除）
-4. [可选] Visual Agent → Qwen-VL → 三级降级 → Visual Grounding字段绑定
-5. Retrieval Agent → LLM提取关键词"蓝牙耳机 降噪 500元 无线"
-   ├─ Text: Qdrant 1024d ANN + jieba RRF k=60 → 候选商品
+2. [Redis L1] Workflow 缓存检查 → 命中直接返回
+3. Router Agent → 闲聊检测(16词) or 购物意图(6种)，约束抽取
+4. PreferenceMemory → 合并/清除历史偏好（话题切换自动清除）
+5. [可选] Visual Agent → [Redis L2] 图片缓存检查 → Qwen-VL → 三级降级
+6. Retrieval Agent → [Redis L3] LLM改写缓存检查 → 关键词提取
+   ├─ Text: [Redis L4] 检索缓存检查 → Qdrant 1024d ANN + jieba RRF k=60
    ├─ Review: ≤2★差评 + ≥4★好评 → 证据
    └─ Policy: FAQ关键词匹配 → 证据
-6. Reranker → Qwen3-Rerank 语义精排（失败保持原序）
-7. Evidence Checker → 按intent检查证据充足性 → sufficiency_report
-8. Decision Agent → 硬约束过滤 + 7维评分 + 风险标签 + evidence绑定
-9. Context Compiler → 编译结构化上下文（含Counterfactual反事实建议）
-10. Response Agent → 闲聊独立Prompt or 购物LLM回答生成 + 模板兜底
-11. Response Guard → 5项守门验证 → guard_warnings
-12. Decision Harness → 7项统一校验 → harness_report
-13. State Checkpoint → JSON文件持久化guard节点
-14. Android展示: MessageBubble + ProductCard(始终有加购按钮) + ProductDetailSheet(6Tab) + AgentInsightSheet(10Tab)
+7. Reranker → Qwen3-Rerank 语义精排（失败保持原序）
+8. Evidence Checker → 按intent检查证据充足性 → sufficiency_report
+9. Decision Agent → 硬约束过滤 + 7维评分 + 风险标签 + evidence绑定
+10. Context Compiler → 编译结构化上下文（含Counterfactual反事实建议）
+11. Response Agent → 闲聊独立Prompt or 购物LLM回答生成 + 模板兜底
+12. Response Guard → 5项守门验证 → guard_warnings
+13. Decision Harness → 7项统一校验 → harness_report
+14. State Checkpoint → JSON文件持久化guard节点
+15. Android展示: MessageBubble + ProductCard(始终有加购按钮) + ProductDetailSheet(6Tab) + AgentInsightSheet(10Tab)
 ```
 
 ---
 
-## 十五、关键 Bug 及修复（答辩时可展示工程能力）
+## 十七、LLM 全链路可观测性（新增 V2 基础设施）
+
+### Q: 这个功能做什么？
+
+Gateway 是全部 LLM 调用的唯一瓶颈（chat / vision / embed / rerank），在每个调用入口自动记录完整追踪数据，无需业务代码改动。
+
+### Q: 记录什么数据？
+
+每条 LLM 调用记录 13 个字段：
+
+| 字段 | 来源 | 示例 |
+|------|------|------|
+| span_id / trace_id | 自动生成 | `a1b2c3d4e5f6` |
+| name | 调用类型 | `qwen.chat` / `qwen.vision` / `qwen.embed` / `qwen.rerank` |
+| capability | 能力名 | `intent_understanding` / `visual_understanding` |
+| model | 模型名 | `qwen-plus` / `qwen-vl-plus` |
+| system_prompt / user_prompt | 完整的 prompt（截断 4000 字符） |
+| response | 完整响应（截断 4000 字符） |
+| tokens_input / tokens_output | 从 API usage 提取，不可用时字符数/3.5 估算 |
+| latency_ms | `time.perf_counter()` 精确计时 |
+| status | `success` / `error` / `mock` / `fallback` |
+| mock_mode | 是否为 Mock 数据 |
+| timestamp | ISO 8601 时间戳 |
+
+### Q: 存储与查询
+
+- **存储**：`data/traces/traces-{date}.json`，按日期分文件，单文件 500 条自动轮转
+- **写入**：异步缓冲（10条或30秒刷新），不阻塞 LLM 调用
+- **列表查询**：`GET /api/observability/traces?limit=50&name=qwen.chat&status=error`
+- **单条查询**：`GET /api/observability/traces/{span_id}`
+- **聚合统计**：`GET /api/observability/stats?hours=24` → 总调用次数、token 消耗、P50/P95 延迟、错误率、按 capability/model 分组
+- **清除**：`DELETE /api/observability/traces?before=2026-05-23T00:00:00`
+
+### Q: 追踪失败会影响业务吗？
+
+不会。`Gateway._trace()` 中所有异常静默捕获，追踪记录失败不会抛出到上层。这是在 Gateway 方法最后的 `finally` 逻辑中以 `try/except` 保护的。
+
+### Q: 怎么接入的？
+
+四个 Gateway 方法改为 async，在每个方法内统一调用 `await self._trace(...)`：
+
+```python
+async def chat(self, capability, prompt, system=""):
+    t0 = time.perf_counter()
+    try:
+        response = real_chat_logic(...)
+        await self._trace(name, capability, model, system, prompt, response,
+                          t0, status="success")
+        return response
+    except Exception as e:
+        await self._trace(name, capability, model, system, prompt, "", t0,
+                          status="error", error=str(e))
+        raise
+```
+
+业务代码零改动 — Router / Retrieval / Response Agent 原本就调 `gateway.chat()`，现在自动被追踪。
+
+### Q: 追踪数据示例
+
+```json
+{
+  "span_id": "a1b2c3d4e5f6",
+  "trace_id": "f6e5d4c3b2a1",
+  "name": "qwen.chat",
+  "capability": "intent_understanding",
+  "model": "qwen-plus",
+  "system_prompt": "你是一个购物决策路由Agent...",
+  "user_prompt": "推荐一款500以内的蓝牙耳机",
+  "response": "{\"intent\": \"recommend\", \"category\": \"数码电子\"...}",
+  "tokens_input": 245,
+  "tokens_output": 128,
+  "latency_ms": 342,
+  "status": "success",
+  "mock_mode": false,
+  "timestamp": "2026-05-23T14:30:00"
+}
+```
+
+### Q: 统计示例
+
+```json
+{
+  "window_hours": 24,
+  "total_calls": 156,
+  "errors": 3,
+  "error_rate": 0.0192,
+  "mock_calls": 0,
+  "tokens_input": 45890,
+  "tokens_output": 12450,
+  "tokens_total": 58340,
+  "latency_avg_ms": 312,
+  "latency_p50_ms": 280,
+  "latency_p95_ms": 850,
+  "by_capability": {"chat_generation": 98, "intent_understanding": 42, "visual_understanding": 16},
+  "by_model": {"qwen-plus": 140, "qwen-vl-plus": 16}
+}
+```
+
+---
+
+## 十八、关键 Bug 及修复（答辩时可展示工程能力）
 
 | # | 问题 | 根因 | 修复 |
 |---|------|------|------|
@@ -338,7 +795,7 @@ NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` /
 
 ---
 
-## 十六、常见追问
+## 十九、常见追问
 
 ### Q: 怎么保证推荐不是胡说？
 
@@ -363,7 +820,7 @@ NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` /
 
 ---
 
-## 十七、技术亮点总结（答辩收尾）
+## 二十、技术亮点总结（答辩收尾）
 
 | # | 亮点 | 一句话 |
 |---|------|--------|
@@ -384,6 +841,9 @@ NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` /
 | 15 | sync-async 桥接 | nest_asyncio 让同步 Agent 调异步 PG/Qdrant |
 | 16 | 闲聊+购物双模 | 日常对话不推商品，购物意图精准推荐 |
 | 17 | Visual Grounding | 字段级视觉证据绑定，像素到数据可追溯 |
+| 18 | **Redis 四级缓存** | Visual/Search/Rewrite/Workflow 四级加速，首次后秒开，Redis 不可用自动降级 |
+| 19 | **LLM 可观测性** | Gateway 全量追踪 + token 统计 + P50/P95 延迟 + 错误率，零业务侵入 |
+| 20 | **标准 MCP Protocol** | 8 Tool JSON-RPC 2.0 + stdio/SSE 双传输 + Claude Desktop/Cursor 可接入 |
 
 ---
 
@@ -413,6 +873,14 @@ NetworkX 商品-证据-风险图关系。`get_supporting_evidence(product_id)` /
 ### 基础设施
 | 文件 | 职责 |
 |------|------|
+| `core/redis_client.py` | Redis 连接池管理 + 健康检查 + 生命周期 |
+| `core/cache.py` | 四级缓存核心: get-or-compute + 命中率统计 + 批量失效 |
+| `observability/collector.py` | LLM 全链路追踪: TraceCollector + LLMSpan + 本地 JSON 存储 |
+| `api/observability.py` | 可观测性 API: 追踪查询 + 聚合统计 + 数据清除 |
+| `mcp/server.py` | 标准 MCP Server: stdio + SSE/HTTP 双传输, JSON-RPC 2.0 |
+| `mcp/tools.py` | 8 个 MCP Tool: 定义(JSON Schema) + Handler + 连通性测试 |
+| `scripts/run_mcp_server.py` | MCP Server 启动脚本: --http 切换 SSE 模式 |
+| `scripts/test_mcp.py` | 8 个 MCP Tool 全量连通性测试 |
 | `skills/registry.py` | Skill Registry 8 Skill |
 | `tools/manager.py` | ToolManager 8 Tool + 权限 + V1 只读 |
 | `graph/evidence_graph.py` | NetworkX 证据图 |

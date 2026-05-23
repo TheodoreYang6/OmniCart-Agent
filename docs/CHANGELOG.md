@@ -1,5 +1,43 @@
 # Changelog
 
+## [V2] 长期偏好记忆 + Evaluation Dashboard — 2026-05-23 (下午)
+
+### Added
+- **用户长期偏好记忆**：跨会话 UserProfile + 三级行为信号(搜索/加购/结账) + 时间衰减(30天半衰期) + EMA预算学习 + PG/JSON双持久化
+- **Evaluation Dashboard**：Web 可视化面板 + Chart.js + 10 golden queries + 历史趋势 + 统计卡片
+- **数据集扩充**：新增 5 个平价数码产品（99-199元）
+
+### Changed
+- WorkflowState 新增 `user_id` 字段，RecommendRequest 新增 `user_id`
+- 加购时自动记录长期偏好
+- Router 节点接入长期记忆合并
+- eval API 新增 4 个端点 + Dashboard HTML 页面
+
+---
+
+## [V2] Redis 缓存 + LLM 可观测性 + Qwen-Omni 语音 + 标准 MCP — 2026-05-23 (上午)
+
+### Added
+- **Redis 四级缓存**：Visual(1h) / Search(5min) / LLM Rewrite(30min) / Workflow(5min) 四级，get-or-compute 模式，Redis 不可用自动降级
+- **LLM 全链路可观测性**：Gateway 全量接入(chat/vision/embed/rerank)，13 字段追踪，本地 JSON 存储，P50/P95 聚合统计 API
+- **Qwen-Omni 语音导购**：ASR 文字转写 → Agent Workflow → TTS 语音回复，Android 全屏语音输入 + 长按录音
+- **标准 MCP Server/Client**：8 Tool JSON-RPC 2.0，stdio + SSE/HTTP 双传输，Claude Desktop/Cursor 可接入
+- **数据集扩充**：新增 5 个平价数码产品（99-199元），填补 500 元以下空白
+- **语音文字清洗**：`_clean_transcription()` 逐句截断 AI 废话后缀
+- **产品仓库降级修复**：`_check_pg()` PG 不可用时自动切换 JSON 模式
+
+### Changed
+- Gateway 4 方法全部 async 化（chat/vision/embed/rerank）以支持缓存和追踪
+- LangGraph Workflow 节点 async 化，`invoke()` → `ainvoke()`
+- 语音流程重构：ASR 先行 → 文字即时显示 → 复用 Agent 推荐通道
+- 偏好设置 API 修复：`Map<String, Any?>` 加 `@JvmSuppressWildcards`
+
+### Fixed
+- 我的订单/收藏无响应 → 订单加提示，收藏删除
+- 语音识别中加 loading 转圈指示器
+
+---
+
 ## [V1-Core] Phase 5 完成：参赛打磨 — 2026-05-22
 
 ### Added
