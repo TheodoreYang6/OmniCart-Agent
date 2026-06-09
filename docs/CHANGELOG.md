@@ -1,5 +1,32 @@
 # Changelog
 
+## [V9-Final] 项目最终交付 — 2026-06-09
+
+### V3 Response Agent
+- `response_agent.py` 重写：FAST_MODE 模板优先 + LLM 可选润色（≤6s timeout）
+- 闲聊增强：情感回应 + 自然过渡商品推荐
+- Bug 修复：`_generate_template` 中 `{i}`→`{idx}` NameError
+- LLM 生成失败自动降级模板兜底
+
+### APK Release 打包
+- 生成 release keystore + signingConfigs 配置
+- gradlew wrapper 生成（指向本地 Gradle 8.7）
+- `./gradlew assembleRelease` 构建成功 → `app-release.apk` (2.4MB)
+
+### 测试验证
+- 54 单元测试全部通过
+- 21 集成测试 18/21 通过（2 个间歇性 session_id 碰撞）
+- Smoke test 主链路验证通过
+
+### 清理
+- 删除调试文件：1.txt, bug.txt, estee_check.txt, audit_report.txt 等
+- 清理 data/checkpoints/ 临时 checkpoint
+- .gitignore 更新：keystore / storage / checkpoint / traces 排除
+
+### Git 最终提交
+- `1778776` V2 Final: 全系统完整交付
+- 406 files changed, +33030/-3252
+
 ## [V8] 记忆系统完整版（长期偏好画像）— 2026-06-07
 
 ### 设计

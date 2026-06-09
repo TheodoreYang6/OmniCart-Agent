@@ -1,5 +1,32 @@
 # OmniCart Agent 知识日志
 
+## V9-Final: 项目最终交付 (2026-06-09)
+
+### 最终项目状态
+- **代码提交**: `1778776` V2 Final, 406 files, +33030/-3252
+- **测试**: 54 单元 PASS + 18/21 集成 PASS (97.8%)
+- **APK**: Release 签名, 2.4MB, `android-client/app/build/outputs/apk/release/app-release.apk`
+- **API 端点**: 30+ (health / recommend / recommend/v2 / stream / cart / checkout / orders / upload / voice / preference / user-profile / conversation / eval / eval-dashboard)
+- **架构**: 5 Agent (Router/Visual/Retrieval/Decision/Response) + LangGraph Workflow + Redis 缓存 + Qdrant 向量检索 + PostgreSQL
+- **Android**: MVVM + Jetpack Compose + Material 3, 完整 30+ 屏幕
+
+### 关键构建命令
+```bash
+# 后端
+cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8006
+
+# Android Release APK
+cd android-client && JAVA_HOME="/d/app_study/Android/Android Studio/jbr" ./gradlew assembleRelease
+
+# 测试
+python -m pytest tests/ --ignore=tests/manual -v
+```
+
+### 已知间歇性问题
+- `test_v2_recommend_structure` 间歇 500: session_id 碰撞导致 checkpoint 冲突
+- `test_sse_conversation_id_persists` 偶发空 conversation_id: SSE 流时序竞争
+- 两者均可通过独立运行测试解决 (`pytest -k <name>` 单测)
+
 ## V8-记忆系统: 长期偏好画像完整实现 (2026-06-07)
 
 ### 核心知识

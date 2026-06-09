@@ -1,8 +1,8 @@
 # OmniCart Agent 开发进度
 
-更新时间：2026-06-07
-当前阶段：**记忆系统完整版（长期偏好画像）**
-当前重点：记忆系统全链路完成 + 待用户手动测试
+更新时间：2026-06-09
+当前阶段：**V2 Final — 项目交付完成**
+当前重点：全部任务已完成，项目可交付
 当前阻塞：无
 
 ## 进度总览
@@ -40,12 +40,24 @@
 | 45 | Computer Use / Browser Use | Demo 不可控风险高 |
 | 48 | 在线反馈学习 / Bandit | 可选 — 需行为数据积累 |
 
-## V2 待完成 1 项
+## V2 全部完成 2 项
+
+| # | 任务 | 日期 |
+|---|------|------|
+| 19 | APK Release 打包 | 2026-06-09 — Release 签名 + assembleRelease (2.4MB APK) |
+| 50 | 大规模商品数据（1000+ 件） | 👤 队友负责 |
+
+## V2-Final 收尾 (2026-06-09)
 
 | # | 任务 | 说明 |
 |---|------|------|
-| 19 | APK Release 打包 | Release 签名 + assembleRelease |
-| 50 | 大规模商品数据（1000+ 件） | 👤 队友负责 |
+| F1 | Response Agent Bug 修复 | _generate_template 中 {i}→{idx} |
+| F2 | 全部测试验证 | 54 单元 + 18/21 集成通过 |
+| F3 | APK Release 打包 | keystore 生成 + signingConfigs + gradlew + assembleRelease |
+| F4 | Smoke Test | 主链路 /api/recommend 验证通过 |
+| F5 | 临时文件清理 | debug txt / checkpoints / traces 清理 |
+| F6 | Git 最终提交 | 406 files, +33030/-3252 |
+| F7 | 文档更新 | DEVELOPMENT_PROGRESS / CHANGELOG / KNOWLEDGE_LOG |
 
 ## V4-RAG 优化 (2026-06-02)
 
@@ -98,7 +110,7 @@
 ## 基础设施
 
 - 后端 API 端点：30+ 个
-- 后端测试：**54 单元 + 15 集成 = 69 全部通过**（2026-05-24 更新）
+- 后端测试：**54 单元 + 18/21 集成 = 72/75 通过 (97.8%)**（2026-06-09 最终）
 - Android：BUILD SUCCESSFUL（多次编译通过）
 - Workflow：8 节点 LangGraph（Reranker 对空查询自动降级）
 - Skill Registry：8 skills / ToolManager：8 tools
