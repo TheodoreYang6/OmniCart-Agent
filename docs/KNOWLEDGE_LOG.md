@@ -1,5 +1,134 @@
 # OmniCart Agent 知识日志
 
+## V8-记忆系统: 长期偏好画像完整实现 (2026-06-07)
+
+### 核心知识
+
+**1. search_hints 不能污染用户 query**
+- 场景关键词（出差→便携/大容量）塞进搜索 query 会完全改变检索意图
+- 搜"手机" + 场景关键词"大容量 快充" → 充电宝排在手机前面
+- 解决：search_hints 仅用 must_tags（用户明确要的特性），品牌/场景仅放 context_prompt
+
+**2. LLM 解析需要 _normalize_fields 兜底**
+- LLM 可能返回 schema 之外的自创字段（如 skin_type, hair_type）
+- 不能丢弃这些信息，必须映射到已知字段
+- skin_type → must_tags（"油皮肤质适用"），hair_type → must_tags（"干性发质适用"）
+
+**3. 一张 JSONB 表足够，不需要多表原子记忆**
+- 用户偏好不是高频增长的知识图谱，一人一行 JSONB 够用
+- 数组 union 去重标量覆盖合并策略简单有效
+
+**4. httpx 在 Windows 上走系统代理导致本地连接失败**
+- qdrant_client 底层用 httpx，会 pickup 系统代理设置
+- 解决：设置 NO_PROXY=localhost,127.0.0.1,::1
+- urllib 默认不走代理，所以 curl 能通但 Python 不通
+
+**5. Retrofit + Gson 不能直接反序列化 JSON null 为 Kotlin nullable**
+- 返回类型必须是 `Response<T?>`，通过 `response.isSuccessful` + `response.body()` 取值
+- 直接声明 `T?` 会在收到 null 时抛异常
+
+## V4-RAG: RAG全链路优化与文档 (2026-06-02)
+
+完成时间：2026-06-02 | 验证：V1 Stream全链路通过 (5 products, 20 evidence, 5/5 chunks有text)
+
+### 核心知识
+
+**1. Chunk级检索 vs 产品级检索**
+- 产品级：整个title+description编码为一个向量，细节信号被淹没
+- Chunk级：105件商品→1133 chunks (summary+105, mkt+105, faq+454, rev+469)，每个chunk是独立语义单元
+- 用户搜"适合跑步"命中FAQ chunk "Q:适合运动吗？A:IPX5防水跑步健身都合适"，产品级搜索会漏掉
+- Qdrant HNSW ANN → 本地暴力余弦(35MB) → 产品级Qdrant → 产品级本地 → 子串匹配 五级降级
+
+**2. 本地Chunk缓存的结构缺陷与修复**
+- `product_chunk_embeddings.json` (35.2MB, 1133 chunks) 的payload中**没有text字段** (0/1133)
+- Qdrant可用时 `with_payload=True` 返回text，但本地缓存降级时matched_chunks的text为空
+- 修复：新增 `_reconstruct_chunk_text()` 从已加载的product.rag_knowledge重建原文
+- 四种chunk类型各有重建逻辑：summary(标题+描述)/mkt(营销描述)/faq(Q+A)/rev(用户+评分+内容)
+
+**3. Embedding和Reranker的分工**
+- Embedding (Bi-Encoder): query和doc各自独立编码→余弦距离，快但粗。用于1133→TOP30粗筛
+- Reranker (Cross-Encoder): query+doc联合输入→交叉注意力→直接输出相关性分数，慢但准。用于TOP10精排
+- 两者必须配合：Embedding先粗筛（毫秒级），Reranker再精排（200ms级）
+
+**4. Reranker文档构建的截断策略**
+- 截断太短(FAQ答案120字)→丢失关键语义 → O8.1提升到300字
+- 截断太长→Reranker API延迟增加。当前平衡：描述300/FAQ答案300/评论200
+- Reranker失败静默降级，保持原排序不阻塞链路
+
+**5. 补充证据搜索的语义化**
+- 旧方案：关键词子串匹配 `sum(1 for w in query_words if w in text)` — 中文"飞机"≠"航空"
+- 新方案：Embedding余弦相似度→降级关键词匹配（兼容无Embedding环境）
+- 触发条件：主检索<3件时，从faq/rev chunk反向发现遗漏商品
+
+**6. V0 vs V1 两条API路径**
+- `/api/recommend` → V0旧路径 (产品级搜索+旧评分，无chunk/无Reranker)
+- `/api/recommend/stream` → V1 LangGraph Workflow (chunk搜索+Reranker+EvidenceCheck+9维评分)
+- 旧路径仍可用但功能受限，新功能只在stream端点生效
+
+---
+
+## V2-Complete: 全量 Bug 修复与代码优化 (2026-05-24)
+
+完成时间：2026-05-24 | 验证：54/54 单元 + 7/7 V2 集成 + Smoke 全部通过
+
+### 核心知识
+
+**1. httpx AsyncClient 全链路异步化**
+- 4 个模型网关 (chat/vision/embed/rerank) 全部从 `httpx.post()` 切换为 `httpx.AsyncClient`
+- 模块级 `_get_client()` 延迟初始化，复用连接池，减少 TLS 握手
+- gateway.py 中 4 处调用全部添加 `await`
+- **教训**: FastAPI async 端点中调用同步 httpx 会阻塞事件循环长达 60s
+
+**2. PG 仓库 AsyncBridge 统一**
+- 5 个 PG 仓库中完全相同的 `_run()` + `_nest_patched` 样板代码→`database.py` 的 `run_async()`
+- `_run()` 模式: try `get_running_loop()` → RuntimeError 则 `asyncio.run()` → 否则 `nest_asyncio.apply()` + `run_until_complete()`
+
+**3. 共享规则模块设计**
+- `app/decision/rules.py` 集中管理: `CATEGORY_RULES` (4品类×100+关键词)、`detect_budget()`、`detect_scenario()`、`validate_image_magic()`
+- recommend.py (V0) 和 router_agent.py (V2) 共享同一套规则
+- **教训**: 两处独立维护的关键词列表会随时间漂移，导致 V0/V2 品类识别不一致
+
+**4. 上传安全 — 魔数校验**
+- 文件头魔数: PNG `\x89PNG`、JPEG `\xff\xd8\xff`、WebP `RIFF....WEBP`、GIF `GIF8`
+- 必须先校验魔数再检查 `content_type`（客户端可控）
+- 空内容和过短内容都需要特殊处理
+
+**5. `__getattr__` 模块惰性加载**
+- `product_repo.py` 使用 `__getattr__` 延迟解析 `ProductRepository` 类引用
+- 避免 `import` 时触发 `_check_pg()` 网络连接（3s 超时阻塞）
+
+**6. Android 安全关键配置**
+- `network_security_config.xml`: 仅 `127.0.0.1`/`10.0.2.2`/`localhost` 允许明文
+- `FileProvider`: path 从 `"."` 收窄到 `"camera/"`
+- `HttpLoggingInterceptor`: `BuildConfig.DEBUG` 控制 BODY vs NONE
+- `AndroidViewModel.onCleared()`: 释放 MediaRecorder 原生资源
+
+**7. LangGraph 混合同步/异步节点**
+- `ainvoke()` 自动将同步节点放入线程池执行，不会阻塞事件循环
+- `_node_decision` 为同步节点是安全的（LangGraph 原生支持）
+
+### 文件清单
+- `app/decision/rules.py` — 共享规则模块（新增）
+- `app/core/database.py` — `run_async()` 桥接函数
+- `app/model_gateway/qwen_chat.py` — `httpx.AsyncClient`
+- `app/model_gateway/qwen_vision.py` — `httpx.AsyncClient`
+- `app/model_gateway/qwen_embedding.py` — `httpx.AsyncClient`
+- `app/model_gateway/qwen_reranker.py` — `httpx.AsyncClient`
+- `app/model_gateway/qwen_omni.py` — 音频污染修复
+- `app/model_gateway/mock_model.py` — `mock_vision_parse()` 实现
+- `app/repositories/pg_cart_repo.py` — `batch_remove()` + 共享桥接
+- `app/repositories/pg_product_repo.py` — 共享桥接 + `plainto_tsquery`
+- `app/repositories/pg_preference_repo.py` — 共享桥接
+- `app/repositories/user_repo.py` — 共享桥接
+- `app/repositories/address_repo.py` — 共享桥接
+- `app/api/upload.py` — 魔数校验
+- `app/api/eval.py` — 路径穿越防护
+- `app/api/voice.py` — 错误脱敏
+- `tests/unit/test_rules.py` — 23 个规则测试（新增）
+- `tests/integration/test_workflow_v2.py` — 7 个 V2 集成测试（新增）
+
+---
+
 ## V2-3: 用户长期偏好记忆
 
 完成时间：2026-05-23 | 验证：8 步行为模拟测试 + 31/31 单元测试

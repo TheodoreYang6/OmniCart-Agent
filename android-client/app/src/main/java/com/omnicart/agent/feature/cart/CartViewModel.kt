@@ -7,6 +7,7 @@ import com.omnicart.agent.core.network.ApiClient
 import com.omnicart.agent.core.network.CartItemResponse
 import com.omnicart.agent.core.network.CheckoutRequest
 import com.omnicart.agent.core.network.UpdateCartRequest
+import com.omnicart.agent.feature.auth.AuthManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +23,7 @@ data class CartItemUi(
     val imageUrl: String,
     val quantity: Int,
     val selected: Boolean,
+    val skuLabel: String = "",
 )
 
 data class CartUiState(
@@ -38,15 +40,27 @@ class CartViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(CartUiState(isLoading = true))
     val uiState: StateFlow<CartUiState> = _uiState.asStateFlow()
 
+    // P0-6: session/conversation context for behavior event recording
+    private var sessionId: String = ""
+    private var conversationId: String = ""
+
+    fun setSessionContext(sessionId: String, conversationId: String) {
+        this.sessionId = sessionId
+        this.conversationId = conversationId
+    }
+
     init {
         loadCart()
     }
+
+    private val userId: String get() = AuthManager.effectiveUserId
 
     fun loadCart() {
         _uiState.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
             try {
-                val response = ApiClient.api.getCart()
+                val response = ApiClient.api.getCart(
+                    userId = userId, sessionId = sessionId, conversationId = conversationId)
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -70,8 +84,11 @@ class CartViewModel : ViewModel() {
         updateStats()
         viewModelScope.launch {
             try {
-                ApiClient.api.updateCartItem(id, UpdateCartRequest(selected = !item.selected))
-            } catch (_: Exception) { }
+                ApiClient.api.updateCartItem(id, UpdateCartRequest(selected = !item.selected),
+                    userId = userId, sessionId = sessionId, conversationId = conversationId)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "操作失败: ${e.message}") }
+            }
         }
     }
 
@@ -83,8 +100,11 @@ class CartViewModel : ViewModel() {
         updateStats()
         viewModelScope.launch {
             try {
-                ApiClient.api.selectAllCart(selected = newVal)
-            } catch (_: Exception) { }
+                ApiClient.api.selectAllCart(selected = newVal,
+                    userId = userId, sessionId = sessionId, conversationId = conversationId)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "操作失败: ${e.message}") }
+            }
         }
     }
 
@@ -97,8 +117,11 @@ class CartViewModel : ViewModel() {
         updateStats()
         viewModelScope.launch {
             try {
-                ApiClient.api.updateCartItem(id, UpdateCartRequest(quantity = newQty))
-            } catch (_: Exception) { }
+                ApiClient.api.updateCartItem(id, UpdateCartRequest(quantity = newQty),
+                    userId = userId, sessionId = sessionId, conversationId = conversationId)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "操作失败: ${e.message}") }
+            }
         }
     }
 
@@ -112,8 +135,11 @@ class CartViewModel : ViewModel() {
         updateStats()
         viewModelScope.launch {
             try {
-                ApiClient.api.updateCartItem(id, UpdateCartRequest(quantity = newQty))
-            } catch (_: Exception) { }
+                ApiClient.api.updateCartItem(id, UpdateCartRequest(quantity = newQty),
+                    userId = userId, sessionId = sessionId, conversationId = conversationId)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "操作失败: ${e.message}") }
+            }
         }
     }
 
@@ -122,8 +148,10 @@ class CartViewModel : ViewModel() {
         updateStats()
         viewModelScope.launch {
             try {
-                ApiClient.api.removeCartItem(id)
-            } catch (_: Exception) { }
+                ApiClient.api.removeCartItem(id, userId = userId, sessionId = sessionId, conversationId = conversationId)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "删除失败: ${e.message}") }
+            }
         }
     }
 
@@ -132,7 +160,8 @@ class CartViewModel : ViewModel() {
         if (selectedIds.isEmpty()) return
         viewModelScope.launch {
             try {
-                val response = ApiClient.api.checkout(CheckoutRequest(itemIds = selectedIds))
+                val response = ApiClient.api.checkout(
+                    CheckoutRequest(userId = userId, itemIds = selectedIds, sessionId = sessionId, conversationId = conversationId))
                 _uiState.update { state ->
                     state.copy(
                         items = state.items.filter { !it.selected },
@@ -172,4 +201,5 @@ private fun CartItemResponse.toUi() = CartItemUi(
     imageUrl = imageUrl,
     quantity = quantity,
     selected = selected,
+    skuLabel = skuLabel,
 )

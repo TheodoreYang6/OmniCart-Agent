@@ -59,3 +59,18 @@ logs/
 
 # ===== Uploads (generated at runtime) =====
 data/uploads/
+
+# ===== Security =====
+*.keystore
+*.jks
+*.p12
+
+# ===== Runtime Data =====
+storage/
+.qdrant-initialized
+data/checkpoints/
+data/traces/
+data/eval_runs/
+data/audit_output.json
+data/baseline_compare.json
+backend/data/

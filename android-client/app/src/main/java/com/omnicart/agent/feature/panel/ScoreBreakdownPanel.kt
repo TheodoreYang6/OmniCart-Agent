@@ -44,8 +44,8 @@ fun ScoreBreakdownPanel(breakdown: ScoreBreakdown?, finalScore: Double = 0.0, di
                 ScoreRow("场景匹配", breakdown.scenarioFit)
                 ScoreRow("规格匹配", breakdown.specMatch)
                 ScoreRow("评论置信度", breakdown.reviewConfidence)
-                ScoreRow("视觉相似度", breakdown.visualSimilarity)
-                ScoreRow("可用性", breakdown.availabilityScore)
+                ScoreRow("语义相关度", breakdown.visualSimilarity)
+                ScoreRow("性价比", breakdown.availabilityScore)
                 ScoreRow("风险惩罚", breakdown.riskPenalty, isPenalty = true)
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {

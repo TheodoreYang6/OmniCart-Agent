@@ -5,6 +5,15 @@ from pathlib import Path
 import httpx
 from app.core.config import QWEN_API_KEY, QWEN_BASE_URL
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=httpx.Timeout(60.0))
+    return _client
+
 
 class QwenVision:
     def __init__(self, model: str = "qwen-vl-plus", temperature: float = 0.3, max_tokens: int = 2048):
@@ -14,7 +23,7 @@ class QwenVision:
         self._temperature = temperature
         self._max_tokens = max_tokens
 
-    def analyze(self, image_path: str, prompt: str, system: str = "") -> str:
+    async def analyze(self, image_path: str, prompt: str, system: str = "") -> str:
         """解析单张图片"""
         image_data = self._encode_image(image_path)
 
@@ -29,9 +38,9 @@ class QwenVision:
             ],
         })
 
-        return self._call_api(messages)
+        return await self._call_api(messages)
 
-    def analyze_bytes(self, image_bytes: bytes, content_type: str, prompt: str, system: str = "") -> str:
+    async def analyze_bytes(self, image_bytes: bytes, content_type: str, prompt: str, system: str = "") -> str:
         """解析内存中的图片数据"""
         image_data = f"data:{content_type};base64,{base64.b64encode(image_bytes).decode()}"
 
@@ -46,10 +55,11 @@ class QwenVision:
             ],
         })
 
-        return self._call_api(messages)
+        return await self._call_api(messages)
 
-    def _call_api(self, messages: list[dict]) -> str:
-        resp = httpx.post(
+    async def _call_api(self, messages: list[dict]) -> str:
+        client = _get_client()
+        resp = await client.post(
             f"{self._base_url}/services/aigc/multimodal-generation/generation",
             headers={
                 "Authorization": f"Bearer {self._api_key}",
@@ -63,13 +73,11 @@ class QwenVision:
                     "max_tokens": self._max_tokens,
                 },
             },
-            timeout=60.0,
         )
         resp.raise_for_status()
         data = resp.json()
         msg = data["output"]["choices"][0]["message"]
         content = msg["content"]
-        # 多模态 API 返回的 content 是 list[dict]，需要提取文本部分
         if isinstance(content, list):
             return "".join(p.get("text", "") for p in content if "text" in p)
         return str(content)

@@ -16,6 +16,7 @@ class CartItemModel(Base):
     user_id: str = Column(String(64), nullable=False, index=True)
     product_id: str = Column(String(64), nullable=False)
     sku_id: str | None = Column(String(64), nullable=True)
+    sku_label: str = Column(String(256), default="")
     title: str = Column(String(256), default="")
     brand: str = Column(String(128), default="")
     price: float = Column(Numeric(10, 2), default=0.0)

@@ -14,6 +14,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.omnicart.agent.R
+import com.omnicart.agent.core.theme.AiBlueContainer
 
 enum class BubbleType { User, Assistant }
 
@@ -49,15 +50,21 @@ fun MessageBubble(
                 BubbleType.Assistant -> RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp)
             },
             color = when (type) {
-                BubbleType.User -> MaterialTheme.colorScheme.primaryContainer
-                BubbleType.Assistant -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                BubbleType.User -> MaterialTheme.colorScheme.primary
+                BubbleType.Assistant -> AiBlueContainer
             },
             modifier = Modifier.widthIn(max = 300.dp),
+            tonalElevation = if (type == BubbleType.User) 0.dp else 1.dp,
         ) {
             Text(
                 text = text,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 style = MaterialTheme.typography.bodyMedium,
+                color = if (type == BubbleType.User) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
             )
         }
     }

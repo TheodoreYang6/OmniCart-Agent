@@ -1,12 +1,6 @@
 from pydantic import BaseModel, Field
 
 
-class SkuProperty(BaseModel):
-    """SKU 属性键值对，如 {'存储': '256GB', '颜色': '宇宙橙'}"""
-    # 使用 dict 类型兼容任意属性名
-    pass
-
-
 class Sku(BaseModel):
     sku_id: str
     properties: dict[str, str] = Field(default_factory=dict)

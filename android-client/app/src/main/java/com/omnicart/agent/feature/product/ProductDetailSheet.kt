@@ -3,16 +3,21 @@ package com.omnicart.agent.feature.product
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddShoppingCart
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.omnicart.agent.core.model.DecisionResult
 import com.omnicart.agent.core.model.Product
+import com.omnicart.agent.core.theme.*
 
 enum class DetailTab(val label: String) {
     Recommend("推荐"),
@@ -32,9 +37,15 @@ fun ProductDetailSheet(
     traceSteps: List<Map<String, Any?>>,
     harnessReport: Map<String, Any?>,
     onDismiss: () -> Unit,
+    onAddToCart: ((skuId: String?, skuLabel: String, skuPrice: Double) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableStateOf(DetailTab.Recommend) }
+    // SKU 选择
+    val skus = product.skus.orEmpty()
+    var selectedSkuIndex by remember { mutableIntStateOf(if (skus.isNotEmpty()) 0 else -1) }
+    val selectedSku = skus.getOrNull(selectedSkuIndex)
+    val effectivePrice = selectedSku?.let { if (it.price > 0.0) it.price else product.price } ?: product.price
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -65,7 +76,7 @@ fun ProductDetailSheet(
 
             Box(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 when (selectedTab) {
-                    DetailTab.Recommend -> RecommendTab(product, decisionResult)
+                    DetailTab.Recommend -> RecommendTab(product, decisionResult, effectivePrice)
                     DetailTab.Evidence -> EvidenceTab(evidenceList)
                     DetailTab.Score -> ScoreTab(decisionResult)
                     DetailTab.Trace -> TraceTab(traceSteps)
@@ -73,12 +84,75 @@ fun ProductDetailSheet(
                     DetailTab.Harness -> HarnessTab(harnessReport)
                 }
             }
+
+            // 规格选择 + 加购
+            if (onAddToCart != null) {
+                if (skus.size > 1) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        skus.forEachIndexed { index, sku ->
+                            val label = sku.properties?.entries
+                                ?.joinToString(" · ") { "${it.key}:${it.value}" }
+                                ?: sku.skuId.ifBlank { "默认" }
+                            FilterChip(
+                                selected = index == selectedSkuIndex,
+                                onClick = { selectedSkuIndex = index },
+                                label = {
+                                    Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                },
+                                leadingIcon = if (index == selectedSkuIndex) {
+                                    { Icon(Icons.Default.CheckCircle, null, Modifier.size(14.dp)) }
+                                } else null,
+                                shape = RoundedCornerShape(8.dp),
+                            )
+                        }
+                    }
+                }
+                Surface(color = Surface, tonalElevation = 4.dp) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(
+                                if (skus.size > 1) "已选规格" else "商品价格",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                "¥%.2f".format(effectivePrice),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = PriceRed,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                val sku = skus.getOrNull(selectedSkuIndex)
+                                val skuId = sku?.skuId?.ifBlank { null }
+                                val skuLabel = sku?.properties?.entries
+                                    ?.joinToString(" · ") { "${it.key}:${it.value}" } ?: ""
+                                val skuPrice = sku?.price ?: product.price
+                                onAddToCart(skuId, skuLabel, skuPrice)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Icon(Icons.Default.AddShoppingCart, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("加购物车")
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun RecommendTab(product: Product, decision: DecisionResult?) {
+private fun RecommendTab(product: Product, decision: DecisionResult?, displayPrice: Double = product.price) {
     Column(modifier = Modifier.padding(16.dp)) {
         decision?.recommendationReason?.let { reason ->
             if (reason.isNotEmpty()) {
@@ -100,7 +174,7 @@ private fun RecommendTab(product: Product, decision: DecisionResult?) {
         Spacer(Modifier.height(8.dp))
         InfoRow("品牌", product.brand)
         InfoRow("品类", "${product.category} / ${product.subCategory}")
-        InfoRow("价格", "¥${product.price}")
+        InfoRow("价格", "¥$displayPrice")
         if (!product.skus.isNullOrEmpty()) InfoRow("规格数", "${product.skus.size} 个 SKU")
         product.ragKnowledge?.userReviews?.let { reviews ->
             InfoRow("用户评分", "${"%.1f".format(reviews.map { it.rating }.average())} / 5 (${reviews.size}条)")
@@ -150,8 +224,8 @@ private fun ScoreTab(decision: DecisionResult?) {
         ScoreBar("场景匹配", bd?.scenarioFit ?: 0.0)
         ScoreBar("规格匹配", bd?.specMatch ?: 0.0)
         ScoreBar("评论置信度", bd?.reviewConfidence ?: 0.0)
-        ScoreBar("视觉相似度", bd?.visualSimilarity ?: 0.0)
-        ScoreBar("可用性", bd?.availabilityScore ?: 0.0)
+        ScoreBar("语义相关度", bd?.visualSimilarity ?: 0.0)
+        ScoreBar("性价比", bd?.availabilityScore ?: 0.0)
         ScoreBar("风险惩罚", -(bd?.riskPenalty ?: 0.0))
     }
 }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
@@ -38,8 +39,8 @@ fun ChatInputBar(
     val canSend = queryText.isNotBlank() || hasImage
 
     Surface(
-        tonalElevation = 1.dp,
-        shadowElevation = 2.dp,
+        tonalElevation = 2.dp,
+        shadowElevation = 8.dp,
         modifier = modifier,
         color = MaterialTheme.colorScheme.surface,
     ) {
@@ -49,12 +50,11 @@ fun ChatInputBar(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 左侧：相机按钮（扁平线条风格）
             FlatIconButton(
                 icon = Icons.Filled.CameraAlt,
                 onClick = onCameraClick,
                 enabled = enabled,
-                contentDescription = "拍照/相册",
+                contentDescription = "拍照或相册",
             )
 
             Spacer(modifier = Modifier.width(4.dp))
@@ -66,7 +66,7 @@ fun ChatInputBar(
                 modifier = Modifier.weight(1f),
                 placeholder = {
                     Text(
-                        "输入购物需求...",
+                        "说说想买什么、预算和使用场景",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 },
@@ -77,8 +77,8 @@ fun ChatInputBar(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 ),
             )
 
@@ -91,7 +91,8 @@ fun ChatInputBar(
                     icon = Icons.Filled.Send,
                     onClick = onSend,
                     enabled = enabled,
-                    contentDescription = "发送",
+                    contentDescription = "发送需求",
+                    emphasized = true,
                 )
             } else {
                 // 无内容时显示语音 + 加号
@@ -102,7 +103,7 @@ fun ChatInputBar(
                         .clip(CircleShape)
                         .background(
                             if (isRecording) MaterialTheme.colorScheme.errorContainer
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                         )
                         .pointerInput(Unit) {
                             detectTapGestures(
@@ -147,15 +148,26 @@ private fun FlatIconButton(
     onClick: () -> Unit,
     enabled: Boolean,
     contentDescription: String,
+    emphasized: Boolean = false,
 ) {
-    IconButton(onClick = onClick, enabled = enabled) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = if (emphasized) {
+            Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+        } else Modifier,
+    ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = if (enabled)
-                MaterialTheme.colorScheme.onSurfaceVariant
-            else
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+            tint = when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                emphasized -> MaterialTheme.colorScheme.onPrimary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
             modifier = Modifier.size(22.dp),
         )
     }

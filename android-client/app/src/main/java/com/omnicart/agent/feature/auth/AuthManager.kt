@@ -25,6 +25,20 @@ object AuthManager {
         get() = prefs()?.getString("user_id", "") ?: ""
         set(value) { prefs()?.edit()?.putString("user_id", value)?.apply() }
 
+    /** 设备级匿名用户ID (UUID)，未登录时使用，确保不同设备数据隔离。首次访问时自动生成并持久化。 */
+    val deviceUserId: String
+        get() {
+            val existing = prefs()?.getString("device_user_id", "") ?: ""
+            if (existing.isNotBlank()) return existing
+            val newId = "device_${java.util.UUID.randomUUID().toString().take(8)}"
+            prefs()?.edit()?.putString("device_user_id", newId)?.apply()
+            return newId
+        }
+
+    /** 获取当前有效用户ID：已登录返回真实ID，未登录返回设备匿名ID。 */
+    val effectiveUserId: String
+        get() = userId.ifBlank { deviceUserId }
+
     var username: String
         get() = prefs()?.getString("username", "") ?: ""
         set(value) { prefs()?.edit()?.putString("username", value)?.apply() }

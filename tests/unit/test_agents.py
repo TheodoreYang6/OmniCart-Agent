@@ -61,7 +61,8 @@ class TestDecisionAgent:
         agent = DecisionAgent()
         assert agent.card.name == "Decision Agent"
 
-    def test_execute(self):
+    @pytest.mark.asyncio
+    async def test_execute(self):
         agent = DecisionAgent()
         state = WorkflowState(
             session_id="t1",
@@ -71,7 +72,7 @@ class TestDecisionAgent:
                 {"product_id": "p_digital_007", "score": 18.6, "title": "Test"},
             ],
         )
-        result = agent.execute(state)
+        result = await agent.execute(state)
         assert len(result.decision_results) >= 0
         assert result.trace_steps[-1]["status"] == "success"
 

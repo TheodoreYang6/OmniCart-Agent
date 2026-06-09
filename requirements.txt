@@ -54,3 +54,6 @@ nest-asyncio>=1.6.0
 pytest>=9.0.0
 pytest-asyncio>=0.25.0
 pytest-cov>=6.0.0
+
+# --- MCP 协议 (V2, MCP Server/Client) ---
+mcp>=1.0.0

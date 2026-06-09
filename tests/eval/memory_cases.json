@@ -1,0 +1,146 @@
+{
+  "description": "Memory system eval test cases — 记忆抽取、检索、使用评测",
+  "version": "P3-2",
+  "cases": [
+    {
+      "id": "extract_001",
+      "name": "临时预算不写长期记忆",
+      "input": "这次预算200块，买个充电器",
+      "expected_extraction": {
+        "has_budget": true,
+        "is_temporary": true
+      },
+      "expected_decision": "session_only",
+      "expected_write": false
+    },
+    {
+      "id": "extract_002",
+      "name": "长期偏好写入长期记忆",
+      "input": "我以后都要USB-C的充电宝",
+      "expected_extraction": {
+        "has_device": true,
+        "is_temporary": false
+      },
+      "expected_decision": "long_term",
+      "expected_write": true
+    },
+    {
+      "id": "extract_003",
+      "name": "明确避雷项识别",
+      "input": "我不喜欢太重的充电宝，讨厌杂牌",
+      "expected_extraction": {
+        "has_negative_preference": true,
+        "is_temporary": false
+      },
+      "expected_decision": "long_term",
+      "expected_write": true
+    },
+    {
+      "id": "retrieve_001",
+      "name": "无user_id不召回长期记忆",
+      "user_id": "",
+      "memories": [
+        {"memory_type": "brand", "content": "偏好Anker", "source": "explicit_user", "confidence": 0.9}
+      ],
+      "query": "推荐充电宝",
+      "expected_used_count": 0,
+      "expected_reason": "no_user_id"
+    },
+    {
+      "id": "retrieve_002",
+      "name": "召回与query匹配的记忆",
+      "user_id": "user1",
+      "memories": [
+        {"memory_type": "device", "content": "USB-C设备", "structured_value": {"device": "usb_c"}, "source": "explicit_user", "confidence": 0.9},
+        {"memory_type": "brand", "content": "偏好Anker", "structured_value": {"brand": "Anker"}, "source": "explicit_user", "confidence": 0.85}
+      ],
+      "query": "推荐充电宝",
+      "expected_used_count": 2,
+      "expected_blocked_count": 0
+    },
+    {
+      "id": "retrieve_003",
+      "name": "删除的记忆不被召回",
+      "user_id": "user1",
+      "memories": [
+        {"memory_type": "brand", "content": "偏好Anker", "source": "explicit_user", "confidence": 0.9, "status": "deleted"}
+      ],
+      "query": "推荐充电宝",
+      "expected_used_count": 0,
+      "expected_blocked_count": 1
+    },
+    {
+      "id": "retrieve_004",
+      "name": "低置信记忆不作为硬约束",
+      "user_id": "user1",
+      "memories": [
+        {"memory_type": "device", "content": "可能用iPhone", "source": "agent_inference", "confidence": 0.3}
+      ],
+      "query": "推荐充电宝",
+      "expected_used_count": 0,
+      "expected_blocked_count": 1,
+      "expected_reason": "low confidence"
+    },
+    {
+      "id": "conflict_001",
+      "name": "当前预算优先于记忆预算",
+      "user_id": "user2",
+      "memories": [
+        {"memory_type": "budget", "content": "预算500", "structured_value": {"budget_max": 500}, "source": "explicit_user", "confidence": 0.9}
+      ],
+      "query": "推荐充电宝，预算200以内",
+      "expected_used_count": 0,
+      "expected_blocked_count": 1,
+      "expected_reason": "current budget << memory budget"
+    },
+    {
+      "id": "scoring_001",
+      "name": "品牌偏好匹配加分",
+      "user_id": "user3",
+      "memories": [
+        {"memory_type": "brand", "content": "偏好Anker", "structured_value": {"brand": "Anker"}, "source": "explicit_user", "confidence": 0.9}
+      ],
+      "product": {"product_id": "P001", "title": "Anker 充电宝", "brand": "Anker", "category": "数码", "base_price": 199},
+      "expected_brand_boost": "> 0"
+    },
+    {
+      "id": "harness_001",
+      "name": "user scope检查通过",
+      "harness_check": "user_scope_pass",
+      "scenario": "used_memories all belong to current user_id",
+      "expected_pass": true
+    },
+    {
+      "id": "harness_002",
+      "name": "低置信硬约束检测",
+      "harness_check": "confidence_pass",
+      "scenario": "memory with confidence=0.3 marked as is_hard_constraint",
+      "expected_pass": false
+    },
+    {
+      "id": "harness_003",
+      "name": "used与blocked不重叠",
+      "harness_check": "conflict_resolution_pass",
+      "scenario": "same memory in both used and blocked",
+      "expected_pass": false
+    },
+    {
+      "id": "harness_004",
+      "name": "避雷项未被推荐",
+      "harness_check": "avoid_tag_pass",
+      "scenario": "answer contains avoided content",
+      "expected_pass": false
+    }
+  ],
+  "metrics": {
+    "extraction_precision": "CandidateMemory中正确抽取的比例",
+    "extraction_recall": "应抽取的CandidateMemory中实际抽取的比例",
+    "memory_write_precision": "写入长期记忆的正确率（不应写临时需求）",
+    "memory_recall_at_k": "召回的相关记忆 / 总相关记忆 @K",
+    "memory_mrr": "第一个相关记忆的平均倒数排名",
+    "wrong_user_memory_rate": "错误召回其他用户记忆的比例",
+    "stale_memory_usage_rate": "使用过期记忆的比例",
+    "memory_citation_accuracy": "回答中引用的记忆真实存在的比例",
+    "memory_harness_pass_rate": "Memory Harness 全部检查通过的比例"
+  }
+}

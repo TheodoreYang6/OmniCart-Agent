@@ -55,7 +55,7 @@ class ToolManager:
         builtins = [
             ToolManifest(
                 tool_name="product_text_search",
-                description="使用 jieba 中文分词 + 关键词匹配检索商品",
+                description="使用 Embedding 语义向量检索商品",
                 input_schema={"type": "object", "properties": {"query": {"type": "string"}, "category": {"type": "string"}, "top_k": {"type": "integer"}}},
                 output_schema={"type": "array", "items": {"type": "object"}},
                 permission_level="read", risk_level="low", cacheable=True,

@@ -1,11 +1,13 @@
-"""Mock Checkout API — 模拟结算，不执行真实支付"""
+"""Mock Checkout API — 模拟结算 + 订单列表"""
 
 import uuid
-from fastapi import APIRouter
+import logging
+from fastapi import APIRouter, Query
 
 from app.schemas.cart import CheckoutRequest, CheckoutResponse, DEMO_USER_ID
 from app.repositories.pg_cart_repo import get_cart_repo
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -21,9 +23,31 @@ async def checkout(req: CheckoutRequest = CheckoutRequest()):
     total = sum(i.price * i.quantity for i in selected)
     order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
+    # 持久化订单
+    try:
+        from app.core.database import get_session_sync, run_async
+        from app.models.order import OrderModel
+        from datetime import datetime, timezone
+
+        async def _save_order():
+            factory = get_session_sync()
+            async with factory() as session:
+                order = OrderModel(
+                    order_id=order_id,
+                    user_id=req.user_id or DEMO_USER_ID,
+                    items=[i.model_dump() for i in selected],
+                    total_price=total,
+                    status="pending",
+                    created_at=datetime.now(timezone.utc),
+                )
+                session.add(order)
+                await session.commit()
+        await _save_order()
+    except Exception as e:
+        logger.warning(f"Order persist failed: {e}")
+
     # 结算后从购物车移除
-    for i in selected:
-        cart_repo.remove_item(i.cart_item_id, req.user_id or DEMO_USER_ID)
+    cart_repo.batch_remove([i.cart_item_id for i in selected], req.user_id or DEMO_USER_ID)
 
     return CheckoutResponse(
         order_id=order_id,
@@ -33,3 +57,30 @@ async def checkout(req: CheckoutRequest = CheckoutRequest()):
         status="pending",
         message=f"模拟结算成功！订单号 {order_id}，共 {len(selected)} 件商品，合计 ¥{total:.2f}（未执行真实支付）",
     ).model_dump()
+
+
+@router.get("/api/orders")
+async def list_orders(user_id: str = Query(default="")):
+    """获取用户订单列表"""
+    if not user_id:
+        return {"orders": [], "count": 0}
+
+    try:
+        from app.core.database import get_session_sync
+        from sqlalchemy import select, text
+        from app.models.order import OrderModel
+
+        async def _list():
+            factory = get_session_sync()
+            async with factory() as session:
+                result = await session.execute(
+                    select(OrderModel)
+                    .where(OrderModel.user_id == user_id)
+                    .order_by(OrderModel.created_at.desc())
+                )
+                return [r.to_dict() for r in result.scalars().all()]
+
+        orders = await _list()
+        return {"user_id": user_id, "orders": orders, "count": len(orders)}
+    except Exception:
+        return {"user_id": user_id, "orders": [], "count": 0}

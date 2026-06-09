@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, UploadFile, HTTPException
 
 from app.core.config import DEMO_DATA_DIR
+from app.decision.rules import validate_image_magic
 
 router = APIRouter()
 
@@ -16,13 +17,20 @@ MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
 
 @router.post("/api/upload", response_model=None)
 async def upload(file: UploadFile = File(...)):
+    contents = await file.read()
+
+    # 先校验文件头魔数（不受客户端 content-type 欺骗）
+    if not validate_image_magic(contents):
+        raise HTTPException(
+            status_code=400,
+            detail="文件不是有效的图片格式（仅支持 JPEG / PNG / WebP / GIF）",
+        )
+
     if file.content_type and file.content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
             detail=f"不支持的文件类型: {file.content_type}。仅支持 JPEG / PNG / WebP / GIF",
         )
-
-    contents = await file.read()
 
     if len(contents) > MAX_SIZE_BYTES:
         raise HTTPException(

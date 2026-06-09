@@ -1,35 +1,43 @@
-"""Qwen-Omni 全模态网关 — 音频输入 → 文字+语音输出。
+"""Qwen-Omni 全模态网关 — 全异步。
 
-两种调用方式:
-1. 纯文本 TTS: OpenAI 兼容 API (stream) — 已验证通过
-2. 音频+文本: DashScope 原生 multimodal API (stream SSE) — 同 Qwen-VL 模式
-
-模型: qwen-omni-turbo / qwen3-omni-flash
-输出: 文字 + 语音(base64 wav, 24kHz)
+三种调用:
+1. ASR 语音转文字: 音频+prompt → 文字
+2. TTS 文本转语音: 纯文本 → WAV 音频
+3. 多模态对话: 音频+文本 → 文字+语音（已废弃，现用独立 ASR+TTS）
 """
 
 import base64
 import json
 import logging
 import time
-from typing import Optional
 
 import httpx
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from app.core.config import QWEN_API_KEY, QWEN_BASE_URL
 
 logger = logging.getLogger(__name__)
 
-_OMNI_SYSTEM_PROMPT = (
-    "你是豆仔，字节跳动旗下的智能购物导购助手（豆包之弟）。"
-    "你能听懂语音，能看图片，能用自然亲切的声音回复用户。"
-    "你专精商品推荐、截图分析、购物对比，始终引导用户完成购买决策。"
-    "回复控制在 3-5 句话，活泼专业，不做无依据的判断。"
-)
-
 _VOICES = ["Cherry", "Serena", "Ethan", "Chelsie"]
 _OPENAI_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# 全局异步客户端
+_http: httpx.AsyncClient | None = None
+_openai: AsyncOpenAI | None = None
+
+
+def _get_http() -> httpx.AsyncClient:
+    global _http
+    if _http is None:
+        _http = httpx.AsyncClient(timeout=httpx.Timeout(120.0))
+    return _http
+
+
+def _get_openai() -> AsyncOpenAI:
+    global _openai
+    if _openai is None:
+        _openai = AsyncOpenAI(api_key=QWEN_API_KEY, base_url=_OPENAI_BASE)
+    return _openai
 
 
 class QwenOmni:
@@ -38,85 +46,41 @@ class QwenOmni:
         self._voice = voice if voice in _VOICES else "Cherry"
         self._api_key = QWEN_API_KEY
         self._base_url = QWEN_BASE_URL.rstrip("/")
-        # OpenAI-compatible client (for text-only TTS)
-        self._openai = OpenAI(api_key=QWEN_API_KEY, base_url=_OPENAI_BASE)
 
     # ============================================================
-    # 方式 1: 纯文本 → 文字+语音（OpenAI 兼容 API，已验证通过）
+    # ASR: 音频 → 文字（DashScope multimodal API）
     # ============================================================
 
-    def chat_with_text_only(self, text: str, system: str = "") -> dict:
-        """纯文本对话 + TTS 语音输出"""
-        messages = [
-            {"role": "system", "content": system or _OMNI_SYSTEM_PROMPT},
-            {"role": "user", "content": text},
-        ]
+    async def transcribe(self, audio_bytes: bytes, hint: str = "") -> str:
+        """纯转写：音频 → 文字。prompt 要求只输出转写结果。"""
+        prompt = hint or "请把这段语音逐字转写成文字，只输出转写结果，一个字都不要多。"
+        result = await self._call_multimodal(audio_bytes, prompt, system="")
+        return (result.get("text") or "").strip()
 
-        t0 = time.perf_counter()
-        text_response = ""
-        audio_data = ""
-        usage = {}
+    async def transcribe_and_recommend(self, audio_bytes: bytes) -> dict:
+        """转写并推荐：音频 → 文字回复 + 语音（保留旧兼容）。"""
+        return await self._call_multimodal(
+            audio_bytes,
+            "请分析这段语音，帮我推荐合适的商品",
+            system=(
+                "你是豆仔，字节跳动旗下的智能购物导购助手（豆包之弟）。"
+                "专精商品推荐、截图分析、购物对比。回复控制在 3-5 句话，活泼专业。"
+            ),
+        )
 
-        try:
-            completion = self._openai.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                modalities=["text", "audio"],
-                audio={"voice": self._voice, "format": "wav"},
-                stream=True,
-                stream_options={"include_usage": True},
-                timeout=120.0,
-            )
-            for chunk in completion:
-                if chunk.choices:
-                    delta = chunk.choices[0].delta
-                    if delta.content:
-                        text_response += delta.content
-                    if hasattr(delta, "audio") and delta.audio:
-                        audio_data += delta.audio.get("data", "") or ""
-                if hasattr(chunk, "usage") and chunk.usage:
-                    usage = {
-                        "input_tokens": getattr(chunk.usage, "input_tokens", 0) or 0,
-                        "output_tokens": getattr(chunk.usage, "output_tokens", 0) or 0,
-                    }
-        except Exception as e:
-            logger.error(f"Qwen-Omni text-only error: {e}")
-            raise
-
-        return self._build_result(text_response, audio_data, usage, t0)
-
-    # ============================================================
-    # 方式 2: 音频输入 → 文字+语音（DashScope 原生 multimodal API）
-    # ============================================================
-
-    def chat_with_audio(
-        self,
-        audio_bytes: bytes,
-        text: str = "",
-        system: str = "",
+    async def _call_multimodal(
+        self, audio_bytes: bytes, text: str, system: str = "",
     ) -> dict:
-        """发送音频+文字，流式返回文字和语音。
-
-        使用 DashScope 原生 multimodal-generation API（SSE 流式）。
-        音频以 base64 data URI 传入，与 Qwen-VL 图片同模式。
-        """
+        """DashScope multimodal-generation API — 异步 SSE 流式。"""
         audio_b64 = base64.b64encode(audio_bytes).decode()
         audio_uri = f"data:audio/wav;base64,{audio_b64}"
 
-        # 构建 multimodal content
-        content = []
-        if text:
-            content.append({"text": text})
-        else:
-            content.append({"text": "请分析这段语音，帮我推荐合适的商品"})
-        content.append({"audio": audio_uri})
-
-        system_prompt = system or _OMNI_SYSTEM_PROMPT
-
+        content = [{"text": text}, {"audio": audio_uri}]
         messages = [
-            {"role": "system", "content": [{"text": system_prompt}]},
+            {"role": "system", "content": [{"text": system}]} if system else None,
             {"role": "user", "content": content},
         ]
+        messages = [m for m in messages if m is not None]
 
         payload = {
             "model": self._model,
@@ -135,7 +99,8 @@ class QwenOmni:
         usage = {}
 
         try:
-            with httpx.stream(
+            client = _get_http()
+            async with client.stream(
                 "POST",
                 f"{self._base_url}/services/aigc/multimodal-generation/generation",
                 headers={
@@ -144,10 +109,9 @@ class QwenOmni:
                     "X-DashScope-SSE": "enable",
                 },
                 json=payload,
-                timeout=120.0,
             ) as resp:
                 resp.raise_for_status()
-                for line in resp.iter_lines():
+                async for line in resp.aiter_lines():
                     if not line.startswith("data:"):
                         continue
                     data_str = line[5:].strip()
@@ -162,7 +126,6 @@ class QwenOmni:
                     choices = output.get("choices", [])
                     if choices:
                         msg = choices[0].get("message", {})
-                        # 文字内容
                         ct = msg.get("content", [])
                         for part in ct if isinstance(ct, list) else [ct]:
                             if isinstance(part, dict):
@@ -170,31 +133,140 @@ class QwenOmni:
                                     text_response += part["text"]
                                 if "audio" in part:
                                     audio_data += part["audio"].get("data", "") or ""
-                                    audio_data += part["audio"].get("transcript", "") or ""
                             elif isinstance(part, str):
                                 text_response += part
-
-                    # token 统计
                     if "usage" in output:
                         u = output["usage"]
                         usage = {
                             "input_tokens": u.get("input_tokens", 0),
                             "output_tokens": u.get("output_tokens", 0),
                         }
-
         except Exception as e:
-            logger.error(f"Qwen-Omni audio error: {e}")
+            logger.error(f"Qwen-Omni multimodal error: {e}")
             raise
 
-        return self._build_result(text_response, audio_data, usage, t0)
-
-    def _build_result(self, text: str, audio_b64: str, usage: dict, t0: float) -> dict:
         return {
-            "text": text.strip(),
-            "audio_base64": audio_b64,
+            "text": text_response.strip(),
+            "audio_base64": audio_data,
             "audio_format": "wav",
             "voice": self._voice,
             "tokens_input": usage.get("input_tokens", 0),
             "tokens_output": usage.get("output_tokens", 0),
+            "latency_ms": round((time.perf_counter() - t0) * 1000),
+        }
+
+    # ============================================================
+    # TTS: 文本 → 音频（OpenAI 兼容 API，异步）
+    # ============================================================
+
+    async def text_to_speech(self, text: str, voice: str = "") -> dict:
+        """纯 TTS：文本 → WAV 音频。voice 为空则用默认。"""
+        v = voice if voice in _VOICES else self._voice
+        messages = [
+            {"role": "system", "content": "你是豆仔，购物导购助手。用自然语速朗读以下内容。"},
+            {"role": "user", "content": text},
+        ]
+
+        t0 = time.perf_counter()
+        text_response = ""
+        audio_data = ""
+        usage = {}
+
+        try:
+            client = _get_openai()
+            completion = await client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                modalities=["text", "audio"],
+                audio={"voice": v, "format": "wav"},
+                stream=True,
+                stream_options={"include_usage": True},
+                timeout=120.0,
+            )
+            async for chunk in completion:
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        text_response += delta.content
+                    if hasattr(delta, "audio") and delta.audio:
+                        audio_data += delta.audio.get("data", "") or ""
+                if hasattr(chunk, "usage") and chunk.usage:
+                    usage = {
+                        "input_tokens": getattr(chunk.usage, "input_tokens", 0) or 0,
+                        "output_tokens": getattr(chunk.usage, "output_tokens", 0) or 0,
+                    }
+        except Exception as e:
+            logger.error(f"Qwen-Omni TTS error: {e}")
+            raise
+
+        return {
+            "audio_base64": audio_data,
+            "audio_format": "wav",
+            "voice": v,
+            "tokens_input": usage.get("input_tokens", 0),
+            "tokens_output": usage.get("output_tokens", 0),
+            "latency_ms": round((time.perf_counter() - t0) * 1000),
+        }
+
+    # ---- 旧兼容方法（同步包装，仅限非关键路径） ----
+
+    def chat_with_audio(self, audio_bytes: bytes, text: str = "", system: str = "") -> dict:
+        """[已废弃] 同步包装，仅供旧代码过渡。新代码请用 transcribe()。"""
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self._call_multimodal(audio_bytes, text, system))
+        import nest_asyncio
+        nest_asyncio.apply()
+        return loop.run_until_complete(self._call_multimodal(audio_bytes, text, system))
+
+    def chat_with_text_only(self, text: str, system: str = "") -> dict:
+        """[已废弃] 同步包装。新代码请用 text_to_speech()。"""
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self._text_to_speech_sync_wrapper(text, system))
+        import nest_asyncio
+        nest_asyncio.apply()
+        return loop.run_until_complete(self._text_to_speech_sync_wrapper(text, system))
+
+    async def _text_to_speech_sync_wrapper(self, text: str, system: str) -> dict:
+        messages = [
+            {"role": "system", "content": system or "你是豆仔。用自然语速朗读以下内容。"},
+            {"role": "user", "content": text},
+        ]
+        t0 = time.perf_counter()
+        text_response = ""
+        audio_data = ""
+        try:
+            client = _get_openai()
+            completion = await client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                modalities=["text", "audio"],
+                audio={"voice": self._voice, "format": "wav"},
+                stream=True,
+                stream_options={"include_usage": True},
+                timeout=120.0,
+            )
+            async for chunk in completion:
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        text_response += delta.content
+                    if hasattr(delta, "audio") and delta.audio:
+                        audio_data += delta.audio.get("data", "") or ""
+        except Exception as e:
+            logger.error(f"Qwen-Omni text-only error: {e}")
+            raise
+        return {
+            "text": text_response.strip(),
+            "audio_base64": audio_data,
+            "audio_format": "wav",
+            "voice": self._voice,
+            "tokens_input": 0,
+            "tokens_output": 0,
             "latency_ms": round((time.perf_counter() - t0) * 1000),
         }

@@ -5,38 +5,23 @@
 - sync 版本通过 asyncio 桥接（供 checkout/agent_actions 兼容调用）
 """
 
-import asyncio
 import uuid
 import logging
 from typing import Optional
 
-import nest_asyncio
 from sqlalchemy import select, update, delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.core.database import get_session_sync
+from app.core.database import get_session_sync, run_async
 from app.models.cart_item import CartItemModel
 from app.schemas.cart import Cart, CartItem, CartItemCreate, CartItemUpdate, DEMO_USER_ID
 
 logger = logging.getLogger(__name__)
-_nest_patched = False
 
 
 class PgCartRepository:
     """购物车仓库 — PostgreSQL 持久化存储。"""
 
-    def _run(self, coro):
-        global _nest_patched
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        if not _nest_patched:
-            nest_asyncio.apply(loop)
-            _nest_patched = True
-
-        return loop.run_until_complete(coro)
 
     # ---- 异步实现 ----
 
@@ -53,7 +38,7 @@ class PgCartRepository:
 
     async def aadd_item(self, item_create: CartItemCreate, user_id: str = DEMO_USER_ID,
                         title: str = "", brand: str = "", price: float = 0.0,
-                        image_url: str = "") -> Optional[CartItem]:
+                        image_url: str = "", sku_label: str = "") -> Optional[CartItem]:
         factory = get_session_sync()
         if factory is None:
             return None
@@ -64,6 +49,7 @@ class PgCartRepository:
                 user_id=user_id,
                 product_id=item_create.product_id,
                 sku_id=item_create.sku_id,
+                sku_label=sku_label,
                 title=title,
                 brand=brand,
                 price=price,
@@ -78,6 +64,7 @@ class PgCartRepository:
             user_id=user_id,
             product_id=item_create.product_id,
             sku_id=item_create.sku_id,
+            sku_label=sku_label,
             title=title,
             brand=brand,
             price=price,
@@ -116,6 +103,22 @@ class PgCartRepository:
             await session.commit()
             return result.rowcount > 0
 
+    async def abatch_remove(self, cart_item_ids: list[str], user_id: str = DEMO_USER_ID) -> int:
+        """批量删除购物车项 — 单条 SQL DELETE IN，避免 N+1。"""
+        if not cart_item_ids:
+            return 0
+        factory = get_session_sync()
+        if factory is None:
+            return 0
+        async with factory() as session:
+            stmt = delete(CartItemModel).where(
+                CartItemModel.cart_item_id.in_(cart_item_ids),
+                CartItemModel.user_id == user_id,
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount
+
     async def aselect_all(self, selected: bool, user_id: str = DEMO_USER_ID) -> bool:
         factory = get_session_sync()
         if factory is None:
@@ -143,25 +146,28 @@ class PgCartRepository:
     # ---- 同步接口 ----
 
     def get_cart(self, user_id: str = DEMO_USER_ID) -> Cart:
-        return self._run(self.aget_cart(user_id))
+        return run_async(self.aget_cart(user_id))
 
     def add_item(self, item_create: CartItemCreate, user_id: str = DEMO_USER_ID,
                  title: str = "", brand: str = "", price: float = 0.0,
-                 image_url: str = "") -> Optional[CartItem]:
-        return self._run(self.aadd_item(item_create, user_id, title, brand, price, image_url))
+                 image_url: str = "", sku_label: str = "") -> Optional[CartItem]:
+        return run_async(self.aadd_item(item_create, user_id, title, brand, price, image_url, sku_label))
 
     def update_item(self, cart_item_id: str, update_data: CartItemUpdate,
                     user_id: str = DEMO_USER_ID) -> Optional[CartItem]:
-        return self._run(self.aupdate_item(cart_item_id, update_data, user_id))
+        return run_async(self.aupdate_item(cart_item_id, update_data, user_id))
 
     def remove_item(self, cart_item_id: str, user_id: str = DEMO_USER_ID) -> bool:
-        return self._run(self.aremove_item(cart_item_id, user_id))
+        return run_async(self.aremove_item(cart_item_id, user_id))
+
+    def batch_remove(self, cart_item_ids: list[str], user_id: str = DEMO_USER_ID) -> int:
+        return run_async(self.abatch_remove(cart_item_ids, user_id))
 
     def select_all(self, selected: bool, user_id: str = DEMO_USER_ID) -> bool:
-        return self._run(self.aselect_all(selected, user_id))
+        return run_async(self.aselect_all(selected, user_id))
 
     def clear_cart(self, user_id: str = DEMO_USER_ID) -> bool:
-        return self._run(self.aclear_cart(user_id))
+        return run_async(self.aclear_cart(user_id))
 
     # ---- 内部 ----
 
@@ -172,6 +178,7 @@ class PgCartRepository:
             user_id=row.user_id,
             product_id=row.product_id,
             sku_id=row.sku_id,
+            sku_label=row.sku_label or "",
             title=row.title or "",
             brand=row.brand or "",
             price=float(row.price),
@@ -197,13 +204,14 @@ class MemCartRepository:
 
     def add_item(self, item_create: CartItemCreate, user_id: str = DEMO_USER_ID,
                  title: str = "", brand: str = "", price: float = 0.0,
-                 image_url: str = "") -> Optional[CartItem]:
+                 image_url: str = "", sku_label: str = "") -> Optional[CartItem]:
         cart = self._get_or_create(user_id)
         item = CartItem(
             cart_item_id=str(uuid.uuid4())[:8],
             user_id=user_id,
             product_id=item_create.product_id,
             sku_id=item_create.sku_id,
+            sku_label=sku_label,
             title=title,
             brand=brand,
             price=price,

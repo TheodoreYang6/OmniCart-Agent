@@ -27,18 +27,18 @@ class QdrantVectorRepository(BaseVectorRepository):
 
     def search_similar(self, query_vector: list[float], top_k: int = 10) -> list[dict]:
         try:
-            results = self._client.search(
+            results = self._client.query_points(
                 collection_name=self._collection,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=top_k,
             )
             return [
                 {
-                    "product_id": hit.payload.get("product_id", ""),
+                    "product_id": hit.payload.get("product_id", "") if hit.payload else "",
                     "score": hit.score,
                     "payload": hit.payload,
                 }
-                for hit in results
+                for hit in results.points
             ]
         except Exception as e:
             logger.warning(f"Qdrant search failed: {e}")

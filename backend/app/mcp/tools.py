@@ -19,7 +19,7 @@ _scorer = DecisionScoring()
 TOOL_DEFINITIONS = [
     {
         "name": "product_text_search",
-        "description": "使用 jieba 中文分词 + 关键词匹配检索商品。输入查询文本，返回匹配的商品列表。",
+        "description": "使用 Embedding 语义向量检索商品。输入查询文本，返回语义匹配的商品列表。",
         "inputSchema": {
             "type": "object",
             "properties": {

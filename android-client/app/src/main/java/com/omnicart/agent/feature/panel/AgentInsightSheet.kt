@@ -23,6 +23,7 @@ enum class InsightTab(val label: String) {
     Counter("反事实"),
     Grounding("视觉绑定"),
     Preference("偏好"),
+    Memory("记忆追溯"),
     Baseline("基准"),
     Summary("汇总"),
 }
@@ -62,6 +63,7 @@ fun AgentInsightSheet(
                     InsightTab.Counter -> CounterTab(response)
                     InsightTab.Grounding -> GroundingTab(response)
                     InsightTab.Preference -> PreferenceTab(response)
+                    InsightTab.Memory -> MemoryTab(response)
                     InsightTab.Baseline -> BaselineTab(response)
                     InsightTab.Summary -> SummaryTab(response)
                 }
@@ -319,6 +321,102 @@ private fun PreferenceTab(r: RecommendResponse) {
         }
         Spacer(Modifier.height(8.dp))
         Text("提示：切换品类话题时旧偏好自动清除，确保推荐不受历史干扰", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+// ---- #P2 Memory Trace Panel — 记忆追溯 ----
+@Composable
+private fun MemoryTab(r: RecommendResponse) {
+    Column(Modifier.padding(16.dp)) {
+        Text("记忆追溯 (Memory Trace)", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(4.dp))
+        Text("本次推荐使用了哪些长期记忆，屏蔽了哪些记忆", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(12.dp))
+
+        val used = r.usedMemories ?: emptyList()
+        val blocked = r.blockedMemories ?: emptyList()
+        val trace = r.memoryTrace ?: emptyMap()
+
+        // 统计摘要
+        if (trace.isNotEmpty()) {
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))) {
+                Column(Modifier.padding(12.dp)) {
+                    InsightRow("原子记忆总数", trace["total_atomic"]?.toString() ?: "-")
+                    InsightRow("本次使用", trace["used_count"]?.toString() ?: "-")
+                    InsightRow("已屏蔽", trace["blocked_count"]?.toString() ?: "-")
+                    InsightRow("快照可用", if (trace["snapshot_available"] == true) "是" else "否")
+                    InsightRow("参考消息", trace["recent_messages"]?.toString() ?: "0")
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
+        // 使用的记忆
+        if (used.isNotEmpty()) {
+            Text("已使用的记忆 (${used.size})", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(4.dp))
+            used.forEach { m ->
+                val mem = m as? Map<*, *> ?: return@forEach
+                val type = mem["memory_type"]?.toString() ?: ""
+                val content = mem["content"]?.toString()?.take(80) ?: ""
+                val source = mem["source"]?.toString() ?: ""
+                val conf = (mem["confidence"] as? Number)?.toDouble() ?: 0.0
+                val isHard = mem["is_hard_constraint"] == true
+                val reason = mem["reason"]?.toString() ?: ""
+
+                Card(Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    colors = CardDefaults.cardColors(containerColor = if (isHard) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(Modifier.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("[$type]", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                                color = if (isHard) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                            if (isHard) {
+                                Spacer(Modifier.width(4.dp))
+                                Text("硬约束", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                        Text(content, style = MaterialTheme.typography.bodySmall)
+                        Row {
+                            Text("置信度: ${(conf * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(8.dp))
+                            Text("来源: $source", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (reason.isNotBlank()) {
+                            Text(reason, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        } else {
+            Text("本次推荐未使用长期记忆（可能是首次使用或未提供 user_id）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+        }
+
+        // 屏蔽的记忆
+        if (blocked.isNotEmpty()) {
+            Text("已屏蔽的记忆 (${blocked.size})", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(4.dp))
+            blocked.take(5).forEach { b ->
+                val mem = b as? Map<*, *> ?: return@forEach
+                val type = mem["memory_type"]?.toString() ?: ""
+                val reason = mem["reason"]?.toString() ?: ""
+                val content = mem["content"]?.toString()?.take(60) ?: ""
+
+                Row(Modifier.padding(vertical = 1.dp)) {
+                    Text("[$type] ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    Text(content, style = MaterialTheme.typography.labelSmall)
+                    if (reason.isNotBlank()) {
+                        Text(" — $reason", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        if (used.isEmpty() && blocked.isEmpty() && trace.isEmpty()) {
+            Text("暂无记忆追溯数据。\n\n登录用户多次使用后，系统将累积偏好记忆并在推荐时追溯展示。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

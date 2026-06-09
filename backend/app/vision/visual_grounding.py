@@ -20,29 +20,17 @@ class VisualGrounding:
         }
 
         for field, label in field_mapping.items():
-            if field == "specs" and isinstance(visual_result.get("specs"), dict):
-                for spec_key, spec_val in visual_result["specs"].items():
-                    grounded.append({
-                        "field": f"specs.{spec_key}",
-                        "label": f"规格:{spec_key}",
-                        "value": str(spec_val),
-                        "source": "visual_agent",
-                        "product_id": product_id,
-                        "confidence": visual_result.get("confidence", 0.5),
-                        "evidence_id": f"V-{product_id}-specs-{spec_key}",
-                    })
-            else:
-                value = visual_result.get(field)
-                if value:
-                    grounded.append({
-                        "field": field,
-                        "label": label,
-                        "value": str(value),
-                        "source": "visual_agent",
-                        "product_id": product_id,
-                        "confidence": visual_result.get("confidence", 0.5),
-                        "evidence_id": f"V-{product_id}-{field}",
-                    })
+            value = visual_result.get(field)
+            if value:
+                grounded.append({
+                    "field": field,
+                    "label": label,
+                    "value": str(value),
+                    "source": "visual_agent",
+                    "product_id": product_id,
+                    "confidence": visual_result.get("confidence", 0.5),
+                    "evidence_id": f"V-{product_id}-{field}",
+                })
 
         return grounded
 

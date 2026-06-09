@@ -2,6 +2,15 @@
 import httpx
 from app.core.config import QWEN_API_KEY, QWEN_BASE_URL
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=httpx.Timeout(60.0))
+    return _client
+
 
 class QwenEmbedding:
     def __init__(self, model: str = "text-embedding-v4", dimensions: int = 1024):
@@ -10,8 +19,9 @@ class QwenEmbedding:
         self._model = model
         self._dimensions = dimensions
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        resp = httpx.post(
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        client = _get_client()
+        resp = await client.post(
             f"{self._base_url}/services/embeddings/text-embedding/text-embedding",
             headers={
                 "Authorization": f"Bearer {self._api_key}",
@@ -22,7 +32,6 @@ class QwenEmbedding:
                 "input": {"texts": texts},
                 "parameters": {"dimension": self._dimensions},
             },
-            timeout=60.0,
         )
         resp.raise_for_status()
         data = resp.json()

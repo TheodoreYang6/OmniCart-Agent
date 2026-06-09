@@ -59,8 +59,13 @@ tr:hover{background:#0f172a}
 </div>
 <div class="container">
     <div class="toolbar">
-        <button class="btn btn-primary" onclick="runEval()" id="btn-run">▶ 运行评测</button>
+        <button class="btn btn-primary" onclick="runEval('default')" id="btn-run">▶ 运行评测</button>
+        <button class="btn btn-secondary" onclick="runEval('chunked')" id="btn-chunked">🧩 分块评测</button>
         <button class="btn btn-secondary" onclick="loadHistory()">📋 刷新历史</button>
+        <select id="aggregation" style="padding:10px;border-radius:8px;background:#334155;color:#e2e8f0;border:none">
+            <option value="max_score">聚合: Max Score</option>
+            <option value="weighted">聚合: Weighted</option>
+        </select>
         <span id="status" style="color:#64748b;font-size:14px"></span>
     </div>
 
@@ -85,6 +90,21 @@ tr:hover{background:#0f172a}
             <div class="card-value" id="avg-prod" style="color:#c084fc">--</div>
             <div class="card-sub">per query</div>
         </div>
+        <div class="card">
+            <div class="card-label">Recall@10</div>
+            <div class="card-value blue" id="recall-10">--</div>
+            <div class="card-sub">Avg relevant found</div>
+        </div>
+        <div class="card">
+            <div class="card-label">MRR</div>
+            <div class="card-value yellow" id="mrr">--</div>
+            <div class="card-sub">Mean Reciprocal Rank</div>
+        </div>
+        <div class="card">
+            <div class="card-label">NDCG@10</div>
+            <div class="card-value green" id="ndcg">--</div>
+            <div class="card-sub">Normalized DCG</div>
+        </div>
     </div>
 
     <div class="charts">
@@ -101,8 +121,8 @@ tr:hover{background:#0f172a}
     <div class="table-box">
         <h3>Query Details</h3>
         <table><thead><tr>
-            <th>Query</th><th>Category</th><th>Match</th><th>Products</th><th>Latency</th><th>Status</th>
-        </tr></thead><tbody id="table-body"><tr><td colspan="6" class="loading">点击"运行评测"开始</td></tr></tbody></table>
+            <th>Query</th><th>Category</th><th>Match</th><th>Products</th><th>Latency</th><th>Recall@10</th><th>MRR</th><th>Status</th>
+        </tr></thead><tbody id="table-body"><tr><td colspan="8" class="loading">点击"运行评测"开始</td></tr></tbody></table>
     </div>
 
     <div class="history table-box">
@@ -143,22 +163,27 @@ function initCharts() {
     });
 }
 
-async function runEval() {
-    const btn = document.getElementById('btn-run');
+async function runEval(method) {
+    const btn = document.getElementById(method === 'chunked' ? 'btn-chunked' : 'btn-run');
+    const otherBtn = document.getElementById(method === 'chunked' ? 'btn-run' : 'btn-chunked');
     const status = document.getElementById('status');
-    btn.disabled = true; btn.textContent = '⏳ Running...';
-    status.textContent = 'Evaluating 10 golden queries...';
+    btn.disabled = true; otherBtn.disabled = true;
+    btn.textContent = '⏳ Running...';
+    const agg = document.getElementById('aggregation').value;
+    status.textContent = 'Evaluating golden queries (' + method + ', ' + agg + ')...';
 
     try {
-        const resp = await fetch('/api/eval/run', {method:'POST'});
+        const url = '/api/eval/run?method=' + method + '&aggregation=' + agg;
+        const resp = await fetch(url, {method:'POST'});
         const data = await resp.json();
         renderResults(data);
-        status.textContent = 'Done: ' + data.run_id;
+        status.textContent = 'Done [' + method + ']: ' + data.run_id;
         await loadHistory();
     } catch(e) {
         status.textContent = 'Error: ' + e.message;
     }
-    btn.disabled = false; btn.textContent = '▶ 运行评测';
+    btn.disabled = false; otherBtn.disabled = false;
+    btn.textContent = method === 'chunked' ? '🧩 分块评测' : '▶ 运行评测';
 }
 
 function renderResults(data) {
@@ -168,6 +193,9 @@ function renderResults(data) {
     document.getElementById('p95-latency').textContent = 'P95: ' + (data.p95_latency_ms||0) + 'ms';
     document.getElementById('cat-acc').textContent = (data.category_accuracy*100).toFixed(0) + '%';
     document.getElementById('avg-prod').textContent = data.avg_products;
+    document.getElementById('recall-10').textContent = data.avg_recall_at_10 != null ? (data.avg_recall_at_10*100).toFixed(0)+'%' : 'N/A';
+    document.getElementById('mrr').textContent = data.avg_mrr != null ? data.avg_mrr.toFixed(3) : 'N/A';
+    document.getElementById('ndcg').textContent = data.avg_ndcg_at_10 != null ? data.avg_ndcg_at_10.toFixed(3) : 'N/A';
 
     const details = data.details || [];
     const shortQuery = q => q.length > 18 ? q.slice(0,16)+'...' : q;
@@ -188,11 +216,13 @@ function renderResults(data) {
     const tbody = document.getElementById('table-body');
     tbody.innerHTML = details.map(d => `
         <tr>
-            <td>${d.query}</td>
+            <td title="${d.query}">${shortQuery(d.query)}</td>
             <td>${d.expected_category||'--'}</td>
             <td>${d.category_match?'✅':'❌'}</td>
             <td>${d.product_count||0}</td>
             <td>${d.latency_ms||0}ms</td>
+            <td>${d.recall_at_10 != null ? (d.recall_at_10*100).toFixed(0)+'%' : '--'}</td>
+            <td>${d.mrr != null ? d.mrr.toFixed(3) : '--'}</td>
             <td><span class="badge ${d.passed?'badge-pass':'badge-fail'}">${d.passed?'PASS':'FAIL'}</span></td>
         </tr>
     `).join('');

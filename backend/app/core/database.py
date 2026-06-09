@@ -48,3 +48,29 @@ async def close_db():
     """应用关闭时释放连接池。"""
     if _engine:
         await _engine.dispose()
+
+
+# ---- Async-to-Sync Bridge (供 PG 仓库在同步接口中桥接异步查询) ----
+
+import asyncio
+
+_nest_patched = False
+
+
+def run_async(coro):
+    """在同步上下文中运行异步协程，自动处理事件循环桥接。
+
+    所有 PG 仓库的同步接口统一使用此函数，避免 5 处重复的 _run() 样板代码。
+    """
+    global _nest_patched
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    if not _nest_patched:
+        import nest_asyncio
+        nest_asyncio.apply(loop)
+        _nest_patched = True
+
+    return loop.run_until_complete(coro)

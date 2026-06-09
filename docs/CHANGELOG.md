@@ -1,5 +1,158 @@
 # Changelog
 
+## [V8] 记忆系统完整版（长期偏好画像）— 2026-06-07
+
+### 设计
+- 一张表 `user_profiles`（user_id PK + JSONB 多字段）
+- 两个偏好来源：Android 手动输入（宽松） + 对话关键词触发（严格）
+- 复用现有 Qwen-Chat 做偏好解析，不单独部署模型
+- 偏好注入推荐：只注入 must_tags 到搜索（不污染 query），品牌/场景/设备放入 context_prompt
+- 统一设计文档 `docs/MEMORY_SYSTEM_DESIGN.md` 替代旧有 3 个记忆文档
+
+### 后端新增 (6 文件)
+- `alembic/versions/004_add_user_profiles.py` — user_profiles 建表
+- `backend/app/models/user_profile.py` — ORM Model
+- `backend/app/repositories/user_profile_repo.py` — PG CRUD
+- `backend/app/services/user_profile_service.py` — 解析/合并/规范化/hints
+- `backend/app/api/user_profile.py` — REST API (GET/PUT/DELETE)
+- `docs/MEMORY_SYSTEM_DESIGN.md` — 统一设计文档
+
+### 后端修改 (4 文件)
+- `backend/app/models/__init__.py` — 注册 UserProfileModel
+- `backend/app/main.py` — 注册 user_profile_router
+- `backend/app/api/recommend.py` — profile 注入 + 对话提取 + follow_up_ctx 默认值
+- `backend/app/api/agent_stream.py` — profile 注入 + 对话提取
+
+### Android 修改 (3 文件)
+- `OmniCartApi.kt` — Profile API 4 端点 + ProfileResponse 数据类
+- `PreferenceScreen.kt` — 自由文本输入 + InputChip 卡片 + 追加模式
+- `PreferenceViewModel.kt` — load/save/delete/reset + budget 展示
+
+### Bug 修复
+- search_hints 污染 query（场景关键词"便携/大容量"导致搜手机出充电宝）→ 仅用 must_tags
+- "油皮敏感肌"解析丢失（LLM 返回 skin_type 无对应 schema）→ _normalize_fields() 映射
+- Android null 响应崩溃（Retrofit 无法反序列化 JSON null）→ Response<T?> 包装
+- Qdrant 连接失败（httpx 走系统代理）→ NO_PROXY 绕过
+- PreferenceScreen 输入框被历史 raw_text 填满 → inputText 独立字段
+
+### 待测试
+- Android 端手动输入偏好 → 保存 → 查看解析卡片 → 豆仔对话验证偏好生效
+- 对话中说"记住，以后都..." → 检查是否自动提取
+
+---
+
+## [V7] 评分系统大修 + 问豆仔闭环 + 闲聊检测 + 直接下单 — 2026-06-04
+
+### 评分系统 (scoring.py)
+- **Spec Quality 去字典化**: LLM spec_keywords + spec_richness兜底, 不限品类扩展
+- **权重重分配**: relevance 0.50→0.45, spec 0.05→0.08, scenario 0.03→0.05
+- **risk_penalty 减半**: 1条差评0.05→0.02, 3条+0.15→0.08, max 0.30→0.20
+- **User Satisfaction**: Bayesian C=5→C=3, 评论量奖励门槛降低
+- **price_score/Budget Fit/keyword_match 全线提分**
+- **cautious cap 0.75→0.80**, global_evidence_sufficient 降级移除
+- **scenario_fit**: 短查询单字匹配修复, base提升
+- **死代码清理**: score()中76行不可达代码
+- 分数: Min 5.8→7.1, Max 8.9→9.1, Avg 7.0→8.3
+
+### 闲聊检测 (router_agent.py + response_agent.py)
+- 两层架构: 规则词库快速拦截 + LLM Router智能判断
+- LLM结果优先覆盖规则
+- 先回人话再顺势推荐
+
+### 问豆仔功能
+- 导航跳转、搜索/分析分离、聚焦商品强制注入+得分拉满
+- ComparisonCard持久化、SKU传递、加载态场景化
+- 推荐等级中文化、对比维度扩展
+
+### 直接下单 (agent_stream.py) — 未完成
+- 聚焦商品读取+默认地址+订单确认+SSE流式
+- 地址表单弹窗(Android)
+
+### Bug修复
+- FaqItem.q→question, conv_svc未初始化, aget_context缺失
+- ev_conf默认0→0.50, review通道缺失, 中文引号语法错误
+- duplicate ComparisonCard, isLoading不重置, IndexError
+
+## [V4-RAG] RAG全链路优化 + 技术文档重写 — 2026-06-02
+
+### Added
+- `semantic_retriever.py`: 新增 `_reconstruct_chunk_text()` 函数，本地降级时从product.rag_knowledge重建chunk原文
+- `docs/RAG_FULL_CHAIN_WORKFLOW_AND_AUDIT.md`: 重写为1248行完整技术文档（10站详解+8答辩QA+数据流追踪）
+
+### Changed
+- `semantic_retriever.py`: chunk权重配置加注释说明
+- `graph.py`: Reranker文档截断阈值提升 (FAQ答案120→300, 评论100→200, 描述200→300)
+- `retrieval_agent.py`: 补充证据搜索从关键词匹配升级为Embedding余弦相似度（降级兼容）
+- `docs/RAG_FULL_CHAIN_WORKFLOW_AND_AUDIT.md`: FollowUpEngine/ContextBuilder引用更新, Bug#7路径修正
+- `docs/SCORING_SYSTEM_COMPLETE_REFERENCE.md`: Android模型缺字段标注, SCORE_VERSION描述修正
+- `docs/DEVELOPMENT_PROGRESS.md`: 更新进度至2026-06-02
+- `docs/KNOWLEDGE_LOG.md`: 新增6条RAG核心技术知识
+
+### Verified
+- V1 Stream全链路：5 products, 20 evidence, 5/5 chunks有text, Reranker top3=0.813/0.672/0.704
+- 降级链：Embedding API不可用时自动降级至关键词子串匹配，仍返回5件商品
+- 代码导入：全部4个修改文件import无异常
+
+---
+
+## [V2-Complete] 全量 Bug 修复 + 代码优化 + 测试覆盖 — 2026-05-24
+
+### Fixed (37 个文件修改，5 轮迭代)
+
+**第一轮 — Bug 扫描修复 (15 项)**
+- `long_term.py`: `user_id` 未定义→`profile.user_id`（NameError 崩溃）
+- `multimodal_fallback.py`: `gateway.vision()` 参数错位→关键字参数
+- `product_repo.py`: asyncpg DSN `+asyncpg` 不兼容→自动剥离；模块加载网络 I/O→`__getattr__` 惰性解析
+- `requirements.txt`: 补充 `jieba`/`mcp` 依赖
+- `gateway.py`: `_CapabilityProxy.chat` 非 async→`async def`；移除未使用导入
+- `config.py`: `USE_REDIS` 默认值与 `REDIS_URL` 不一致→统一
+- `preference_memory.py`: 新增 `set_session()` 公开方法
+- `preference.py`: `mem._sessions` 私有访问→`set_session()`
+- `mock_model.py`: 实现 `mock_vision_parse()` 防止 Level 1 降级崩溃
+- `qwen_omni.py`: 音频数据被 text transcript 污染→移除污染行
+- `main.py`: CORS `allow_credentials=True` + `allow_origins=["*"]` 冲突→`allow_credentials=False`
+- `visual_agent.py`: 提示模板 JSON 多余 `]]`
+- `voice.py`: `__import__("time")`→`import time`
+- `visual_grounding.py`: specs dict 死代码→移除
+- `text_retriever.py`: 重复停用词 `"一款"`→去重
+
+**第二轮 — 深度性能 + 安全优化 (12 项)**
+- **httpx 全链路异步化**: `qwen_chat.py`, `qwen_vision.py`, `qwen_embedding.py`, `qwen_reranker.py` 全部切换 `httpx.AsyncClient`，事件循环不再阻塞
+- **共享 AsyncBridge**: `database.py` 新增 `run_async()`→pg_product/pg_cart/pg_preference/user/address 5 个 repo 统一使用
+- **jieba 分词缓存**: `text_retriever.py` 每查询仅分词一次（原每商品重复分词）
+- **购物车批量删除**: `pg_cart_repo.py` 新增 `batch_remove()`→`checkout.py` 单条 SQL 结算
+- **eval 路径穿越**: `run_id` 正则校验 `[a-zA-Z0-9_-]+`
+- **PG 全文搜索**: `to_tsquery`→`plainto_tsquery` + try/except 兜底
+- **语音错误脱敏**: 内部错误不再返回给客户端
+- **Android OkHttp**: 日志级别仅 `BuildConfig.DEBUG` 时 BODY
+- **Android FileProvider**: cache 根目录→`camera/` 子目录
+- **Android 网络安全**: `network_security_config.xml` 仅 localhost/模拟器允许明文
+- **Android MediaRecorder**: `ChatViewModel.onCleared()` 释放录音资源
+
+**第三轮 — 代码清理 (9 项)**
+- 死代码: `SkuProperty` 类、`_get_cart` 函数、`NetworkResult` 类
+- 日志: `graph.py`/`agent_actions.py` 6 处被吞噬异常全部添加 `_log.debug/warning`
+- **Camera 缓存**: `ChatViewModel.cleanOldCameraFiles()` 24h 自动清理
+- **Cart 异常**: `CartViewModel` 5 个操作 catch 块全部报告错误信息
+- **strings.xml**: 提取 30+ 关键用户可见字符串
+
+**第四轮 — 架构改进 (6 项)**
+- **共享规则模块**: `app/decision/rules.py` — 品类/预算/场景/魔数 4 类规则集中管理
+- `recommend.py` 和 `router_agent.py` 统一从 `rules.py` 引用
+- **上传魔数校验**: `validate_image_magic()` 拒绝伪造 MIME 文件
+
+**第五轮 — 测试覆盖 (30 新测试)**
+- `tests/unit/test_rules.py`: 23 个测试覆盖全部 4 类规则
+- `tests/integration/test_workflow_v2.py`: 7 个 V2 工作流集成测试
+- `scripts/smoke_test_v2.py`: API 全链路烟雾测试
+
+### Test Results
+- 单元测试: 31→**54** (增长 97%)
+- 集成测试: 8→**15** (新增 7 个 V2 工作流)
+- Smoke: Health/V2/V0/Upload/Fake-Upload 全部通过
+
+---
+
 ## [V2] 长期偏好记忆 + Evaluation Dashboard — 2026-05-23 (下午)
 
 ### Added

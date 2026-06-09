@@ -5,6 +5,8 @@ import com.google.gson.annotations.SerializedName
 data class RecommendResponse(
     @SerializedName("session_id")
     val sessionId: String = "",
+    @SerializedName("conversation_id")
+    val conversationId: String = "",
     @SerializedName("answer")
     val answer: String = "",
     @SerializedName("products")
@@ -27,6 +29,32 @@ data class RecommendResponse(
     val sufficiencyReport: Map<String, Any?>? = null,
     @SerializedName("constraints")
     val constraints: Map<String, Any?>? = null,
+    @SerializedName("used_memories")
+    val usedMemories: List<Map<String, Any?>>? = null,
+    @SerializedName("blocked_memories")
+    val blockedMemories: List<Map<String, Any?>>? = null,
+    @SerializedName("memory_trace")
+    val memoryTrace: Map<String, Any?>? = null,
+    @SerializedName("target_product_analysis")
+    val targetProductAnalysis: Map<String, Any?>? = null,
+    @SerializedName("alternative_products")
+    val alternativeProducts: List<Map<String, Any?>>? = null,
+    @SerializedName("comparison_table")
+    val comparisonTable: Map<String, Any?>? = null,
+    @SerializedName("cross_category")
+    val crossCategory: List<Map<String, Any?>>? = null,
+    @SerializedName("timing")
+    val timing: Map<String, Any?>? = null,
+    @SerializedName("needs_clarification")
+    val needsClarification: Boolean = false,
+    @SerializedName("clarification_question")
+    val clarificationQuestion: String = "",
+    @SerializedName("clarification_options")
+    val clarificationOptions: List<Map<String, Any?>>? = null,
+    @SerializedName("shop_action")
+    val shopAction: Boolean = false,
+    @SerializedName("actions")
+    val actions: List<Map<String, Any?>>? = null,
 )
 
 data class EvidenceItem(

@@ -25,8 +25,8 @@ capabilities:
     max_tokens: 1024
 
   # ---- 视觉理解类 ----
-  visual_understanding:     # 商品图/截图解析 (Qwen-VL)
-    model: qwen-vl-plus
+  visual_understanding:     # 商品图/截图解析 (Qwen-VL-Max, 最强)
+    model: qwen-vl-max
     temperature: 0.3
     max_tokens: 2048
 
@@ -39,6 +39,12 @@ capabilities:
     model: qwen3-vl-embedding
     dimensions: 1024
     fallback: text_embedding
+
+  # ---- 上下文压缩 ----
+  context_compression:      # 对话历史增量摘要 (小模型，低延迟，异步)
+    model: qwen-turbo
+    temperature: 0.3
+    max_tokens: 256
 
   # ---- 精排类 ----
   text_reranking:           # 候选商品文本精排 (兼容 API)

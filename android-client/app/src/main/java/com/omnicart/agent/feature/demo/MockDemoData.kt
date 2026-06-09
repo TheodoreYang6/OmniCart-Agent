@@ -9,7 +9,7 @@ object MockDemoData {
         Product(
             productId = "p_digital_007", title = "Apple AirPods Pro 3 主动降噪真无线蓝牙耳机",
             brand = "Apple", category = "数码电子", subCategory = "真无线耳机", price = 1899.0,
-            imageUrls = listOf("https://picsum.photos/seed/earpod1/400/400"),
+            imageUrls = listOf("/api/products/p_digital_007/image"),
             skus = listOf(Sku("s1", mapOf("颜色" to "白色"), 1899.0), Sku("s2", mapOf("颜色" to "黑色"), 1899.0)),
             ragKnowledge = RagKnowledge(
                 marketingDescription = "Apple旗舰TWS，H3芯片，自适应降噪，空间音频",
@@ -19,7 +19,7 @@ object MockDemoData {
         Product(
             productId = "p_digital_009", title = "华为 FreeBuds Pro 5 主动降噪真无线蓝牙耳机",
             brand = "华为", category = "数码电子", subCategory = "真无线耳机", price = 1499.0,
-            imageUrls = listOf("https://picsum.photos/seed/earpod2/400/400"),
+            imageUrls = listOf("/api/products/p_digital_009/image"),
             skus = listOf(Sku("s1", mapOf("颜色" to "陶瓷白"), 1499.0)),
             ragKnowledge = RagKnowledge(
                 marketingDescription = "华为旗舰TWS，静谧通话3.0，Hi-Res认证",
@@ -29,14 +29,20 @@ object MockDemoData {
     )
 
     fun buildDemoDecisions(): List<DecisionResult> = listOf(
-        DecisionResult("p_digital_007", 0.89, 8.9,
-            ScoreBreakdown(0.80, 0.95, 0.90, 0.93, 0.80, 1.0, 0.15),
-            listOf("E-MKT-p_digital_007", "R-p_digital_007-0", "R-p_digital_007-1"),
-            listOf("价格较高 ¥1899", "仅适配苹果生态"), "Apple旗舰TWS，H3芯片+自适应降噪"),
-        DecisionResult("p_digital_009", 0.86, 8.6,
-            ScoreBreakdown(0.88, 0.90, 0.88, 0.87, 0.75, 1.0, 0.12),
-            listOf("E-MKT-p_digital_009", "R-p_digital_009-0"),
-            listOf("部分用户反馈佩戴不稳"), "华为旗舰TWS，Hi-Res认证+静谧通话"),
+        DecisionResult(
+            productId = "p_digital_007", finalScore = 0.89, displayScore = 8.9,
+            scoreBreakdown = ScoreBreakdown(0.80, 0.95, 0.90, 0.93, 0.80, 1.0, 0.15),
+            evidenceIds = listOf("E-MKT-p_digital_007", "R-p_digital_007-0", "R-p_digital_007-1"),
+            riskFactors = listOf("价格较高 ¥1899", "仅适配苹果生态"),
+            recommendationReason = "Apple旗舰TWS，H3芯片+自适应降噪",
+        ),
+        DecisionResult(
+            productId = "p_digital_009", finalScore = 0.86, displayScore = 8.6,
+            scoreBreakdown = ScoreBreakdown(0.88, 0.90, 0.88, 0.87, 0.75, 1.0, 0.12),
+            evidenceIds = listOf("E-MKT-p_digital_009", "R-p_digital_009-0"),
+            riskFactors = listOf("部分用户反馈佩戴不稳"),
+            recommendationReason = "华为旗舰TWS，Hi-Res认证+静谧通话",
+        ),
     )
 
     fun buildDemoEvidence(): List<EvidenceItem> = listOf(

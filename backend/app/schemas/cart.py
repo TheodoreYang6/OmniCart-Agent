@@ -10,6 +10,7 @@ class CartItem(BaseModel):
     user_id: str = DEMO_USER_ID
     product_id: str
     sku_id: str | None = None
+    sku_label: str = ""
     title: str = ""
     brand: str = ""
     price: float = 0.0
@@ -45,6 +46,8 @@ class Cart(BaseModel):
 class CheckoutRequest(BaseModel):
     user_id: str = DEMO_USER_ID
     item_ids: list[str] = Field(default_factory=list)  # 要结算的 cart_item_id 列表
+    session_id: str = ""
+    conversation_id: str = ""
 
 
 class CheckoutResponse(BaseModel):

@@ -39,7 +39,7 @@ class MultimodalFallback:
         try:
             from app.model_gateway.gateway import get_model_gateway
             gateway = get_model_gateway()
-            result = await gateway.vision(image_url, user_query)
+            result = await gateway.vision(image_path=image_url, prompt=user_query)
             if result and result.get("product_name"):
                 status["attempts"].append("level_0_success")
                 return result, status

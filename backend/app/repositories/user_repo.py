@@ -1,20 +1,17 @@
 """用户仓库 — PostgreSQL 持久化 + 内存降级。"""
 
-import asyncio
 import hashlib
 import logging
 import secrets
 import uuid
 from typing import Optional
 
-import nest_asyncio
 from sqlalchemy import select
 
-from app.core.database import get_session_sync
+from app.core.database import get_session_sync, run_async
 from app.models.user import UserModel
 
 logger = logging.getLogger(__name__)
-_nest_patched = False
 
 
 def _hash_password(password: str) -> str:
@@ -37,18 +34,6 @@ def _verify_password(password: str, hash_str: str) -> bool:
 class PgUserRepository:
     """PostgreSQL 用户仓库。"""
 
-    def _run(self, coro):
-        global _nest_patched
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        if not _nest_patched:
-            nest_asyncio.apply(loop)
-            _nest_patched = True
-
-        return loop.run_until_complete(coro)
 
     async def _aget_by_username(self, username: str) -> Optional[UserModel]:
         factory = get_session_sync()
@@ -97,13 +82,13 @@ class PgUserRepository:
 
     def register(self, username: str, password: str, email: str = "",
                  phone: str = "") -> Optional[dict]:
-        existing = self._run(self._aget_by_username(username))
+        existing = run_async(self._aget_by_username(username))
         if existing:
             return None  # 用户名已存在
-        return self._run(self._acreate(username, _hash_password(password), email, phone))
+        return run_async(self._acreate(username, _hash_password(password), email, phone))
 
     def login(self, username: str, password: str) -> Optional[dict]:
-        user = self._run(self._aget_by_username(username))
+        user = run_async(self._aget_by_username(username))
         if not user or not _verify_password(password, user.password_hash):
             return None
         # 刷新 token
@@ -118,7 +103,7 @@ class PgUserRepository:
                 await session.commit()
 
         if factory:
-            self._run(_save_token())
+            run_async(_save_token())
         return {
             "user_id": user.user_id, "username": user.username, "token": new_token,
             "email": user.email or "", "phone": user.phone or "",
@@ -126,7 +111,7 @@ class PgUserRepository:
         }
 
     def get_by_token(self, token: str) -> Optional[dict]:
-        user = self._run(self._aget_by_token(token))
+        user = run_async(self._aget_by_token(token))
         if not user:
             return None
         return {
@@ -145,7 +130,7 @@ class PgUserRepository:
                 u = await session.get(UserModel, user_id)
                 return u
 
-        user = self._run(_get())
+        user = run_async(_get())
         if not user:
             return None
         return {

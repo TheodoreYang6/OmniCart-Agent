@@ -2,7 +2,7 @@
 
 > Android 原生四 Tab 电商智能导购客户端 | FastAPI Agent Runtime 多模态购物决策后端
 >
-> **字节跳动 Agent 挑战赛参赛项目** · V2 扩展中 (6/13) · 私有仓库
+> **字节跳动 Agent 挑战赛参赛项目** · V2 完成 (7/13 + 5 跳过) · 私有仓库
 
 ---
 
@@ -150,6 +150,11 @@ OmniCart-Agent/
 │   │   │   ├── address.py          # CRUD /api/addresses
 │   │   │   ├── preference.py       # GET/PUT/DELETE /api/preferences
 │   │   │   ├── agent_actions.py    # POST /api/agent/action
+│   │   │   ├── agent_stream.py     # SSE /api/agent/stream (V2)
+│   │   │   ├── voice.py            # POST /api/voice/transcribe, /chat/v2 (V2)
+│   │   │   ├── eval.py             # POST /api/eval/run, GET /results (V2)
+│   │   │   ├── eval_dashboard.py   # GET /eval 可视化面板 (V2)
+│   │   │   ├── observability.py    # GET /api/observability/* (V2)
 │   │   │   └── upload.py           # POST /api/upload
 │   │   ├── agents/                 # 5 个核心 Agent
 │   │   │   ├── base.py             # Agent 抽象基类
@@ -161,7 +166,9 @@ OmniCart-Agent/
 │   │   ├── core/                   # 全局基础设施
 │   │   │   ├── config.py           # 环境变量读取 + 配置导出
 │   │   │   ├── database.py         # Async SQLAlchemy engine + session factory
-│   │   │   └── qdrant_client.py    # Qdrant client singleton
+│   │   │   ├── qdrant_client.py    # Qdrant client singleton
+│   │   │   ├── redis_client.py     # Redis client singleton (V2)
+│   │   │   └── cache.py            # 四级缓存层 (V2)
 │   │   ├── models/                 # SQLAlchemy ORM 模型
 │   │   │   ├── product.py          # 商品表（JSONB skus + rag_knowledge）
 │   │   │   ├── cart_item.py        # 购物车表（商品快照反范式）
@@ -195,7 +202,9 @@ OmniCart-Agent/
 │   │   ├── retrieval/              # 检索层
 │   │   │   └── text_retriever.py   # jieba 关键词 + Qdrant 向量 RRF 融合
 │   │   ├── decision/               # 决策层
-│   │   │   └── scoring.py          # 7 维 Decision Scoring 公式
+│   │   │   ├── scoring.py          # 7 维 Decision Scoring 公式
+│   │   │   ├── rules.py            # 品类/预算/场景规则检测 (V2 重构)
+│   │   │   └── counterfactual.py   # 反事实推荐 (0 结果兜底)
 │   │   ├── model_gateway/          # Qwen 模型网关
 │   │   │   ├── gateway.py          # 统一调用入口
 │   │   │   ├── qwen_chat.py        # Chat 能力
@@ -253,7 +262,12 @@ OmniCart-Agent/
 │   ├── CHANGELOG.md                           # 变更日志
 │   ├── KNOWLEDGE_LOG.md                       # 技术知识沉淀
 │   ├── DECISION_LOG.md                        # 关键技术决策
-│   └── 答辩QA手册.md                          # 答辩 QA 手册（13 章）
+│   ├── 答辩QA手册.md                          # 答辩 QA 手册（13 章）
+│   ├── DATABASE_DESIGN.md                     # 数据库设计详解
+│   ├── AGENT_TECH_ADVANCEMENT_AND_EVALUATION.md  # Agent 技术进阶与评测分析
+│   ├── DATASET_FEATURE_RAG_OPTIMIZATION_ANALYSIS.md  # 数据集特征与 RAG 优化分析
+│   ├── TASK_LIST.md                           # V2 阶段任务清单
+│   └── PROJECT_RESUME_BRIEF.md                # 项目简历事实材料（17 章）
 │
 ├── scripts/                        # 自动化脚本
 │   ├── smoke_recommend.py          # 推荐链路快速验证
@@ -347,7 +361,7 @@ cd backend && uvicorn app.main:app --host 127.0.0.1 --port 8006
 验证：
 ```bash
 curl http://127.0.0.1:8006/api/health
-# → {"status":"ok","service":"omnicart-agent","version":"0.1.0"}
+# → {"status":"ok","service":"omnicart-agent","version":"2.0.0"}
 ```
 
 #### 启动 Android 客户端
@@ -497,6 +511,7 @@ POST /api/checkout                    # 模拟结算（mock checkout，不接入
 ### Agent 受控操作
 ```
 POST /api/agent/action                # 豆仔受控操作（add_to_cart 等）
+GET  /api/agent/stream                # SSE 流式推荐（V2）
 ```
 
 ### 语音导购（V2）

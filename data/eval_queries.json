@@ -1,0 +1,52 @@
+[
+  {
+    "query": "推荐一款快充充电宝",
+    "product_ids": ["p_digital_028"],
+    "category": "数码电子"
+  },
+  {
+    "query": "推荐一款手机",
+    "product_ids": ["p_digital_001", "p_digital_002"],
+    "category": "数码电子"
+  },
+  {
+    "query": "推荐一款精华液",
+    "product_ids": ["p_beauty_001", "p_beauty_002"],
+    "category": "美妆护肤"
+  },
+  {
+    "query": "推荐一款防晒霜",
+    "product_ids": ["p_beauty_006", "p_beauty_010"],
+    "category": "美妆护肤"
+  },
+  {
+    "query": "推荐一款运动鞋",
+    "product_ids": ["p_clothes_001"],
+    "category": "服饰运动"
+  },
+  {
+    "query": "推荐一款T恤",
+    "product_ids": ["p_clothes_002", "p_clothes_003"],
+    "category": "服饰运动"
+  },
+  {
+    "query": "推荐无糖饮料",
+    "product_ids": ["p_food_003", "p_food_004"],
+    "category": "食品饮料"
+  },
+  {
+    "query": "推荐咖啡",
+    "product_ids": ["p_food_001", "p_food_002"],
+    "category": "食品饮料"
+  },
+  {
+    "query": "推荐一个充电宝 要支持苹果手机",
+    "product_ids": ["p_digital_028"],
+    "category": "数码电子"
+  },
+  {
+    "query": "我要买护肤品 油皮敏感肌",
+    "product_ids": ["p_beauty_007", "p_beauty_012"],
+    "category": "美妆护肤"
+  }
+]

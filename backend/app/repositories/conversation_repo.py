@@ -1,0 +1,219 @@
+"""Conversation Repository — PG async + sync wrapper.
+
+Conversation CRUD + message append/list. PG is authoritative; no memory fallback
+because messages are facts that must survive restarts.
+"""
+
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
+
+from sqlalchemy import select, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_session_sync, run_async
+from app.models.conversation import ConversationModel, ConversationMessageModel
+
+
+def _new_id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
+
+
+class ConversationRepository:
+    """Async-first conversation repository with sync bridge."""
+
+    # ---- helpers ----
+
+    @staticmethod
+    async def _aget_session() -> AsyncSession:
+        factory = get_session_sync()
+        if factory is None:
+            raise RuntimeError("PostgreSQL is not configured")
+        async with factory() as session:
+            yield session
+
+    # ---- Conversation CRUD ----
+
+    async def acreate(self, user_id: str, session_id: str, title: str = "") -> ConversationModel:
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            conv = ConversationModel(
+                conversation_id=_new_id("CONV"),
+                user_id=user_id,
+                session_id=session_id,
+                title=title or f"Chat {_utcnow().strftime('%m-%d %H:%M')}",
+                status="active",
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
+            )
+            session.add(conv)
+            await session.commit()
+            await session.refresh(conv)
+            return conv
+        finally:
+            await gen.aclose()
+
+    async def aget(self, conversation_id: str) -> Optional[ConversationModel]:
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            result = await session.execute(
+                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id)
+            )
+            return result.scalar_one_or_none()
+        finally:
+            await gen.aclose()
+
+    async def alist_by_user(self, user_id: str, limit: int = 20) -> list[ConversationModel]:
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            result = await session.execute(
+                select(ConversationModel)
+                .where(ConversationModel.user_id == user_id)
+                .order_by(desc(ConversationModel.updated_at))
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+        finally:
+            await gen.aclose()
+
+    async def aupdate(self, conversation_id: str, **kwargs) -> Optional[ConversationModel]:
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            result = await session.execute(
+                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id)
+            )
+            conv = result.scalar_one_or_none()
+            if not conv:
+                return None
+            for k, v in kwargs.items():
+                if hasattr(conv, k) and v is not None:
+                    setattr(conv, k, v)
+            conv.updated_at = _utcnow()
+            await session.commit()
+            await session.refresh(conv)
+            return conv
+        finally:
+            await gen.aclose()
+
+    # ---- Message CRUD ----
+
+    async def aappend_message(self, conversation_id: str, user_id: str, session_id: str,
+                              role: str, content: str, image_url: str | None = None,
+                              product_refs: list | None = None, evidence_refs: list | None = None,
+                              memory_refs: list | None = None, metadata: dict | None = None) -> ConversationMessageModel:
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            msg = ConversationMessageModel(
+                message_id=_new_id("MSG"),
+                conversation_id=conversation_id,
+                user_id=user_id,
+                session_id=session_id,
+                role=role,
+                content=content,
+                image_url=image_url,
+                product_refs=product_refs or [],
+                evidence_refs=evidence_refs or [],
+                memory_refs=memory_refs or [],
+                created_at=_utcnow(),
+                extra_data=metadata or {},
+            )
+            session.add(msg)
+            # touch conversation updated_at
+            conv_result = await session.execute(
+                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id)
+            )
+            conv = conv_result.scalar_one_or_none()
+            if conv:
+                conv.updated_at = _utcnow()
+            await session.commit()
+            await session.refresh(msg)
+            return msg
+        finally:
+            await gen.aclose()
+
+    async def alist_messages(self, conversation_id: str, limit: int = 50) -> list[ConversationMessageModel]:
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            result = await session.execute(
+                select(ConversationMessageModel)
+                .where(ConversationMessageModel.conversation_id == conversation_id)
+                .order_by(ConversationMessageModel.created_at)
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+        finally:
+            await gen.aclose()
+
+    # ---- Sync wrappers ----
+
+    def create(self, user_id: str, session_id: str, title: str = "") -> ConversationModel:
+        return run_async(self.acreate(user_id, session_id, title))
+
+    def get(self, conversation_id: str) -> Optional[ConversationModel]:
+        return run_async(self.aget(conversation_id))
+
+    def list_by_user(self, user_id: str, limit: int = 20) -> list[ConversationModel]:
+        return run_async(self.alist_by_user(user_id, limit))
+
+    def append_message(self, conversation_id: str, user_id: str, session_id: str,
+                       role: str, content: str, **kwargs) -> ConversationMessageModel:
+        return run_async(self.aappend_message(conversation_id, user_id, session_id, role, content, **kwargs))
+
+    def list_messages(self, conversation_id: str, limit: int = 50) -> list[ConversationMessageModel]:
+        return run_async(self.alist_messages(conversation_id, limit))
+
+
+    async def adelete(self, conversation_id: str) -> bool:
+        """硬删除对话及其所有消息。"""
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            # 先删消息
+            from sqlalchemy import delete
+            await session.execute(
+                delete(ConversationMessageModel).where(
+                    ConversationMessageModel.conversation_id == conversation_id
+                )
+            )
+            # 再删对话
+            result = await session.execute(
+                delete(ConversationModel).where(
+                    ConversationModel.conversation_id == conversation_id
+                )
+            )
+            await session.commit()
+            return result.rowcount > 0
+        except Exception:
+            await session.rollback()
+            return False
+        finally:
+            await gen.aclose()
+
+    def delete(self, conversation_id: str) -> bool:
+        """同步删除 (使用 run_async 桥接)。"""
+        try:
+            return run_async(self.adelete(conversation_id))
+        except Exception:
+            return False
+
+
+# ---- Singleton ----
+
+_conv_repo: ConversationRepository | None = None
+
+
+def get_conversation_repo() -> ConversationRepository:
+    global _conv_repo
+    if _conv_repo is None:
+        _conv_repo = ConversationRepository()
+    return _conv_repo

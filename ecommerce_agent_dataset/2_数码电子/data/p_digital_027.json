@@ -1,0 +1,59 @@
+{
+  "product_id": "p_digital_027",
+  "title": "小米 Redmi Buds 6 真无线蓝牙耳机 半入耳式 AI降噪 长续航 适配小米/苹果/华为",
+  "brand": "小米",
+  "category": "数码电子",
+  "sub_category": "真无线耳机",
+  "base_price": 99.0,
+  "image_path": "2_数码电子/images/p_digital_027.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_027_1",
+      "properties": {
+        "颜色": "白色"
+      },
+      "price": 99.0
+    },
+    {
+      "sku_id": "s_p_digital_027_2",
+      "properties": {
+        "颜色": "黑色"
+      },
+      "price": 99.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "小米Redmi Buds 6是百元级半入耳式真无线耳机标杆。AI通话降噪，半入耳设计久戴不痛。蓝牙5.3快速连接，支持小米/苹果/华为全平台适配。13mm大动圈，低音增强调音，刷抖音看剧音质清晰。单次续航5小时，总续航24小时。Type-C充电接口，性价比极高，适合学生和轻度使用场景。",
+    "official_faq": [
+      {
+        "question": "苹果手机能用吗？",
+        "answer": "支持！蓝牙5.3协议全平台兼容，iPhone/安卓都能正常使用。"
+      },
+      {
+        "question": "戴着舒服吗？",
+        "answer": "半入耳式设计，单耳仅4.2g，长时间佩戴无压迫感，适合办公室全天使用。"
+      },
+      {
+        "question": "通话质量怎么样？",
+        "answer": "AI通话降噪，日常电话会议和微信语音清晰无杂音。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "米粉小李子",
+        "rating": 5,
+        "content": "99块钱买到小米品质，连接我的红米手机秒配对，音质超出预期！"
+      },
+      {
+        "nickname": "学生妹",
+        "rating": 4,
+        "content": "半入耳不痛这个太重要了，图书馆戴一下午没问题，白色颜值也高。"
+      },
+      {
+        "nickname": "办公族",
+        "rating": 3,
+        "content": "音质够用，打电话清晰，就是没有降噪有点遗憾，但99元要啥自行车。"
+      }
+    ]
+  }
+}

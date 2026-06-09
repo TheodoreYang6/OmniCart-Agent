@@ -1,35 +1,20 @@
 """地址仓库 — PostgreSQL 持久化 + 内存降级。"""
 
-import asyncio
 import logging
 import uuid
 from typing import Optional
 
-import nest_asyncio
 from sqlalchemy import select, delete
 
-from app.core.database import get_session_sync
+from app.core.database import get_session_sync, run_async
 from app.models.address import AddressModel
 
 logger = logging.getLogger(__name__)
-_nest_patched = False
 
 
 class PgAddressRepository:
     """PostgreSQL 地址仓库。"""
 
-    def _run(self, coro):
-        global _nest_patched
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        if not _nest_patched:
-            nest_asyncio.apply(loop)
-            _nest_patched = True
-
-        return loop.run_until_complete(coro)
 
     async def _alist(self, user_id: str) -> list[dict]:
         factory = get_session_sync()
@@ -105,16 +90,16 @@ class PgAddressRepository:
     # ---- 同步接口 ----
 
     def list(self, user_id: str) -> list[dict]:
-        return self._run(self._alist(user_id))
+        return run_async(self._alist(user_id))
 
     def create(self, user_id: str, data: dict) -> Optional[dict]:
-        return self._run(self._acreate(user_id, data))
+        return run_async(self._acreate(user_id, data))
 
     def update(self, address_id: str, user_id: str, data: dict) -> Optional[dict]:
-        return self._run(self._aupdate(address_id, user_id, data))
+        return run_async(self._aupdate(address_id, user_id, data))
 
     def delete(self, address_id: str, user_id: str) -> bool:
-        return self._run(self._adelete(address_id, user_id))
+        return run_async(self._adelete(address_id, user_id))
 
 
 def _row_to_dict(addr: AddressModel) -> dict:

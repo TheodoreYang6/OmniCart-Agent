@@ -7,7 +7,7 @@ Model Gateway — 能力名驱动的模型访问层。
 
 配置集中在 model_config.yaml 中统一管理。
 
-每次 LLM 调用自动记录到 TraceCollector（可观测性）。
+每次 LLM 调用自动记录到 TraceCollector（可观测性）+ 终端审计日志。
 """
 
 import os
@@ -23,10 +23,30 @@ from app.core.config import MOCK_MODE
 from app.model_gateway.mock_model import MockChat, MockEmbedding
 from app.observability.collector import (
     get_collector, LLMSpan,
-    _estimate_tokens_input, _estimate_tokens_output, _extract_usage_from_response,
+    _estimate_tokens_input, _estimate_tokens_output,
 )
 
 _log = __import__("logging").getLogger(__name__)
+
+# 审计日志 — 每次模型调用终端可见
+_audit = __import__("logging").getLogger("omnicart.audit")
+_audit.setLevel(__import__("logging").INFO)
+if not _audit.handlers:
+    _h = __import__("logging").StreamHandler()
+    _h.setFormatter(__import__("logging").Formatter("%(message)s"))
+    _audit.addHandler(_h)
+    _audit.propagate = False
+
+
+def _audit_call(capability: str, model: str, prompt: str, response: str, latency_ms: int, status: str):
+    """终端输出每次模型调用摘要。"""
+    p = (prompt or "").replace("\n", "\\n")[:200]
+    r = (response or "").replace("\n", "\\n")[:150]
+    tag = "✅" if status == "success" else "❌"
+    _audit.info(f"{tag} [{capability}] {model} | {latency_ms}ms | in: {p}...")
+    if r:
+        _audit.info(f"   out: {r}...")
+    _audit.info("")
 
 _CONFIG_PATH = Path(__file__).resolve().parent / "model_config.yaml"
 
@@ -111,14 +131,43 @@ class ModelGateway:
                     temperature=cfg.get("temperature", 0.7),
                     max_tokens=cfg.get("max_tokens", 2048),
                 )
-                response = chat.generate(prompt, system)
+                response = await chat.generate(prompt, system)
         except Exception as e:
             status, error = "error", str(e)[:500]
         await self._trace("qwen.chat", capability, model, system, prompt, response,
                           t0, status, error)
+        _audit_call(capability, model, system + " " + prompt, response, round((time.perf_counter() - t0) * 1000), status)
         if status == "error":
             raise RuntimeError(error)
         return response
+
+    async def chat_stream(self, capability: str, prompt: str, system: str = ""):
+        """流式对话生成 — 每个 token yield"""
+        cfg = self._capabilities.get(capability, {})
+        model = cfg.get("model", "qwen-plus")
+        t0 = time.perf_counter()
+        full_response = ""
+        try:
+            if MOCK_MODE:
+                for ch in MockChat().generate(prompt, system):
+                    full_response += ch
+                    yield ch
+            else:
+                from app.model_gateway.qwen_chat import QwenChat
+                chat = QwenChat(
+                    model=model,
+                    temperature=cfg.get("temperature", 0.7),
+                    max_tokens=cfg.get("max_tokens", 2048),
+                )
+                async for token in chat.generate_stream(prompt, system):
+                    full_response += token
+                    yield token
+            status = "mock" if MOCK_MODE else "success"
+        except Exception as e:
+            status, error = "error", str(e)[:500]
+            _audit_call(capability, model, system + " " + prompt, "", round((time.perf_counter() - t0) * 1000), status)
+            raise RuntimeError(error) from e
+        _audit_call(capability, model, system + " " + prompt, full_response, round((time.perf_counter() - t0) * 1000), status)
 
     async def embed(self, texts: list[str], capability: str = "text_embedding") -> list[list[float]]:
         """文本向量化 — 自动追踪"""
@@ -137,12 +186,13 @@ class ModelGateway:
                     model=model,
                     dimensions=cfg.get("dimensions", 1024),
                 )
-                result = emb.embed(texts)
+                result = await emb.embed(texts)
         except Exception as e:
             status, error = "error", str(e)[:500]
         await self._trace("qwen.embed", capability, model, "", prompt_snippet,
                           f"{len(texts)} vectors, {len(result[0]) if result else 0}d",
                           t0, status, error)
+        _audit_call(capability, model, prompt_snippet, f"{len(texts)}vecs/{len(result[0]) if result else 0}d", round((time.perf_counter() - t0) * 1000), status)
         if status == "error":
             raise RuntimeError(error)
         return result
@@ -170,13 +220,14 @@ class ModelGateway:
                     max_tokens=cfg.get("max_tokens", 2048),
                 )
                 if image_bytes:
-                    response = vis.analyze_bytes(image_bytes, content_type, prompt, system)
+                    response = await vis.analyze_bytes(image_bytes, content_type, prompt, system)
                 else:
-                    response = vis.analyze(image_path or "", prompt, system)
+                    response = await vis.analyze(image_path or "", prompt, system)
         except Exception as e:
             status, error = "error", str(e)[:500]
         await self._trace("qwen.vision", capability, model, system, prompt, response,
                           t0, status, error)
+        _audit_call(capability, model, system + " " + prompt, response, round((time.perf_counter() - t0) * 1000), status)
         if status == "error":
             raise RuntimeError(error)
         return response
@@ -197,11 +248,12 @@ class ModelGateway:
             else:
                 from app.model_gateway.qwen_reranker import QwenReranker
                 ranker = QwenReranker(model=model)
-                result = ranker.rerank(query, documents, top_n or 10)
+                result = await ranker.rerank(query, documents, top_n or 10)
         except Exception as e:
             status, error = "error", str(e)[:500]
         await self._trace("qwen.rerank", capability, model, "", prompt_snippet,
                           f"{len(result)} results", t0, status, error)
+        _audit_call(capability, model, prompt_snippet, f"{len(result)} results, top={result[0]['relevance_score']:.3f}" if result else "0 results", round((time.perf_counter() - t0) * 1000), status)
         if status == "error":
             raise RuntimeError(error)
         return result
@@ -224,8 +276,8 @@ class _CapabilityProxy:
         self._gw = gateway
         self._cap = capability
 
-    def chat(self, prompt: str, system: str = "") -> str:
-        return self._gw.chat(self._cap, prompt, system)
+    async def chat(self, prompt: str, system: str = "") -> str:
+        return await self._gw.chat(self._cap, prompt, system)
 
     @property
     def config(self) -> dict:

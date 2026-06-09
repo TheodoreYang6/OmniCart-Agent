@@ -1,0 +1,64 @@
+{
+  "product_id": "p_digital_026",
+  "title": "QCY MeloBuds ANC 真无线降噪蓝牙耳机 40dB深度降噪 Hi-Res音质 30小时续航",
+  "brand": "QCY",
+  "category": "数码电子",
+  "sub_category": "真无线耳机",
+  "base_price": 199.0,
+  "image_path": "2_数码电子/images/p_digital_026.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_026_1",
+      "properties": {
+        "颜色": "星空黑"
+      },
+      "price": 199.0
+    },
+    {
+      "sku_id": "s_p_digital_026_2",
+      "properties": {
+        "颜色": "云朵白"
+      },
+      "price": 199.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "QCY MeloBuds ANC 是一款性价比极高的真无线降噪耳机。40dB深度主动降噪，Hi-Res Audio认证音质，搭载12mm大动圈单元，低音浑厚高音清亮。蓝牙5.4连接稳定，游戏模式延迟低至45ms。单次续航6小时，充电盒总续航30小时。IPX5防水防汗，运动无忧。适合学生党、通勤族、预算有限的音乐爱好者。",
+    "official_faq": [
+      {
+        "question": "降噪效果如何？",
+        "answer": "40dB主动降噪，地铁通勤环境噪音降低明显，日常使用完全够用。"
+      },
+      {
+        "question": "续航多久？",
+        "answer": "耳机单次6小时，搭配充电盒总续航30小时，支持快充15分钟使用2小时。"
+      },
+      {
+        "question": "适合运动吗？",
+        "answer": "IPX5防水等级，跑步健身出汗不担心，佩戴稳固不易掉落。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "学生党小明",
+        "rating": 5,
+        "content": "199元买到40dB降噪太值了，音质比预期好很多，考研党图书馆必备！"
+      },
+      {
+        "nickname": "通勤族小李",
+        "rating": 4,
+        "content": "地铁上用降噪效果不错，连接稳定，就是充电盒有点大。"
+      },
+      {
+        "nickname": "数码控老王",
+        "rating": 4,
+        "content": "性价比之选，Hi-Res认证在这个价位很少见，推荐预算有限的朋友。"
+      },
+      {
+        "nickname": "运动达人",
+        "rating": 5,
+        "content": "跑步戴着不掉的耳机终于找到了！防水也靠谱，出了汗擦擦就好。"
+      }
+    ]
+  }
+}

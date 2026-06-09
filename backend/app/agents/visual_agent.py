@@ -12,27 +12,25 @@ from app.core.config import REDIS_CACHE_TTL_VISUAL
 
 _UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "uploads"
 
-PROMPT_SYSTEM = """你是一个电商购物导购助手，专门从商品截图中提取关键信息。
-请仔细观察用户上传的商品截图，提取所有可见的商品参数。"""
+PROMPT_SYSTEM = """你是一个专业的电商商品识别助手。你的任务是仔细观察商品图片，准确提取商品信息。
+特别注意同一品牌下的不同产品线（如精华 vs 粉底液、面霜 vs 防晒），要根据包装文字、瓶身颜色、质地等细节严格区分。"""
 
-PROMPT_USER = """请从这张商品截图中提取以下信息，以 JSON 格式返回（只返回 JSON，不要其他内容）：
+PROMPT_USER = """请从这张商品图片中提取以下信息，只返回 JSON：
 
 {
-  "product_name": "商品名称（优先提取中文名，如只有英文则保留英文）",
-  "brand": "品牌名（优先提取中文名，如只有英文则保留英文）",
-  "category": "商品类别（如：精华/面霜/防晒/手机/耳机/充电宝/T恤/跑鞋/咖啡/零食等）",
-  "price": 价格数字（只提取数字，不含货币符号）,
-  "specs": "关键规格（如容量30ml、重量200g、尺码M等）",
-  "highlights": ["卖点标签（中文优先），如抗初老、淡化细纹、夜间修护、保湿"]],
-  "confidence": 0.0到1.0之间的数值
+  "product_name": "完整商品名（中文优先，包含产品线关键词如'特润修护精华'vs'持妆粉底液'）",
+  "brand": "品牌名",
+  "category": "精确类别（精华/面霜/防晒/粉底液/化妆水/口红/面膜/眼霜/洁面等）",
+  "price": 价格数字,
+  "specs": "规格（如30ml、50g）",
+  "highlights": ["卖点标签"],
+  "confidence": 0.0到1.0
 }
 
-规则：
-- 只能提取截图中明确可见的信息
-- product_name和brand有中文就优先输出中文
-- category根据商品外观/包装/描述判断，输出中文类别词
-- 无法识别的字段设为 null 或 []
-- confidence 根据图片清晰度和字段完整度估算，模糊图片低于 0.5"""
+关键规则：
+- 同一品牌常有外观相似的多个产品线，务必根据包装上的产品名文字严格区分
+- 金棕色/深色瓶身≠精华液，仔细辨识瓶身或包装上印的具体产品名
+- 无法确认时降低 confidence，不要猜测"""
 
 
 class VisualAgent:
@@ -40,8 +38,12 @@ class VisualAgent:
         self._gateway = get_model_gateway()
 
     async def parse(self, image_url: str, user_query: str = "") -> VisualResult:
-        # 将 /api/uploads/xxx.png 转为本地路径
-        filename = image_url.rsplit("/", 1)[-1]
+        # 解析文件名: /api/uploads/xxx.png 或 /api/uploads/xxx.png?t=123
+        from urllib.parse import urlparse
+        path = urlparse(image_url).path
+        filename = path.rsplit("/", 1)[-1]
+        if not filename:
+            return VisualResult(confidence=0.0, raw_response="", fallback_level=4)
         filepath = _UPLOAD_DIR / filename
 
         if not filepath.exists():
@@ -54,9 +56,11 @@ class VisualAgent:
             ".webp": "image/webp", ".gif": "image/gif",
         }.get(ext, "image/png")
 
-        # 缓存键：视觉解析结果由图片内容 + 用户问题决定
+        # 缓存键：图片内容 + 用户问题 + 模型名（换模型/改prompt自动失效旧缓存）
+        model = self._gateway.get_capability_config("visual_understanding").get("model", "qwen-vl-plus")
         img_hash = hashlib.md5(image_bytes).hexdigest()[:12]
-        cache_key = make_key("visual", img_hash, user_query[:80])
+        prompt_hash = hashlib.md5(PROMPT_USER.encode()).hexdigest()[:8]
+        cache_key = make_key("visual", model, img_hash, prompt_hash, user_query[:80])
 
         async def _do_parse() -> VisualResult:
             prompt = PROMPT_USER
@@ -77,7 +81,11 @@ class VisualAgent:
             result.raw_response = raw
             return result
 
-        return await cached(cache_key, REDIS_CACHE_TTL_VISUAL, _do_parse)
+        return await cached(
+            cache_key, REDIS_CACHE_TTL_VISUAL, _do_parse,
+            serializer=lambda v: json.dumps(v.model_dump(), ensure_ascii=False),
+            deserializer=lambda s: VisualResult(**json.loads(s)),
+        )
 
     def _parse_json(self, raw: str) -> VisualResult:
         # 尝试提取 JSON（可能被 markdown 代码块包裹）

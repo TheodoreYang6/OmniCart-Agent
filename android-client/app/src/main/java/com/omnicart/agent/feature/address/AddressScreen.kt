@@ -22,9 +22,17 @@ fun AddressScreen(
     viewModel: AddressViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
         viewModel.loadAddresses()
+    }
+
+    LaunchedEffect(uiState.errorMessage) {
+        uiState.errorMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
     }
 
     // 新增 / 编辑对话框
@@ -72,15 +80,7 @@ fun AddressScreen(
                 },
             )
         },
-        snackbarHost = {
-            uiState.errorMessage?.let { msg ->
-                Snackbar(modifier = Modifier.padding(16.dp)) {
-                    Text(msg)
-                }
-            } ?: run {
-                Box {}
-            }
-        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         if (uiState.isLoading && uiState.addresses.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {

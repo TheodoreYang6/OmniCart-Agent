@@ -11,4 +11,8 @@ data class RecommendRequest(
     val demoMode: Boolean = false,
     @SerializedName("session_id")
     val sessionId: String = "",
+    @SerializedName("user_id")
+    val userId: String = "",
+    @SerializedName("conversation_id")
+    val conversationId: String = "",
 )

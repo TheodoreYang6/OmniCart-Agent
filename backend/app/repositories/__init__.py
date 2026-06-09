@@ -13,11 +13,6 @@ from app.repositories.pg_cart_repo import (
     MemCartRepository,
     get_cart_repo,
 )
-from app.repositories.pg_preference_repo import (
-    PgPreferenceRepository,
-    MemPreferenceRepository,
-    get_preference_repo,
-)
 from app.repositories.user_repo import (
     PgUserRepository,
     MemUserRepository,
@@ -28,6 +23,7 @@ from app.repositories.address_repo import (
     MemAddressRepository,
     get_address_repo,
 )
+from app.repositories.conversation_repo import ConversationRepository, get_conversation_repo
 
 __all__ = [
     "get_product_repo",
@@ -43,13 +39,12 @@ __all__ = [
     "get_cart_repo",
     "PgCartRepository",
     "MemCartRepository",
-    "get_preference_repo",
-    "PgPreferenceRepository",
-    "MemPreferenceRepository",
     "get_user_repo",
     "PgUserRepository",
     "MemUserRepository",
     "get_address_repo",
     "PgAddressRepository",
     "MemAddressRepository",
+    "get_conversation_repo",
+    "ConversationRepository",
 ]

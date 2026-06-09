@@ -52,15 +52,26 @@ def _check_pg() -> bool:
 
 async def _check_pg_async():
     import asyncpg
-    conn = await asyncpg.connect(DATABASE_URL, timeout=3)
+    # asyncpg 不接受 SQLAlchemy 的 "+asyncpg" 协议前缀，需转换为纯 postgresql://
+    pg_url = DATABASE_URL.replace("+asyncpg", "") if "+asyncpg" in DATABASE_URL else DATABASE_URL
+    conn = await asyncpg.connect(pg_url, timeout=3)
     await conn.close()
 
 
-# 向后兼容的 ProductRepository 别名
-if USE_POSTGRES and _check_pg():
-    ProductRepository = PgProductRepository  # type: ignore[assignment]
-else:
-    ProductRepository = JsonProductRepository  # type: ignore[assignment]
+_ProductRepository: type | None = None
+
+
+def __getattr__(name: str):
+    """惰性解析 ProductRepository，避免模块导入时触发网络 I/O。"""
+    if name == "ProductRepository":
+        global _ProductRepository
+        if _ProductRepository is None:
+            if USE_POSTGRES and _check_pg():
+                _ProductRepository = PgProductRepository
+            else:
+                _ProductRepository = JsonProductRepository
+        return _ProductRepository
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_product_repo(data_root: Path | None = None) -> BaseProductRepository:

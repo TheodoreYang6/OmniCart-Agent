@@ -8,10 +8,10 @@ from app.schemas.product import Product
 
 # 品类目录名 → 中文分类名
 _CATEGORY_DIRS = {
-    "1_Beauty_and_Skincare": "美妆护肤",
-    "2_Digital_Electronics": "数码电子",
-    "3_Clothing_and_Sports": "服饰运动",
-    "4_Food_and_Life": "食品饮料",
+    "1_美妆护肤": "美妆护肤",
+    "2_数码电子": "数码电子",
+    "3_服饰运动": "服饰运动",
+    "4_食品生活": "食品饮料",
 }
 
 # 中文路径 → 英文目录名（图片 URL 修正）
@@ -68,8 +68,15 @@ class BaseProductRepository(ABC):
     def total_count(self) -> int:
         ...
 
-    def resolve_image_url(self, product_id: str, base_url: str = "/images") -> str:
-        """将数据集中的图片路径转换为可访问的 URL。"""
+    def resolve_image_url(self, product_id: str, base_url: str = "") -> str:
+        """V4: 返回新图片 API 路径。"""
+        product = self.get_by_id(product_id)
+        if not product or not product.image_path:
+            return ""
+        return f"/api/products/{product_id}/image"
+
+    def _resolve_image_url_legacy(self, product_id: str, base_url: str = "/images") -> str:
+        """旧版图片 URL 转换(已废弃)。"""
         product = self.get_by_id(product_id)
         if not product or not product.image_path:
             return ""

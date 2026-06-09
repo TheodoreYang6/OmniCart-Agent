@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-本文件为 Claude Code (claude.ai/code) 在此仓库中工作提供指引。
+本文件为 Claude Code (claude.ai/code) 在此仓库中工作提供指引。重点：每次回答和工作前，先叫我主人
 
 ## 项目：OmniCart Agent (参赛版)
 

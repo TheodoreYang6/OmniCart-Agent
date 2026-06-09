@@ -6,6 +6,7 @@
 LangGraph StateGraph 控制状态流转，每个 Agent 是一个 node。
 """
 
+import time
 from langgraph.graph import StateGraph, END
 
 from app.agents.router_agent import RouterAgent
@@ -17,11 +18,14 @@ from app.model_gateway.gateway import get_model_gateway
 from app.verification.response_guard import ResponseGuard
 from app.verification.evidence_checker import EvidenceSufficiencyChecker
 from app.workflow.checkpoint import get_checkpoint_store
-from app.memory.preference_memory import get_memory
+from app.services.conversation_service import get_conversation_service
 from app.repositories.product_repo import get_product_repo
 from app.schemas.workflow import WorkflowState
 from app.core.cache import cached, make_key, cache_set
 from app.core.config import REDIS_CACHE_TTL_WORKFLOW
+import json
+import logging
+_log = logging.getLogger(__name__)
 
 # 全局单例 — 通过 factory 注入 repo，PG/JSON 自动切换
 _product_repo = get_product_repo()
@@ -35,58 +39,92 @@ _guard = ResponseGuard()
 _evidence_checker = EvidenceSufficiencyChecker()
 
 
-async async def _node_router(state: WorkflowState) -> WorkflowState:
+async def _node_router(state: WorkflowState) -> WorkflowState:
+    t0 = time.perf_counter()
     state = await _router.execute(state)
+    state.timing["router_ms"] = round((time.perf_counter() - t0) * 1000)
 
-    # 合并多轮记忆中的偏好
-    mem = get_memory()
-    state.constraints = mem.merge_constraints(state.session_id, state.constraints)
-    mem.update(state.session_id, state.constraints)
-
-    # V2: 合并长期偏好记忆（跨会话学习）
-    if state.user_id:
+    # Memory Lite: 约束合并 → context_snapshot (ConversationService 统一管理)
+    conv_svc = get_conversation_service()
+    if state.conversation_id:
         try:
-            from app.memory.long_term import get_long_term_memory
-            ltm = get_long_term_memory()
-            lt_defaults = ltm.merge_with_session(state.user_id, state.constraints)
-            if lt_defaults:
-                # 长期偏好的默认值不覆盖当前会话的明确约束
-                if not state.constraints.category and lt_defaults.get("category"):
-                    state.constraints.category = lt_defaults["category"]
-                if state.constraints.budget_max is None and lt_defaults.get("budget_max"):
-                    state.constraints.budget_max = lt_defaults["budget_max"]
-                if not state.constraints.scenario and lt_defaults.get("scenario"):
-                    state.constraints.scenario = lt_defaults["scenario"]
-            # 记录这次搜索行为
-            await ltm.record_search(
-                user_id=state.user_id,
-                query=state.user_query,
-                category=state.constraints.category or "",
-                sub_category=state.constraints.sub_category or "",
+            state.constraints = await conv_svc.merge_constraints(
+                state.conversation_id, state.constraints
             )
-        except Exception:
-            pass  # 长期记忆失败不影响主链路
+            await conv_svc.set_last_context(
+                state.conversation_id,
+                query=state.user_query,
+                intent=state.intent,
+            )
+        except Exception as e:
+            _log.debug(f"Constraint merge skipped: {e}")
 
     return state
 
 
 async def _node_visual(state: WorkflowState) -> WorkflowState:
+    t0 = time.perf_counter()
     if not state.image_url:
+        state.timing["visual_ms"] = 0
         return state
     result = await _visual.parse(state.image_url, state.user_query)
     if result:
-        state.visual_result = result.model_dump()
-        extra_info = []
-        if result.product_name:
-            extra_info.append(result.product_name)
-        if result.brand:
-            extra_info.append(result.brand)
-        if result.category:
-            extra_info.append(result.category)
-        if result.specs:
-            extra_info.append(result.specs)
-        if extra_info:
-            state.user_query = f"{state.user_query} {' '.join(extra_info)}"
+        # 归一化为 dict（缓存命中返回 VisualResult，反序列化器已修复）
+        vr = result if isinstance(result, dict) else result.model_dump()
+        state.visual_result = vr
+        p_name = vr.get("product_name", "") or ""
+        p_brand = vr.get("brand", "") or ""
+        p_cat = vr.get("category", "") or ""
+        p_price = vr.get("price")
+        p_specs = vr.get("specs", "") or ""
+        p_conf = vr.get("confidence", 0) or 0
+
+        # 视觉信息注入：精确匹配优先，语义搜索补充
+        if p_conf >= 0.5:
+            extra_info = [x for x in [p_name, p_brand, p_cat, p_specs] if x]
+            if extra_info:
+                state.user_query = f"{state.user_query} {' '.join(extra_info)}"
+
+            # ① 品类覆盖：以视觉为准，无条件清空旧约束防止泄漏
+            mapped_cat = _map_visual_category(p_cat) if p_cat else ""
+            if mapped_cat:
+                state.constraints.category = mapped_cat
+                state.constraints.sub_category = p_cat or ""
+            # 有视觉结果时清空旧场景/预算（防止上一轮泄漏）
+            state.constraints.scenario = None
+            state.constraints.scenario_keywords = []
+            state.constraints.budget_min = None
+            state.constraints.budget_max = None
+
+            # ② 精确匹配：品牌名 ILIKE + 产品名关键词 OR 匹配
+            try:
+                from app.core.database import get_session_sync
+                from app.models.product import ProductModel
+                from sqlalchemy import select, or_, func
+                factory = get_session_sync()
+                if factory:
+                    async with factory() as session:
+                        conditions = []
+                        # 品牌名精确匹配（跳过疑似噪音品牌如 "mat"）
+                        if p_brand and len(p_brand) >= 2 and not (p_brand.isascii() and len(p_brand) <= 3 and p_brand.isalpha()):
+                            conditions.append(ProductModel.brand.ilike(f"%{p_brand}%"))
+                        # 产品名拆成 2-3 字片段，OR 匹配（容忍"肌活"等差异）
+                        for window in [3, 2]:
+                            for i in range(len(p_name) - window + 1):
+                                kw = p_name[i:i + window]
+                                if kw and len(kw) >= 2:
+                                    conditions.append(ProductModel.title.ilike(f"%{kw}%"))
+                        if conditions:
+                            result = await session.execute(
+                                select(ProductModel.product_id)
+                                .where(or_(*conditions))
+                                .limit(5)
+                            )
+                            pids = [row[0] for row in result.fetchall()]
+                            state.visual_matched_pids = pids[:2]
+            except Exception:
+                pass
+
         # 记录 trace
         step_num = len(state.trace_steps) + 1
         state.trace_steps.append({
@@ -94,30 +132,109 @@ async def _node_visual(state: WorkflowState) -> WorkflowState:
             "agent_name": "Visual Agent (Qwen-VL)",
             "action": "image_parse",
             "input_summary": state.image_url[-30:],
-            "output_summary": f"product={result.product_name}, brand={result.brand}, confidence={result.confidence}",
+            "output_summary": f"product={p_name}, brand={p_brand}, confidence={p_conf}",
             "latency_ms": 0,
-            "status": "success" if result.confidence > 0 else "fallback",
+            "status": "success" if p_conf > 0 else "fallback",
         })
+        state.timing["visual_ms"] = round((time.perf_counter() - t0) * 1000)
     return state
 
 
+def _map_visual_category(cat: str) -> str:
+    mapping = {
+        "精华": "美妆护肤", "面霜": "美妆护肤", "防晒": "美妆护肤", "粉底": "美妆护肤",
+        "口红": "美妆护肤", "面膜": "美妆护肤", "洗发水": "美妆护肤", "沐浴露": "美妆护肤",
+        "洁面": "美妆护肤", "化妆水": "美妆护肤", "眼霜": "美妆护肤", "卸妆": "美妆护肤",
+        "手机": "数码电子", "电脑": "数码电子", "耳机": "数码电子", "充电宝": "数码电子",
+        "平板": "数码电子", "手表": "数码电子", "音箱": "数码电子", "键盘": "数码电子",
+        "T恤": "服饰运动", "跑鞋": "服饰运动", "裤子": "服饰运动", "裙子": "服饰运动",
+        "卫衣": "服饰运动", "短裤": "服饰运动",
+        "零食": "食品饮料", "饮料": "食品饮料", "咖啡": "食品饮料", "茶叶": "食品饮料",
+        "矿泉水": "食品饮料", "可乐": "食品饮料", "牛奶": "食品饮料", "气泡水": "食品饮料",
+        "冰淇淋": "食品饮料", "雪糕": "食品饮料", "酸奶": "食品饮料", "坚果": "食品饮料",
+        "方便面": "食品饮料", "巧克力": "食品饮料", "饼干": "食品饮料", "面包": "食品饮料",
+    }
+    return mapping.get(cat, "")
+
+
 async def _node_retrieval(state: WorkflowState) -> WorkflowState:
-    return await _retrieval.execute(state)
+    t0 = time.perf_counter()
+    result = await _retrieval.execute(state)
+    # RAG trace: 记录 embedding 搜索结果
+    try:
+        from app.observability.rag_logger import RagTrace
+        _rag = RagTrace(session_id=state.session_id or "", query=state.user_query)
+        _rag.set_embedding(
+            query_vec=[],  # 向量在检索内部，不暴露
+            candidates=result.retrieved_products or [],
+            latency_ms=round((time.perf_counter() - t0) * 1000),
+        )
+        state._rag_trace = _rag
+    except Exception:
+        pass
+    # 视觉精确匹配：将匹配到的商品钉在检索结果顶部
+    visual_pids = getattr(state, "visual_matched_pids", None) or []
+    if visual_pids:
+        products = result.retrieved_products
+        matched = [p for p in products if p.get("product_id") in visual_pids]
+        others = [p for p in products if p.get("product_id") not in visual_pids]
+        result.retrieved_products = matched + others
+        # 同时给匹配商品加分，确保精排不翻盘
+        for p in matched:
+            p["reranker_score"] = max(p.get("reranker_score", 0), 0.95)
+            p["_visual_exact_match"] = True
+    # 检索完成后恢复原始 query（仅限 profile hints 污染，视觉信息保留给精排和回复）
+    if getattr(state, "user_query_original", None):
+        state.user_query = state.user_query_original
+        state.user_query_original = None
+    result.timing["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
+    return result
 
 
 async def _node_reranker(state: WorkflowState) -> WorkflowState:
-    """Qwen Reranker 精排：对 jieba 粗排结果进行语义重排序"""
+    """Qwen Reranker 精排：对语义检索结果进行语义重排序"""
+    t0 = time.perf_counter()
     products = state.retrieved_products
     if len(products) <= 1:
+        state.timing["rerank_ms"] = 0
         return state
 
     try:
+        # Build evidence lookup by product_id for richer reranker input
+        ev_by_pid: dict[str, list[str]] = {}
+        for ev in state.evidence_list:
+            pid = ev.get("product_id", "")
+            content = ev.get("content", "")
+            if pid and content and "余弦相似度" not in str(content) and "Text match" not in str(content):
+                ev_by_pid.setdefault(pid, []).append(str(content)[:300])
+
         documents = []
         for p in products:
+            pid = p.get("product_id", "")
             doc = f"{p.get('title','')} {p.get('category','')} {p.get('sub_category','')}"
             desc = p.get('description', '')
             if desc:
-                doc += f" {desc[:200]}"
+                doc += f" {desc[:300]}"
+            # Add rag_knowledge content for richer semantic matching
+            rk = p.get("rag_knowledge") or {}
+            if isinstance(rk, dict):
+                mkt = rk.get("marketing_description", "")
+                if mkt:
+                    doc += f" {str(mkt)[:300]}"
+                faqs = rk.get("official_faq", [])
+                if isinstance(faqs, list):
+                    for faq in faqs[:2]:
+                        if isinstance(faq, dict):
+                            doc += f" {faq.get('question','')[:150]} {faq.get('answer','')[:300]}"
+                revs = rk.get("user_reviews", [])
+                if isinstance(revs, list):
+                    for rev in revs[:2]:
+                        if isinstance(rev, dict):
+                            doc += f" 用户评价: {rev.get('content','')[:200]}"
+            # Add evidence snippets
+            ev_snippets = ev_by_pid.get(pid, [])[:2]
+            if ev_snippets:
+                doc += " " + " ".join(ev_snippets)
             documents.append(doc)
 
         ranked = await _gateway.rerank(
@@ -126,14 +243,27 @@ async def _node_reranker(state: WorkflowState) -> WorkflowState:
             top_n=len(products),
         )
 
-        # 按 relevance_score 降序重排
+        # 按 relevance_score 降序重排，同时把分数写回每个 product dict
         index_map = {r["index"]: r["relevance_score"] for r in ranked}
+        # 固定校准: Reranker 排序分(0~1) → 商业可读分，保留质量信号和区分度
+        for idx in index_map:
+            index_map[idx] = 0.68 + 0.38 * index_map[idx]
         reordered = sorted(
             enumerate(products),
             key=lambda x: index_map.get(x[0], 0.0),
             reverse=True,
         )
+        # 将 reranker_score 写入 product dict，供 Decision V4 scoring 使用
+        for idx, p in enumerate(products):
+            p["reranker_score"] = index_map.get(idx, 0.0)
+            p["relevance_score"] = p["reranker_score"]
         state.retrieved_products = [p for _, p in reordered]
+        # 视觉精确匹配商品锁定最高分（Reranker 可能覆盖了之前的加分）
+        visual_pids = set(state.visual_matched_pids or [])
+        for p in state.retrieved_products:
+            if p.get("product_id") in visual_pids:
+                p["reranker_score"] = 0.99
+                p["relevance_score"] = 0.99
 
         # 记录 trace
         step_num = len(state.trace_steps) + 1
@@ -146,22 +276,78 @@ async def _node_reranker(state: WorkflowState) -> WorkflowState:
             "latency_ms": 0,
             "status": "success",
         })
-    except Exception:
-        pass  # Reranker 不可用时保持原序
+    except Exception as e:
+        _log.warning(f"Reranker unavailable, falling back to raw retrieval scores: {e}")
 
+    # RAG trace: 记录 reranker 结果
+    try:
+        _rag = getattr(state, "_rag_trace", None)
+        if _rag is not None:
+            _rag.set_reranker(
+                input_products=products,
+                ranked=state.retrieved_products,
+                scores=[p.get("reranker_score", 0) for p in state.retrieved_products],
+                latency_ms=round((time.perf_counter() - t0) * 1000),
+            )
+    except Exception:
+        pass
+    state.timing["rerank_ms"] = round((time.perf_counter() - t0) * 1000)
     return state
 
 
-def _node_decision(state: WorkflowState) -> WorkflowState:
-    return _decision.execute(state)
+async def _node_decision(state: WorkflowState) -> WorkflowState:
+    t0 = time.perf_counter()
+    state = await _decision.execute(state)
+    # 按 final_score 排序，但视觉精确匹配商品始终排在最前
+    if state.decision_results and state.retrieved_products:
+        ranked = {r["product_id"]: i for i, r in enumerate(state.decision_results)}
+        visual_pids = set(state.visual_matched_pids or [])
+        state.retrieved_products.sort(key=lambda p: (
+            0 if p.get("product_id") in visual_pids else 1,  # 精确匹配优先
+            ranked.get(p.get("product_id", ""), 999)          # 同组内按分数排
+        ))
+        state.evidence_list.sort(key=lambda e: ranked.get(e.get("product_id", ""), 999))
+    # Memory Lite: 结构化商品列表存入 context_snapshot (供 FollowUpEngine 指代解析)
+    if state.conversation_id and state.retrieved_products:
+        try:
+            structured = []
+            for p in state.retrieved_products[:10]:
+                pid = p.get("product_id", "")
+                if pid:
+                    structured.append({
+                        "product_id": pid,
+                        "title": p.get("title", "")[:60],
+                        "brand": p.get("brand", ""),
+                        "price": p.get("price", 0),
+                    })
+            if structured:
+                conv_svc = get_conversation_service()
+                await conv_svc.set_last_products(state.conversation_id, structured)
+        except Exception:
+            pass
+    # RAG trace: 记录最终结果 + 评估
+    try:
+        _rag = getattr(state, "_rag_trace", None)
+        if _rag is not None:
+            _rag.set_final(state.retrieved_products or [], state.decision_results or [])
+            _rag.evaluate()  # 尝试从 eval_queries 匹配 golden
+            _rag.save()
+    except Exception:
+        pass
+    state.timing["decision_ms"] = round((time.perf_counter() - t0) * 1000)
+    return state
 
 
 async def _node_response(state: WorkflowState) -> WorkflowState:
-    return await _response.execute(state)
+    t0 = time.perf_counter()
+    result = await _response.execute(state)
+    result.timing["response_ms"] = round((time.perf_counter() - t0) * 1000)
+    return result
 
 
 def _node_evidence_check(state: WorkflowState) -> WorkflowState:
     """证据充足性检查：在 Reranker 之后、Decision 之前执行。"""
+    t0 = time.perf_counter()
     state.sufficiency_report = _evidence_checker.check(state)
     step_num = len(state.trace_steps) + 1
     state.trace_steps.append({
@@ -174,19 +360,29 @@ def _node_evidence_check(state: WorkflowState) -> WorkflowState:
         "latency_ms": 0,
         "status": "pass" if state.sufficiency_report.get("sufficient") else "insufficient",
     })
+    state.timing["evidence_check_ms"] = round((time.perf_counter() - t0) * 1000)
     return state
 
 
 def _node_guard(state: WorkflowState) -> WorkflowState:
-    _guard.check(state)
+    t0 = time.perf_counter()
+    _guard.check(state)  # sets state.harness_report with individual checks + passed
+
+    response_passed = state.harness_report.get("passed", True)
+    state.harness_report["passed"] = response_passed
+    state.harness_report["failure_source"] = None if response_passed else "response_guard"
+
+    state.timing["guard_ms"] = round((time.perf_counter() - t0) * 1000)
     return state
 
 
 def _router_next(state: WorkflowState) -> str:
-    """Router 后决定下一节点：闲聊→直接回复，有图→视觉解析，否则→检索"""
+    """Router 后决定下一节点：有图优先视觉解析，闲聊且无图→直接回复，否则→检索"""
+    if state.image_url:
+        return "visual"
     if state.intent == "chitchat":
         return "response"
-    return "visual" if state.image_url else "retrieval"
+    return "retrieval"
 
 
 def _has_results(state: WorkflowState) -> str:
@@ -231,37 +427,70 @@ def get_workflow():
     return _compiled
 
 
+_compiled_no_response = None
+
+
+def get_workflow_no_response():
+    """无 response/guard 节点的 workflow — 供 SSE 流式路径使用。"""
+    global _compiled_no_response
+    if _compiled_no_response is None:
+        wf = build_workflow()
+        # 移除 response 和 guard，decision 直接到 END
+        # LangGraph 的 StateGraph 在 compile 前可以修改
+        wf.add_edge("decision", END)
+        _compiled_no_response = wf.compile()
+    return _compiled_no_response
+
+
 async def run_workflow(user_query: str, image_url: str | None = None, session_id: str = "",
-                      user_id: str = "", enable_checkpoint: bool = True) -> WorkflowState:
-    wf = get_workflow()
+                      user_id: str = "", conversation_id: str = "", enable_checkpoint: bool = True,
+                      prefill_state: WorkflowState | None = None,
+                      context_prompt: str = "", no_response: bool = False) -> WorkflowState:
+    wf = get_workflow_no_response() if no_response else get_workflow()
 
     # ---- Workflow 级缓存：相同 query + image 在 TTL 内直接返回 ----
-    cache_key = make_key("workflow", user_query, image_url or "noimg")
+    cache_key = make_key("workflow", user_query, image_url or "noimg", user_id, session_id)
     if not enable_checkpoint:
-        state = await _run_uncached(user_query, image_url, session_id, user_id, wf, enable_checkpoint)
+        state = await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt)
     else:
         async def _do_run():
-            return await _run_uncached(user_query, image_url, session_id, user_id, wf, enable_checkpoint)
+            return await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt)
 
-        state = await cached(cache_key, REDIS_CACHE_TTL_WORKFLOW, _do_run)
+        state = await cached(
+            cache_key, REDIS_CACHE_TTL_WORKFLOW, _do_run,
+            serializer=lambda v: json.dumps(v.model_dump(), ensure_ascii=False, default=str),
+            deserializer=lambda s: WorkflowState(**json.loads(s)),
+        )
+
+    # cached() may return dict on cache hit; ensure WorkflowState
+    if isinstance(state, dict):
+        state = WorkflowState(**state)
 
     return state
 
 
 async def _run_uncached(user_query: str, image_url: str | None, session_id: str,
-                        user_id: str, wf, enable_checkpoint: bool) -> WorkflowState:
-    state = WorkflowState(session_id=session_id or "", user_id=user_id, user_query=user_query, image_url=image_url)
+                        user_id: str, conversation_id: str, wf, enable_checkpoint: bool,
+                        prefill_state: WorkflowState | None = None,
+                        context_prompt: str = "") -> WorkflowState:
+    if prefill_state is not None:
+        state = prefill_state
+        state.user_query = user_query
+        state.image_url = image_url
+        state.context_prompt = context_prompt
+    else:
+        state = WorkflowState(session_id=session_id or "", user_id=user_id, conversation_id=conversation_id,
+                              user_query=user_query, image_url=image_url, context_prompt=context_prompt)
 
     if enable_checkpoint and state.session_id:
         try:
             ckpt = get_checkpoint_store()
             restored = ckpt.load(state.session_id)
             if restored and restored.user_query == user_query:
-                logger = __import__('logging').getLogger(__name__)
-                logger.info(f"Resumed from checkpoint: {state.session_id}")
+                _log.info(f"Resumed from checkpoint: {state.session_id}")
                 state = restored
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug(f"Checkpoint restore skipped: {e}")
 
     # 使用 ainvoke 以支持 async node（Visual / Retrieval）
     result_dict = await wf.ainvoke(state)
@@ -274,7 +503,8 @@ async def _run_uncached(user_query: str, image_url: str | None, session_id: str,
         try:
             ckpt = get_checkpoint_store()
             ckpt.save(result.session_id, "guard", result)
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug(f"Checkpoint save skipped: {e}")
+
 
     return result

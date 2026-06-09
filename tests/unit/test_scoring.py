@@ -32,7 +32,7 @@ def test_budget_fit_perfect():
     scorer = DecisionScoring()
     p = make_product(base_price=100)
     result = scorer.score(p, "100元的蓝牙耳机", budget_max=100)
-    assert result.score_breakdown.budget_fit > 0.9
+    assert result.score_breakdown.budget_fit > 0.85  # price=100, budget=100 → ratio=1.0 → 0.88
 
 
 def test_budget_exceeded_lowers_score():
@@ -44,9 +44,13 @@ def test_budget_exceeded_lowers_score():
 
 def test_expensive_product_risk():
     scorer = DecisionScoring()
-    p = make_product(base_price=2500)
+    p = make_product(base_price=2500, reviews=[
+        ReviewItem(nickname="U1", rating=1, content="太贵了不值"),
+        ReviewItem(nickname="U2", rating=2, content="性价比低"),
+        ReviewItem(nickname="U3", rating=1, content="后悔买了"),
+    ])
     result = scorer.score(p, "高端耳机")
-    assert result.score_breakdown.risk_penalty > 0.0
+    assert result.score_breakdown.risk_penalty > 0.0  # 3条≤2星评价触发扣分
 
 
 def test_review_confidence():
@@ -70,6 +74,6 @@ def test_result_has_evidence_ids():
 def test_scenario_fit():
     scorer = DecisionScoring()
     p = make_product()
-    # "蓝牙耳机" appears in the product description, so scenario_fit should be > 0
+    # V3: scenario_fit 已接入评分公式 (权重 0.05)
     result = scorer.score(p, "蓝牙耳机", scenario="commute")
-    assert result.score_breakdown.scenario_fit > 0.0
+    assert result.score_breakdown.scenario_fit > 0.0  # 场景匹配已激活

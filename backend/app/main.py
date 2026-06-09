@@ -1,6 +1,9 @@
 import logging
 from pathlib import Path
 
+# 确保 prompt 日志可见
+logging.getLogger("omnicart.prompt").setLevel(logging.INFO)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +22,9 @@ from app.api.observability import router as observability_router
 from app.api.voice import router as voice_router
 from app.api.eval import router as eval_router
 from app.api.eval_dashboard import router as dashboard_router
+from app.api.agent_stream import router as agent_stream_router
+from app.api.conversation import router as conversation_router
+from app.api.user_profile import router as user_profile_router
 from app.core.config import SERVICE_NAME, SERVICE_VERSION, DEMO_DATA_DIR, USE_POSTGRES, USE_QDRANT, USE_REDIS
 
 logger = logging.getLogger(__name__)
@@ -28,7 +34,7 @@ app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -63,6 +69,9 @@ app.include_router(observability_router)
 app.include_router(voice_router)
 app.include_router(eval_router)
 app.include_router(dashboard_router)
+app.include_router(agent_stream_router)
+app.include_router(conversation_router)
+app.include_router(user_profile_router)
 
 
 @app.on_event("startup")
@@ -84,9 +93,9 @@ async def on_startup():
             await init_qdrant()
             logger.info("Qdrant connected and collection ready")
         except Exception as e:
-            logger.warning(f"Qdrant init failed: {e} — falling back to keyword search")
+            logger.warning(f"Qdrant init failed: {e} — falling back to local embedding cache")
     else:
-        logger.info("Qdrant not configured — using jieba keyword mode")
+        logger.info("Qdrant not configured — using local embedding cache mode")
 
     if USE_REDIS:
         try:

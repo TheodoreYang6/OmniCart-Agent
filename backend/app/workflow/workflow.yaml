@@ -1,10 +1,11 @@
-# OmniCart Agent — 声明式 Workflow 配置
-# 定义 Agent 节点、边和条件分支，修改此文件即可调整工作流，无需改 Python 代码
-# 与 graph.py 中 build_workflow() 保持同步
+# OmniCart Agent — Workflow 架构参考文档
+# 此文件用于文档说明工作流结构，不做运行时解析。
+# 实际工作流定义在 graph.py 的 build_workflow() 中（Python 代码是唯一真相源）。
+# 若修改 graph.py 中的节点/边/条件分支，请同步更新此文件以保持文档准确。
 
 name: omnicart-shopping-decision
 version: "1.1"
-description: 多模态购物决策工作流 — Router → Visual → Retrieval → Reranker → Evidence Check → Decision → Response → Guard
+description: 多模态购物决策工作流 — Router → Visual → Rrieval → Reranker → Evidence Check → Decision → Response → Guard
 
 nodes:
   router:

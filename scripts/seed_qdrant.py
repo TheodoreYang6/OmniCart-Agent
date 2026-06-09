@@ -24,7 +24,10 @@ from app.model_gateway.gateway import get_model_gateway
 from qdrant_client import QdrantClient
 
 
-def main():
+import asyncio
+
+
+async def main_async():
     if not USE_QDRANT:
         print("QDRANT_URL is empty — 请先在 .env 中配置 QDRANT_URL")
         sys.exit(1)
@@ -74,7 +77,7 @@ def main():
             texts.append(f"{p.product_id} | {' '.join(t for t in text_parts if t)}")
 
         try:
-            embeddings = gateway.embed(texts, "text_embedding")
+            embeddings = await gateway.embed(texts, "text_embedding")
         except Exception as e:
             print(f"嵌入 API 调用失败 (batch {i // batch_size + 1}): {e}")
             time.sleep(2)
@@ -86,8 +89,11 @@ def main():
         time.sleep(0.3)  # API 限速缓冲
 
     print(f"\n索引完成! 共 {total} 件商品写入 Qdrant")
-    print(f"Collection: {QDRANT_URL}/collections/{client}")
     client.close()
+
+
+def main():
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":

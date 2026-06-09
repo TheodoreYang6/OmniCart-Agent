@@ -1,39 +1,22 @@
 """PostgreSQL 产品仓库 — 使用 SQLAlchemy 2.0 async + asyncpg 驱动。"""
 
-import asyncio
 from typing import Optional
 
-import nest_asyncio
 from sqlalchemy import select, func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.core.database import get_session_sync
+from app.core.database import get_session_sync, run_async
 from app.models.product import ProductModel
 from app.repositories.base_product_repo import BaseProductRepository
 from app.schemas.product import Product
-
-_nest_patched = False
 
 
 class PgProductRepository(BaseProductRepository):
     """PostgreSQL 产品仓库。
 
     所有公开方法均为同步（满足 BaseProductRepository 接口），
-    内部通过 nest_asyncio + loop.run_until_complete 桥接异步查询。
+    内部通过 run_async 桥接异步查询。
     """
-
-    def _run(self, coro):
-        global _nest_patched
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        if not _nest_patched:
-            nest_asyncio.apply(loop)
-            _nest_patched = True
-
-        return loop.run_until_complete(coro)
 
     # ---- 异步实现 ----
 
@@ -92,20 +75,24 @@ class PgProductRepository(BaseProductRepository):
         if not query_terms:
             query_terms = query
 
+        rows = []
         async with factory() as session:
-            stmt = (
-                select(ProductModel)
-                .where(
-                    text(
-                        "to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(brand,'') || ' ' || "
-                        "coalesce(rag_knowledge->>'marketing_description','')) "
-                        "@@ to_tsquery('simple', :q)"
-                    ).bindparams(q=query_terms)
+            try:
+                stmt = (
+                    select(ProductModel)
+                    .where(
+                        text(
+                            "to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(brand,'') || ' ' || "
+                            "coalesce(rag_knowledge->>'marketing_description','')) "
+                            "@@ plainto_tsquery('simple', :q)"
+                        ).bindparams(q=query_terms)
+                    )
+                    .limit(top_k)
                 )
-                .limit(top_k)
-            )
-            result = await session.execute(stmt)
-            rows = [self._row_to_product(r) for r in result.scalars()]
+                result = await session.execute(stmt)
+                rows = [self._row_to_product(r) for r in result.scalars()]
+            except Exception:
+                pass  # tsquery syntax error → fallback to ILIKE below
             if not rows:
                 # 降级：ILIKE 模糊匹配
                 ilike_stmt = (
@@ -196,10 +183,10 @@ class PgProductRepository(BaseProductRepository):
     # ---- 同步接口 ----
 
     def get_by_id(self, product_id: str) -> Optional[Product]:
-        return self._run(self._aget_by_id(product_id))
+        return run_async(self._aget_by_id(product_id))
 
     def list_all(self) -> list[Product]:
-        return self._run(self._alist_all())
+        return run_async(self._alist_all())
 
     def filter_by(
         self,
@@ -209,20 +196,20 @@ class PgProductRepository(BaseProductRepository):
         price_max: float | None = None,
         price_min: float | None = None,
     ) -> list[Product]:
-        return self._run(self._afilter_by(category, sub_category, brand, price_max, price_min))
+        return run_async(self._afilter_by(category, sub_category, brand, price_max, price_min))
 
     def search_text(self, query: str, top_k: int = 20) -> list[Product]:
-        return self._run(self._asearch_text(query, top_k))
+        return run_async(self._asearch_text(query, top_k))
 
     def get_categories(self) -> list[str]:
-        return self._run(self._aget_categories())
+        return run_async(self._aget_categories())
 
     def get_sub_categories(self, category: str | None = None) -> list[str]:
-        return self._run(self._aget_sub_categories(category))
+        return run_async(self._aget_sub_categories(category))
 
     @property
     def total_count(self) -> int:
-        return self._run(self._atotal_count())
+        return run_async(self._atotal_count())
 
     # ---- 内部 ----
 
