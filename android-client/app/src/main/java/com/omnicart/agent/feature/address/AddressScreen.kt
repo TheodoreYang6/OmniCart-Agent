@@ -1,6 +1,7 @@
 package com.omnicart.agent.feature.address
 
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +20,8 @@ import com.omnicart.agent.core.network.AddressItem
 @Composable
 fun AddressScreen(
     onBack: () -> Unit = {},
+    selectionMode: Boolean = false,
+    onAddressSelected: (() -> Unit)? = null,
     viewModel: AddressViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -64,47 +67,50 @@ fun AddressScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("收货地址") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, "返回")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.showAddDialog() }) {
-                        Icon(Icons.Filled.Add, "新增")
-                    }
-                },
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "返回") }
+            Text(
+                if (selectionMode) "选择收货地址" else "收货地址",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { padding ->
+            IconButton(onClick = { viewModel.showAddDialog() }) { Icon(Icons.Filled.Add, "新增") }
+        }
         if (uiState.isLoading && uiState.addresses.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         } else if (uiState.addresses.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Filled.LocationOn, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     Text("暂无收货地址", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = { viewModel.showAddDialog() }) {
-                        Text("添加新地址")
-                    }
+                    OutlinedButton(onClick = { viewModel.showAddDialog() }) { Text("添加新地址") }
                 }
             }
         } else {
-            LazyColumn(modifier = Modifier.padding(padding)) {
+            LazyColumn {
                 items(uiState.addresses, key = { it.addressId }) { addr ->
                     AddressCard(
                         addr = addr,
                         onEdit = { viewModel.startEdit(addr) },
                         onDelete = { viewModel.deleteAddress(addr.addressId) },
+                        selectionMode = selectionMode,
+                        onSelect = {
+                            viewModel.saveAddress(
+                                addr.name, addr.phone, addr.province, addr.city,
+                                addr.district, addr.detail, isDefault = true,
+                                editId = addr.addressId,
+                            )
+                            onAddressSelected?.invoke()
+                        },
                     )
                     HorizontalDivider()
                 }
@@ -114,16 +120,35 @@ fun AddressScreen(
 }
 
 @Composable
-private fun AddressCard(addr: AddressItem, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun AddressCard(
+    addr: AddressItem,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    selectionMode: Boolean = false,
+    onSelect: (() -> Unit)? = null,
+) {
     Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .then(
+                if (selectionMode) Modifier.clickable { onSelect?.invoke() }
+                else Modifier
+            ),
         colors = CardDefaults.cardColors(
             containerColor = if (addr.isDefault)
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
             else MaterialTheme.colorScheme.surface
         ),
     ) {
-        Row(modifier = Modifier.padding(16.dp)) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (selectionMode) {
+                RadioButton(
+                    selected = addr.isDefault,
+                    onClick = { onSelect?.invoke() },
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(addr.name, fontWeight = FontWeight.Bold)
@@ -145,11 +170,13 @@ private fun AddressCard(addr: AddressItem, onEdit: () -> Unit, onDelete: () -> U
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.Edit, "编辑", modifier = Modifier.size(20.dp))
-            }
-            IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.Delete, "删除", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error)
+            if (!selectionMode) {
+                IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.Edit, "编辑", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.Delete, "删除", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }

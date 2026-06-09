@@ -93,14 +93,16 @@ class RetrievalAgent(BaseAgent):
         except Exception as e:
             return self._error_trace(state, str(e))
 
-    async def _llm_extract_keywords(self, user_query: str) -> str:
+    async def _llm_extract_keywords(self, user_query: str, context: str = "") -> str:
         """用 Qwen LLM 从口语查询中提取搜索关键词。失败时退回原 query。结果缓存 30 分钟。"""
-        cache_key = make_key("rewrite", user_query)
+        cache_key = make_key("rewrite", user_query, context[:80])
 
         async def _do_rewrite() -> str:
+            ctx_part = f"上文：{context}\n" if context else ""
             prompt = (
                 "你是一个搜索关键词提取器。将用户的购物口语转化为商品搜索引擎友好的关键词，"
                 "用空格分隔。提取品类、品牌、属性、场景等核心词。最多输出10个词。\n\n"
+                f"{ctx_part}"
                 f"用户说：{user_query}\n关键词："
             )
             try:
@@ -126,12 +128,10 @@ class RetrievalAgent(BaseAgent):
         """
         constraints = state.constraints
 
-        # 判断 Router 产出是否足够丰富
+        # 判断 Router 产出是否足够丰富（有品类就够了，不用额外 LLM）
         router_rich = bool(
-            (constraints.sub_category and (
-                constraints.must_tags or constraints.spec_keywords
-            ))
-            or (constraints.must_tags and len(constraints.must_tags) >= 2)
+            constraints.category
+            or (constraints.must_tags and len(constraints.must_tags) >= 1)
         )
 
         if router_rich:
@@ -147,8 +147,11 @@ class RetrievalAgent(BaseAgent):
                 search_parts.append(" ".join(constraints.spec_keywords))
             search_query = " ".join(search_parts)
         else:
-            # 慢路径: Router 信息不足，LLM 提取关键词
-            search_query = await self._llm_extract_keywords(state.user_query)
+            # 慢路径: Router 信息不足，LLM 提取关键词（带会话上下文）
+            search_query = await self._llm_extract_keywords(
+                state.user_query,
+                context=(state.context_prompt or "")[:200],
+            )
             if search_query != state.user_query:
                 state.trace_steps.append({
                     "step_id": f"T{len(state.trace_steps) + 1:03d}",

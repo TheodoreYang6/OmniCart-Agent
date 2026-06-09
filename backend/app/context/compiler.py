@@ -72,22 +72,14 @@ def compile_context(state: WorkflowState) -> str:
             brand = p.get("brand", "")
             reranker_score = p.get("reranker_score", 0)
 
-            risk_str = ""
-            for d in state.decision_results:
-                if d.get("product_id") == pid:
-                    risks = d.get("risk_factors", [])
-                    if risks:
-                        risk_str = f" | ⚠ {', '.join(risks[:2])}"
-                    break
-
             # 匹配度描述
             match_desc = ""
             if reranker_score and reranker_score > 0.75:
-                match_desc = " [与你描述的需求很契合]"
+                match_desc = "，与你描述的需求很契合"
             elif reranker_score and reranker_score > 0.5:
-                match_desc = " [部分匹配你的需求]"
+                match_desc = "，基本匹配你的需求"
 
-            parts.append(f"{i}. [{category}] {brand} {title[:50]} — ¥{price}{risk_str}{match_desc}")
+            parts.append(f"{i}. {brand} {title[:50]} — ¥{price}{match_desc}")
 
         # 关键证据 (每商品1条，≤100字)
         if state.evidence_list:

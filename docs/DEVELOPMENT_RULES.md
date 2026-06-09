@@ -1,10 +1,10 @@
 # OmniCart Agent 开发过程规则与 AI Agent 行为规范
 
-版本：v1.0  
+版本：v1.1  
 适用项目：OmniCart Agent Competition Edition  
 适用对象：Claude Code / Codex / Cursor Agent / 通义灵码 / 其他 AI 编程 Agent  
-基准蓝图：`OMNICART_AGENT_COMPLETE_BLUEPRINT.md` v5.0  
-更新日期：2026-05-20  
+基准蓝图：`OMNICART_AGENT_COMPLETE_BLUEPRINT.md` v6.0  
+更新日期：2026-06-09  
 
 ---
 

@@ -626,10 +626,10 @@ data class ConversationItem(
     val conversationId: String = "",
     @SerializedName("session_id")
     val sessionId: String = "",
-    val title: String = "",
-    val status: String = "",
+    val title: String? = null,
+    val status: String? = null,
     @SerializedName("last_message")
-    val lastMessage: String = "",
+    val lastMessage: String? = null,
     @SerializedName("context_snapshot")
     val contextSnapshot: Map<String, Any?>? = null,
     @SerializedName("created_at")
@@ -643,6 +643,7 @@ data class ConversationMessagesResponse(
     val conversationId: String = "",
     val count: Int = 0,
     val messages: List<ConversationMessageItem> = emptyList(),
+    val products: Map<String, Map<String, Any?>>? = null,
 )
 
 data class ConversationMessageItem(
@@ -651,7 +652,7 @@ data class ConversationMessageItem(
     val role: String = "",
     val content: String = "",
     @SerializedName("image_url")
-    val imageUrl: String = "",
+    val imageUrl: String? = null,
     @SerializedName("product_refs")
     val productRefs: List<String> = emptyList(),
     @SerializedName("evidence_refs")

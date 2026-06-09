@@ -6,6 +6,7 @@ import com.omnicart.agent.core.network.AddressCreateRequest
 import com.omnicart.agent.core.network.AddressItem
 import com.omnicart.agent.core.network.AddressUpdateRequest
 import com.omnicart.agent.core.network.ApiClient
+import com.omnicart.agent.feature.auth.AuthManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +30,7 @@ class AddressViewModel : ViewModel() {
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
-                val result = ApiClient.api.getAddresses()
+                val result = ApiClient.api.getAddresses(userId = AuthManager.effectiveUserId)
                 _uiState.update { it.copy(isLoading = false, addresses = result.addresses) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, errorMessage = "加载失败: ${e.message}") }
@@ -66,12 +67,12 @@ class AddressViewModel : ViewModel() {
                     ApiClient.api.updateAddress(editId, AddressUpdateRequest(
                         name = name, phone = phone, province = province, city = city,
                         district = district, detail = detail, isDefault = isDefault,
-                    ))
+                    ), userId = AuthManager.effectiveUserId)
                 } else {
                     ApiClient.api.createAddress(AddressCreateRequest(
                         name = name, phone = phone, province = province, city = city,
                         district = district, detail = detail, isDefault = isDefault,
-                    ))
+                    ), userId = AuthManager.effectiveUserId)
                 }
                 _uiState.update { it.copy(showAddDialog = false, editingAddress = null) }
                 loadAddresses()
@@ -84,7 +85,7 @@ class AddressViewModel : ViewModel() {
     fun deleteAddress(addressId: String) {
         viewModelScope.launch {
             try {
-                ApiClient.api.deleteAddress(addressId)
+                ApiClient.api.deleteAddress(addressId, userId = AuthManager.effectiveUserId)
                 loadAddresses()
             } catch (e: Exception) {
                 _uiState.update { it.copy(errorMessage = "删除失败: ${e.message}") }

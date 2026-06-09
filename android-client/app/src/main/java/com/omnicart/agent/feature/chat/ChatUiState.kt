@@ -81,10 +81,10 @@ data class ChatUiState(
     val conversations: List<ConversationItem> = emptyList(),
     val isLoadingHistory: Boolean = false,
     val isLoadingConversation: Boolean = false,
-    // 地址表单
-    val showAddressForm: Boolean = false,
     // 长期偏好
     val profileEnabled: Boolean = false,
+    // 快速回答
+    val fastMode: Boolean = false,
 ) {
     val lastUserMessage: ChatMessage?
         get() = messages.lastOrNull { it.role == MessageRole.User }

@@ -65,9 +65,32 @@ async def list_messages(
 ):
     repo = get_conversation_repo()
     msgs = repo.list_messages(conversation_id, limit)
+    # 收集所有被引用的商品ID，批量查产品信息供前端渲染卡片
+    products_map = {}
+    all_pids = set()
+    for m in msgs:
+        refs = getattr(m, 'product_refs', None) or []
+        if isinstance(refs, list):
+            all_pids.update(refs)
+    if all_pids:
+        try:
+            from app.repositories.product_repo import get_product_repo
+            prod_repo = get_product_repo()
+            for pid in all_pids:
+                p = prod_repo.get_by_id(pid)
+                if p:
+                    products_map[pid] = {
+                        "product_id": p.product_id, "title": p.title,
+                        "brand": p.brand, "price": p.base_price,
+                        "category": p.category,
+                        "image_urls": [prod_repo.resolve_image_url(pid)] if p.image_path else [],
+                    }
+        except Exception:
+            pass
     return {
         "conversation_id": conversation_id,
         "count": len(msgs),
+        "products": products_map,
         "messages": [
             MessageOut(
                 message_id=m.message_id,

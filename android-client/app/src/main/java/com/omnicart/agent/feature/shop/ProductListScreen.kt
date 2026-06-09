@@ -1,5 +1,12 @@
 package com.omnicart.agent.feature.shop
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +18,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -24,6 +34,30 @@ val CATEGORY_OPTIONS = listOf(
     "服饰运动" to "服饰运动",
     "食品饮料" to "食品饮料",
 )
+
+@Composable
+fun ShimmerBlock(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val translateAnim by transition.animateFloat(
+        initialValue = 0f, targetValue = 1000f,
+        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
+        label = "shimmer",
+    )
+    val brush = Brush.linearGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        ),
+        start = Offset(translateAnim - 200f, 0f),
+        end = Offset(translateAnim, 0f),
+    )
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(brush),
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,11 +93,7 @@ fun ProductListScreen(
                     Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Search, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            "去豆仔页输入需求，获取 AI 个性化推荐",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Text("去豆仔页输入需求，获取 AI 个性化推荐", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -79,11 +109,13 @@ fun ProductListScreen(
                 }
             }
             when {
-                uiState.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(12.dp))
-                        Text("正在整理商品货架...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                uiState.isLoading -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(4) {
+                        Column {
+                            ShimmerBlock(Modifier.fillMaxWidth().height(120.dp))
+                            Spacer(Modifier.height(8.dp))
+                            ShimmerBlock(Modifier.fillMaxWidth(0.6f).height(16.dp))
+                        }
                     }
                 }
                 uiState.error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -105,7 +137,6 @@ fun ProductListScreen(
             }
         }
 
-        // 评分详情弹窗
         if (uiState.selectedProduct != null) {
             ProductDetailSheet(
                 product = uiState.selectedProduct!!,

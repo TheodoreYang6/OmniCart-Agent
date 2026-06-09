@@ -56,6 +56,7 @@ fun ChatScreen(
     askDouzaiTitle: String = "",
     onAskDouzaiConsumed: () -> Unit = {},
     onProductClick: (String) -> Unit = {},
+    onNavigateToAddress: () -> Unit = {},
 ) {
     LaunchedEffect(sessionId) {
         if (sessionId.isNotBlank() && viewModel.uiState.value.sessionId != sessionId) {
@@ -84,10 +85,11 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
 
-    // 自动滚动到底部
-    LaunchedEffect(uiState.messages.size, uiState.isLoading) {
-        if (uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+    // 自动滚动到底部（新消息 + 流式输出时都触发）
+    LaunchedEffect(uiState.messages.size, uiState.isLoading, uiState.streamingText.length) {
+        if (uiState.messages.isNotEmpty() || uiState.streamingText.isNotEmpty()) {
+            val target = if (uiState.messages.isNotEmpty()) uiState.messages.size - 1 else 0
+            listState.animateScrollToItem(target)
         }
     }
 
@@ -351,19 +353,28 @@ fun ChatScreen(
                                             )
                                             Spacer(modifier = Modifier.height(4.dp))
                                         }
-                                        message.products.forEach { product ->
+                                        message.products.forEachIndexed { index, product ->
                                             val decision = message.decisionResults.find {
                                                 it.productId == product.productId
                                             }
-                                            ProductCard(
-                                                product = product,
-                                                decisionResult = decision,
-                                                onClick = { onProductClick(product.productId) },
-                                                onAddToCart = { skuId, skuLabel, skuPrice ->
-                                                    viewModel.onAddToCart(product.productId, product.title, skuId, skuLabel, skuPrice)
-                                                },
-                                                onScoreDetail = { viewModel.onProductClick(product.productId) },
-                                            )
+                                            androidx.compose.animation.AnimatedVisibility(
+                                                visible = true,
+                                                enter = androidx.compose.animation.fadeIn() +
+                                                        androidx.compose.animation.slideInVertically(
+                                                            initialOffsetY = { it / 8 }
+                                                        ),
+                                            ) {
+                                                ProductCard(
+                                                    product = product,
+                                                    decisionResult = decision,
+                                                    onClick = { onProductClick(product.productId) },
+                                                    onAddToCart = { skuId, skuLabel, skuPrice ->
+                                                        viewModel.onAddToCart(product.productId, product.title, skuId, skuLabel, skuPrice)
+                                                    },
+                                                    onScoreDetail = { viewModel.onProductClick(product.productId) },
+                                                    modifier = Modifier.padding(start = 36.dp),
+                                                )
+                                            }
                                             Spacer(modifier = Modifier.height(8.dp))
                                         }
                                     }
@@ -377,6 +388,7 @@ fun ChatScreen(
                                 SummaryChips(uiState.lastResponse!!)
                             }
                         }
+
 
                         if (uiState.isLoadingConversation) {
                             item(key = "load_conv") {
@@ -443,7 +455,7 @@ fun ChatScreen(
                                 ShopActionButtons(
                                     actions = uiState.lastResponse!!.actions!!,
                                     onAddressForm = {
-                                        viewModel.showAddressForm()
+                                        onNavigateToAddress()
                                     },
                                     onQuickReply = { label ->
                                         viewModel.onQueryChange(label)
@@ -573,23 +585,12 @@ fun ChatScreen(
                     enabled = !uiState.isLoading,
                     hasImage = uiState.selectedImageUri != null,
                     isRecording = uiState.isRecording,
+                    fastMode = uiState.fastMode,
+                    onFastModeToggle = { viewModel.toggleFastMode() },
                     modifier = Modifier.imePadding(),
                 )
             }
         }
-        // 地址填写弹窗
-        if (uiState.showAddressForm) {
-            AddressFormDialog(
-                onDismiss = { viewModel.dismissAddressForm() },
-                onSubmit = { name, phone, province, city, district, detail ->
-                    viewModel.submitAddress(name, phone, province, city, district, detail) {
-                        viewModel.onQueryChange("下单")
-                        viewModel.onSend()
-                    }
-                },
-            )
-        }
-
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -912,27 +913,55 @@ fun ShopActionButtons(
     onAddressForm: () -> Unit,
     onQuickReply: (String) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        actions.forEach { action ->
-            val type = action["type"]?.toString() ?: ""
-            val label = action["label"]?.toString() ?: ""
-            when (type) {
-                "address_form" -> {
-                    Button(
-                        onClick = onAddressForm,
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    ) { Text(label, style = MaterialTheme.typography.labelLarge) }
+    val skuActions = actions.filter { it["type"]?.toString() == "sku_option" }
+    val normalActions = actions.filter { it["type"]?.toString() != "sku_option" }
+
+    // 普通操作按钮（换行排列）
+    if (normalActions.isNotEmpty()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            normalActions.forEach { action ->
+                val type = action["type"]?.toString() ?: ""
+                val label = action["label"]?.toString() ?: ""
+                when (type) {
+                    "address_form" -> {
+                        Button(
+                            onClick = onAddressForm,
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        ) { Text(label, style = MaterialTheme.typography.labelLarge) }
+                    }
+                    "quick_reply" -> {
+                        OutlinedButton(
+                            onClick = { onQuickReply(label) },
+                            shape = RoundedCornerShape(20.dp),
+                        ) { Text(label, style = MaterialTheme.typography.labelLarge) }
+                    }
                 }
-                "quick_reply" -> {
-                    OutlinedButton(
-                        onClick = { onQuickReply(label) },
-                        shape = RoundedCornerShape(20.dp),
-                    ) { Text(label, style = MaterialTheme.typography.labelLarge) }
-                }
+            }
+        }
+    }
+
+    // SKU 规格选项（横向滚动）
+    if (skuActions.isNotEmpty()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            skuActions.forEach { action ->
+                val label = action["label"]?.toString() ?: ""
+                OutlinedButton(
+                    onClick = { onQuickReply(label) },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.tertiary,
+                    ),
+                ) { Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1) }
             }
         }
     }
@@ -977,3 +1006,4 @@ fun AddressFormDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
+

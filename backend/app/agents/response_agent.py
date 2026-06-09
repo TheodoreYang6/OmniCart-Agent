@@ -27,27 +27,20 @@ _CHITCHAT_PROMPT = """你是豆仔，字节跳动旗下的智能购物导购助�
 
 控制在2-4句话，活泼自然。直接回复："""
 
-_RESPONSE_PROMPT = """你是一个严谨的购物导购助手——字节跳动旗下的豆仔。你的回答必须严格基于下方提供的候选商品和证据，不得编造、推测或提及候选列表之外的任何商品。
+_RESPONSE_PROMPT = """你是豆仔，字节跳动旗下的智能购物导购助手，豆包的弟弟。你活泼可爱、专业靠谱，严格基于候选商品推荐，不编造、不推测。
 
 {context}
 
-## 红线（违反即为失败）
-- 禁止提及候选商品列表中不存在的品牌、型号、价格
-- 禁止说"可能是""大概有""市场上还有"等推测性表述
-- 如果候选商品列表为空，只能说"抱歉，没有找到匹配的商品"，不得自行推荐
-- 引用具体证据时用自然语言融入（如"用户评价提到..."），不要输出证据ID和推荐分数（这些在商品卡片中已展示）
+## 规则
+- 语气亲切俏皮，像朋友安利好物一样。适当加"～""啦""哦""嘿嘿"等语气词，用“豆仔”代替“我”
+- 禁止提候选列表之外的品牌/型号/价格，禁止"可能是""大概有"等推测
+- Top1优先推荐，引用候选列表中的商品名和价格，介绍产品优点和适合人群
+- 不提负面评价、用户差评、"不满意"等词，只做正向推荐
+- 候选商品为空 → "抱歉，没有找到匹配的商品" + 建议放宽条件
+- 有替代商品简要提及（限候选列表内）
+- 3-6句，段间不空行，不出现[品类名称]格式，不说"推荐分"
 
-## 要求
-1. 用自然的中文回复，3-6句话
-2. 首先给出Top1推荐，必须引用候选列表中的 exact 商品名和价格
-3. 如有风险项必须明确提醒用户
-4. 如有替代商品简要提及（必须是候选列表中的其他商品）
-5. 引用具体的证据信息（用户评价、FAQ等）
-6. 如果候选商品列表为空，只说：抱歉，没有找到完全匹配您条件的商品 + 建议放宽条件
-7. 不要输出推荐分数（如"推荐分6.3/10"），用户在商品卡片中已能看到
-8. 不做无依据的判断，不过度推销，保持客观
-
-请直接回复用户："""
+请直接回复："""
 
 
 class ResponseAgent(BaseAgent):
@@ -67,8 +60,13 @@ class ResponseAgent(BaseAgent):
         self._start_trace(state, action, f"intent={state.intent}, products={len(state.decision_results)}, fast={FAST_MODE}")
 
         try:
+            fast_mode = state.context_prompt and "[FAST_MODE]" in (state.context_prompt or "")
+            if fast_mode:
+                state.context_prompt = (state.context_prompt or "").replace("[FAST_MODE]", "")
             if state.intent == "chitchat":
                 state.answer = await self._handle_chitchat(state.user_query)
+            elif fast_mode:
+                state.answer = self._generate_template(state)
             elif not state.retrieved_products:
                 state.answer = self._generate_template(state)
             elif FAST_MODE:
@@ -228,6 +226,131 @@ class ResponseAgent(BaseAgent):
                     return True
         return False
 
+    def _generate_compare(self, state: WorkflowState) -> str:
+        """对比决策模板 — 两个商品平等对比，不偏向任何一方。"""
+        products = state.retrieved_products[:5]
+        decisions = state.decision_results[:5]
+        if len(products) < 2:
+            return self._generate_template(state)
+
+        q = state.user_query
+        import re
+        CH_NUM = {"一":1,"二":2,"三":3,"四":4,"五":5}
+
+        # 尝试从检索结果中匹配用户提到的品牌/商品名
+        i1, i2 = -1, -1
+        # 用 must_tags 中的品牌/商品名去匹配 retrieved_products
+        must_tags = getattr(state.constraints, "must_tags", None) or []
+        for tag in must_tags:
+            for idx, p in enumerate(products):
+                title = p.get("title","")
+                brand = p.get("brand","")
+                if tag.lower() in title.lower() or tag.lower() in brand.lower():
+                    if i1 < 0:
+                        i1 = idx
+                    elif i2 < 0 and idx != i1:
+                        i2 = idx
+                        break
+            if i2 >= 0:
+                break
+
+        # 序号指代："第一个和第三个对比"
+        if i1 < 0:
+            m = re.search(r"第\s*(\d+|[一二三四五])\s*(?:个|款).*第\s*(\d+|[一二三四五])\s*(?:个|款)", q)
+            if m:
+                a, b = m.group(1), m.group(2)
+                i1 = int(a) - 1 if a.isdigit() else CH_NUM.get(a, 1) - 1
+                i2 = int(b) - 1 if b.isdigit() else CH_NUM.get(b, 1) - 1
+
+        # 兜底：Top 2
+        if i1 < 0: i1 = 0
+        if i2 < 0: i2 = 1
+        i1 = max(0, min(i1, len(products) - 1))
+        i2 = max(0, min(i2, len(products) - 1))
+        if i1 == i2:
+            i2 = 0 if i1 > 0 else 1
+
+        # 从 query 直接提取对比维度
+        dim_label = "综合"
+        dm = re.search(r"哪个更(\S{1,4})", q)
+        if not dm: dm = re.search(r"更(\S{1,4})的", q)
+        if not dm: dm = re.search(r"哪个(\S{1,4})更", q)
+        if dm:
+            dw = dm.group(1).rstrip("？?吗呢啊哦呀的")
+            if dw and len(dw) >= 2:
+                dim_label = dw
+
+        p1, p2 = products[i1], products[i2]
+        d1, d2 = decisions[i1] if len(decisions) > i1 else {}, decisions[i2] if len(decisions) > i2 else {}
+
+        b1, t1 = p1.get('brand','') or '', p1.get('title','') or ''
+        b2, t2 = p2.get('brand','') or '', p2.get('title','') or ''
+        # 智能去重：title中已含品牌关键词则不加前缀
+        def _brand_prefix(brand, title):
+            if not brand: return title[:25]
+            # 取品牌第一个词做匹配（如 "Apple 苹果" → "Apple"）
+            first_word = brand.split()[0] if brand.split() else brand
+            if first_word.lower() in title.lower()[:20]:
+                return title[:25]
+            return f"{first_word} {title[:20]}"
+        name1 = _brand_prefix(b1, t1)
+        name2 = _brand_prefix(b2, t2)
+        price1 = f"¥{p1.get('price',0):.0f}"
+        price2 = f"¥{p2.get('price',0):.0f}"
+        score1 = d1.get("display_score", 0)
+        score2 = d2.get("display_score", 0)
+
+        # 从 evidence_list 中找和对比维度相关的证据
+        evidence_for_dim = []
+        if dim_label != "综合":
+            for ev in (state.evidence_list or []):
+                content = ev.get("content", "")
+                if dim_label in content:
+                    evidence_for_dim.append(content[:120])
+
+        # 推荐等级中文
+        LVL = {"strong_recommend":"强烈推荐","recommended":"推荐","cautious":"谨慎推荐","insufficient_evidence":"证据不足","not_recommended":"不推荐"}
+
+        lines = [f"📊 {name1} vs {name2}，{dim_label}维度对比\n"]
+
+        # 基本信息
+        lvl1 = LVL.get(d1.get("recommendation_level",""), "")
+        lines.append(f"【{name1}】{price1} | {score1}/10 | {lvl1}")
+        reason1 = d1.get("recommendation_reason", "")
+        # 去除开头的推荐等级前缀（已在标题显示）
+        for prefix in ["强烈推荐 | ", "推荐 | ", "谨慎推荐 | ", "值得购买 | "]:
+            if reason1.startswith(prefix):
+                reason1 = reason1[len(prefix):]
+        if reason1 and len(reason1) > 60:
+            reason1 = reason1[:60] + "..."
+        if reason1:
+            lines.append(f"  {reason1}")
+        lines.append(f"\n【{name2}】{price2} | {score2}/10 | {LVL.get(d2.get('recommendation_level',''),'')}")
+        reason2 = d2.get("recommendation_reason", "")
+        for prefix in ["强烈推荐 | ", "推荐 | ", "谨慎推荐 | ", "值得购买 | "]:
+            if reason2.startswith(prefix):
+                reason2 = reason2[len(prefix):]
+        if reason2 and len(reason2) > 60:
+            reason2 = reason2[:60] + "..."
+        if reason2:
+            lines.append(f"  {reason2}")
+
+        # 相关证据
+        if evidence_for_dim:
+            lines.append(f"\n📋 {dim_label}相关评价：")
+            for e in evidence_for_dim[:2]:
+                lines.append(f"  • {e}")
+
+        # 结论
+        if score1 > score2 + 0.5:
+            lines.append(f"\n💡 {dim_label}角度，{name1}更胜一筹。")
+        elif score2 > score1 + 0.5:
+            lines.append(f"\n💡 {dim_label}角度，{name2}更值得入手。")
+        else:
+            lines.append(f"\n💡 两款各有优势——{name1}综合更强，{name2}在某些方面也不差。建议根据你最关心的{('「'+dim_label+'」') if dim_label != '综合' else '点'}来选择。")
+
+        return "\n".join(lines)
+
     def _generate_template(self, state: WorkflowState) -> str:
         top_n = 5 if state.visual_result else 3
         products = state.retrieved_products[:top_n]
@@ -236,93 +359,59 @@ class ResponseAgent(BaseAgent):
         if not products:
             vr = state.visual_result or {}
             if vr.get("product_name"):
-                # 有识图结果但没搜到：品类过滤问题 vs 真的没有
+                brand_str = f"（{vr['brand']}）" if vr.get("brand") else ""
                 if state.constraints.category:
-                    msg = (
-                        f"您拍的看起来是「{vr['product_name']}」"
-                        + (f"（{vr.get('brand', '')}）" if vr.get("brand") else "")
-                        + f"。当前在「{state.constraints.category}」品类下没有找到匹配商品"
-                        + "，可能是品类范围太窄，已为您扩大搜索。"
+                    return (
+                        f"您拍的看起来是「{vr['product_name']}」{brand_str}，"
+                        f"不过目前在「{state.constraints.category}」品类下没找到完全匹配的商品～"
                     )
-                else:
-                    msg = (
-                        f"您拍的看起来是「{vr['product_name']}」"
-                        + (f"（{vr.get('brand', '')}）" if vr.get("brand") else "")
-                        + "。抱歉，目前商品库里还没有收录这款商品。"
-                    )
-            else:
-                msg = "抱歉，没有找到完全匹配您条件的商品。"
+                return (
+                    f"您拍的看起来是「{vr['product_name']}」{brand_str}，"
+                    f"可惜商品库里暂时还没有收录这款商品。要不要试试搜一下同类产品？"
+                )
+            msg = "抱歉，没有找到完全匹配您条件的商品。"
             if state.constraints.budget_max:
-                msg += f"您可以尝试放宽预算到 {state.constraints.budget_max * 1.5:.0f} 元左右，或更换品类关键词。"
+                msg += f" 试试放宽预算到 {state.constraints.budget_max * 1.5:.0f} 元左右？"
             return msg
 
-        # 视觉识别结果优先展示：同款在前，同类在后
         vr = state.visual_result or {}
-        visual_note = ""
-        # 区分是否有精确匹配
         exact_pids = set(state.visual_matched_pids or [])
         exact_products = [p for p in products if p.get("product_id") in exact_pids]
         other_products = [p for p in products if p.get("product_id") not in exact_pids]
         exact_decisions = [d for d in decisions if d.get("product_id") in exact_pids]
         other_decisions = [d for d in decisions if d.get("product_id") not in exact_pids]
 
+        lines = []
+
+        # 视觉识图开场白
         if vr.get("product_name"):
+            brand_str = f"（{vr['brand']}）" if vr.get("brand") else ""
             if exact_products:
-                visual_note = (
-                    f"您拍的看起来是「{vr['product_name']}」"
-                    + (f"（{vr.get('brand', '')}）" if vr.get('brand') else "")
-                    + "。这就是这款商品👇"
-                )
+                lines.append(f"您拍的看起来是「{vr['product_name']}」{brand_str}，就是这款～")
             else:
-                visual_note = (
-                    f"您拍的看起来是「{vr['product_name']}」"
-                    + (f"（{vr.get('brand', '')}）" if vr.get('brand') else "")
-                    + "。商品库暂无同款，为您推荐同类商品👇"
-                )
+                lines.append(f"您拍的像是「{vr['product_name']}」{brand_str}，库内暂无同款，看看这些相近的～")
         elif vr.get("brand"):
-            visual_note = f"您拍的品牌是{vr['brand']}，为您找到以下商品："
+            lines.append(f"认出是{vr['brand']}的产品，帮你挑了几款～")
+        else:
+            lines.append("帮你挑了几款～")
 
-        # 用户偏好上下文
-        profile_note = ""
-        if state.context_prompt and "[用户偏好]" in state.context_prompt:
-            profile_note = state.context_prompt.split("\n")[0].strip() + "\n\n"
-
-        # 等级中文映射
-        level_cn = {
-            "strong_recommend": "强烈推荐", "recommended": "推荐",
-            "cautious": "谨慎推荐", "insufficient_evidence": "证据不足，仅供参考",
-            "not_recommended": "不推荐",
-        }
-
-        lines = [profile_note + (visual_note or "根据您的需求，为您找到以下商品：")]
-        # 同款优先，再同类推荐
+        # 同款优先
         display_list = list(zip(exact_products, exact_decisions)) if exact_products else []
         if exact_products and other_products:
-            display_list += [(None, None)]  # 分隔标记
+            display_list += [(None, None)]
         display_list += list(zip(other_products, other_decisions))
-        idx = 0
+
         for prod, dec in display_list:
             if prod is None:
-                lines.append("\n📌 同类推荐：")
+                lines.append("📌 同类还有这些：")
                 continue
-            idx += 1
-            score = dec.get("display_score", 0)
-            reason = dec.get("recommendation_reason", "")
-            risks = dec.get("risk_factors", [])
-            level = dec.get("recommendation_level", "")
-            level_label = level_cn.get(level, "")
 
+            brand = prod.get("brand", "")
             title = prod.get("title", "")
-            # 标题截断: 中英文混合的手机名太长，保留前30字
-            title_short = title[:30] + ("..." if len(title) > 30 else "")
-
-            header = f"\n{idx}. {title_short} — ¥{prod.get('price', 0)}"
-            if level_label:
-                header += f" [{level_label}]"
-            lines.append(header)
-            if reason and not reason.startswith(("强烈推荐", "值得购买", "可以考虑", "仅供参考")):
-                lines.append(f"   {reason[:120]}")
-            if risks:
-                lines.append(f"   ⚠ {', '.join(risks[:2])}")
+            price = prod.get("price", 0)
+            name = f"{brand} {title}" if brand and not title.startswith(brand) else title
+            if len(name) > 55:
+                name = name[:55] + "…"
+            lines.append(f"{name}  ¥{price:.0f}")
 
         return "\n".join(lines)

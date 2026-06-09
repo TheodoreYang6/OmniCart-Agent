@@ -130,7 +130,7 @@ fun ProfileScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        ProfileItem(Icons.Filled.Info, "关于豆仔", "V1 参赛版 · 可解释购物决策 Agent")
+        ProfileItem(Icons.Filled.Info, "关于豆仔", "参赛版 · 基于 RAG 的多模态电商智能导购 Agent")
     }
 }
 
@@ -153,7 +153,7 @@ private fun StatCard(title: String, subtitle: String, modifier: Modifier = Modif
 @Composable
 private fun ProfileItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit = {}) {
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         shape = MaterialTheme.shapes.medium,
         onClick = onClick,
     ) {

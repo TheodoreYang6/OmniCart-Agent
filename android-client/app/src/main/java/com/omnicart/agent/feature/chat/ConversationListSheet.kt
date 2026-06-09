@@ -34,7 +34,7 @@ fun ConversationListSheet(
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text("删除对话") },
-            text = { Text("确定删除「${conv.title.ifBlank { "新对话" }}」吗？消息不可恢复。") },
+            text = { Text("确定删除「${conv.title?.ifBlank { "新对话" } ?: "新对话"}」吗？消息不可恢复。") },
             confirmButton = {
                 TextButton(onClick = {
                     onDelete?.invoke(conv)
@@ -117,13 +117,13 @@ fun ConversationListSheet(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            conv.title.ifBlank { "新对话" },
+                                            conv.title?.ifBlank { "新对话" } ?: "新对话",
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.SemiBold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
-                                        if (conv.lastMessage.isNotBlank()) {
+                                        if (!conv.lastMessage.isNullOrBlank()) {
                                             Spacer(Modifier.height(4.dp))
                                             Text(
                                                 conv.lastMessage,

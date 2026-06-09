@@ -29,19 +29,19 @@ fun OrderScreen(
         if (userId.isNotBlank()) viewModel.loadOrders(userId)
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("我的订单") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
-            )
-        },
-    ) { padding ->
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+            Text("我的订单", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
         when {
-            uiState.isLoading -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            uiState.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-            uiState.orders.isEmpty() -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            uiState.orders.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Filled.LocalMall, null, Modifier.size(54.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                     Spacer(Modifier.height(12.dp))
@@ -52,7 +52,6 @@ fun OrderScreen(
             else -> LazyColumn(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize().padding(padding),
             ) {
                 items(uiState.orders) { order ->
                     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Surface)) {
@@ -63,12 +62,8 @@ fun OrderScreen(
                             }
                             Spacer(Modifier.height(8.dp))
                             order.items.forEach { item ->
-                                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(
-                                        "${item.brand} ${item.title}".take(30),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.weight(1f),
-                                    )
+                                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("${item.brand} ${item.title}".take(30), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                                     Text("×${item.quantity} ¥%.2f".format(item.price), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }

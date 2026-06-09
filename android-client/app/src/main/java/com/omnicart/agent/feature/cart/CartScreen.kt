@@ -98,12 +98,12 @@ fun CartScreen(
                                         Spacer(Modifier.weight(1f))
                                         Surface(shape = RoundedCornerShape(999.dp), color = SurfaceVariant) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                IconButton(onClick = { viewModel.decreaseQty(item.id) }, modifier = Modifier.size(30.dp)) {
-                                                    Icon(Icons.Filled.Remove, null, Modifier.size(16.dp))
+                                                IconButton(onClick = { viewModel.decreaseQty(item.id) }, modifier = Modifier.size(36.dp)) {
+                                                    Icon(Icons.Filled.Remove, null, Modifier.size(18.dp))
                                                 }
                                                 Text("${item.quantity}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                                IconButton(onClick = { viewModel.increaseQty(item.id) }, modifier = Modifier.size(30.dp)) {
-                                                    Icon(Icons.Filled.Add, null, Modifier.size(16.dp))
+                                                IconButton(onClick = { viewModel.increaseQty(item.id) }, modifier = Modifier.size(36.dp)) {
+                                                    Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
                                                 }
                                             }
                                         }

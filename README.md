@@ -1,620 +1,323 @@
 # OmniCart Agent
 
-> Android 原生四 Tab 电商智能导购客户端 | FastAPI Agent Runtime 多模态购物决策后端
->
-> **字节跳动 Agent 挑战赛参赛项目** · V2 完成 (7/13 + 5 跳过) · 私有仓库
+**基于 RAG 的多模态电商智能导购 AI Agent** — 字节跳动 Agent 挑战赛参赛项目。
+
+将传统"展示型广告"升级为"交互型导购"，实现从内容浏览到购买决策的深度连接。支持文字、图片、语音三种输入模态，通过 5 个协作 Agent 完成意图理解→视觉识别→多维检索→决策评分→证据绑定回答的全链路闭环。
 
 ---
 
-## 1. 项目简介
+## 目录
 
-OmniCart Agent 是一个**具备完整购物链路的 Android 原生智能导购 Agent 产品**。它不同于普通购物 App，也不是单一聊天机器人——它是一个以 AI Agent 为核心的端到端购物决策系统。
-
-**四个主页面：**
-
-| Tab | 功能 | 说明 |
-|-----|------|------|
-| 商品展示 | 浏览商品、分类筛选、商品详情 | 展示官方数据集商品，支持搜索和品类筛选 |
-| **豆仔智能** | **核心 AI Agent 页面** | 多模态导购、商品推荐、证据解释、评分、Trace、Harness 展示、受控加入购物车 |
-| 购物车 | 购物车管理、模拟结算 | 增删改查、多选、全选、豆仔推荐标识、mock checkout |
-| 个人中心 | 用户信息、地址、偏好 | 登录/注册、收货地址管理、购物偏好设置 |
-
-**本项目不是**：普通 Android 购物 App、WebView 套壳、RAG 聊天 Demo。
-
-**本项目是**：Workflow-controlled Multi-Agent（非开放式 ReAct），所有推荐结论绑定 `evidence_ids`，具备完整的可解释决策链路。
+- [系统架构](#系统架构)
+- [技术栈](#技术栈)
+- [目录结构](#目录结构)
+- [配置说明](#配置说明)
+- [快速启动](#快速启动)
+- [核心功能](#核心功能)
+- [Agent 协同](#agent-协同)
+- [RAG 全链路](#rag-全链路)
+- [记忆系统](#记忆系统)
+- [关键问题与解决方案](#关键问题与解决方案)
+- [文档索引](#文档索引)
 
 ---
 
-## 2. 项目核心能力
+## 系统架构
 
-### Android 原生客户端
-- Kotlin + Jetpack Compose + Material 3 + MVVM
-- 底部四 Tab 导航 + 10 个子路由：商品 / **豆仔（含 Agent 洞察 10 Tab）** / 购物车 / 我的（含登录/地址/偏好）
-- 图片选择（Photo Picker）+ 图片上传 + 图片预览
-- **ProductDetailSheet 6 Tab**（推荐/证据/评分/链路/技能/验证）
-- **AgentInsightSheet 10 Tab**（上下文/检索计划/证据图/降级/工具/反事实/视觉绑定/偏好/基准/摘要）
-- Demo Mode 一键展示完整 Agent 链路数据
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Android Native Client                     │
+│  Kotlin + Jetpack Compose + Material 3 + MVVM               │
+│  四 Tab: 商品展示 │ 豆仔智能 │ 购物车 │ 个人中心              │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ HTTP + SSE (Retrofit/OkHttp)
+┌──────────────────────────▼──────────────────────────────────┐
+│                    FastAPI Backend (:8006)                    │
+│                                                              │
+│  ┌────────┐  ┌────────┐  ┌──────────┐  ┌────────┐  ┌──────┐ │
+│  │ Router │→│ Visual │→│ Retrieval │→│Decision│→│Resp..│ │
+│  │ Agent  │  │ Agent  │  │  Agent    │  │ Agent  │  │Agent │ │
+│  └────────┘  └────────┘  └──────────┘  └────────┘  └──────┘ │
+│                                                              │
+│              LangGraph StateGraph (Workflow)                  │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+    ┌──────────────────────┼──────────────────────┐
+    │                      │                      │
+┌───▼────┐  ┌─────────────▼──┐  ┌───────────────▼──┐
+│ Qdrant │  │  PostgreSQL    │  │     Redis        │
+│向量检索 │  │ 商品/购物车/会话│  │  四级缓存/降级    │
+└────────┘  └────────────────┘  └──────────────────┘
+```
 
-### FastAPI 后端 Agent Runtime
-- **8 节点 LangGraph Workflow**：Router → Visual → Retrieval → Reranker → EvidenceCheck → Decision → Response → Guard
-- **LLM 查询改写**：Qwen 口语→搜索关键词（"我想买鞋"→"运动鞋 跑步鞋 休闲鞋"），jieba 单字拆分兜底
-- **闲聊模式**：16 词检测 → 跳过全部检索链 → 纯文字友好回复 + 6 类模板兜底
-- Qwen-only Model Stack（Chat / Vision / Embedding / Reranker）
-- PostgreSQL 18（6 张表）+ Qdrant 1.18（1024d COSINE）双数据库架构
-- **6 类 Repository** 全部 PG+内存双实现 + 工厂注入 + 透明降级
-- **State Checkpoint**：JSON 文件 8 节点持久化（resume/replay/export）
-- **Skill Registry**：8 内置 Skill（组合能力，编排原子 Tool）
-- **标准 MCP Server**：8 Tool JSON-RPC 2.0 + stdio/SSE 双传输 + Claude Desktop/Cursor 可接入
-- **ToolManager**：8 内置 Tool + Manifest + 权限 + V1 只读强制
-- **Redis 四级缓存**：Visual(1h)/Search(5min)/Rewrite(30min)/Workflow(5min) + 透明降级
-- **LLM 全链路可观测性**：Gateway 全量追踪 + Token 统计 + P50/P95 + 聚合 API
-- **Qwen-Omni 语音导购**：ASR→Agent→TTS + Android 全屏语音输入
-- **用户长期偏好记忆**：跨会话 UserProfile + 行为信号学习 + 时间衰减 + PG/JSON 双持久化
-- **Evaluation Dashboard**：Web 可视化评测面板 + Chart.js + 10 golden queries + 历史趋势
+**Workflow 流程：**
 
-### 多模态 Evidence RAG
-- **LLM 查询改写 + jieba 单字拆分**：口语精准转化为搜索关键词
-- Hybrid Search（Qdrant 1024d ANN + jieba 关键词 RRF k=60 融合 + 透明降级）
-- 用户评论挖掘：低分评论风险提取 + 好评证据
-- 政策/规则查询：购物政策、航空携带规则等
-- 7 维 Decision Scoring + Qwen Reranker 精排
-- **Visual Evidence Grounding**：字段级视觉证据绑定
-- **Evidence Graph Lite**：NetworkX 商品-证据-风险图关系
-- **Counterfactual Recommendation**：0 结果时智能反事实建议
-- **Hierarchical Knowledge Index**：品类→子品类→品牌→商品 4 级分层 + 250+ 关键词
-
-### 豆仔智能导购 Agent
-- Router Agent：规则优先 LLM + 6 种意图（含闲聊） + 16 词闲聊检测
-- Visual Agent：截图→结构化参数 + 三级降级（L0 真实→L1 Mock→L2 纯文本）
-- Retrieval Agent：**LLM 改写** + 三通道并行（text/review/policy）
-- Decision Agent：硬约束过滤（预算×2 排除）+ 7 维评分 + 风险标签
-- Response Agent：**闲聊/购物双模式 Prompt** + 6 类模板兜底
-- Response Guard + Evidence Checker + Decision Harness（7 项校验）
-- Preference Memory：多轮约束合并 + 话题切换自动清除 + REST API
-
-### 商品展示
-- 100 件官方数据集商品（美妆护肤 / 数码电子 / 服饰运动 / 食品饮料）
-- 品类筛选 + 子品类展示 + SKU 价格区间 + 用户评分
-
-### 购物车
-- PG/内存双模 + 商品快照（加购时锁定价格）
-- 增删改查 + 多选/全选 + 模拟结算（不接入真实支付）
-
-### 个人中心
-- 用户注册/登录（PBKDF2-SHA256 100k 迭代 + Bearer Token，每次登录刷新）
-- 收货地址 CRUD（省/市/区/详细 + 默认地址互斥）
-- 用户偏好 REST API（品类/预算/标签/场景）
-
-### Demo Mode / Mock Mode
-- 一键 Demo 完整数据：2 商品 + 4 证据 + 7 条 Trace + 完整 Harness + Agent 洞察全部数据
-- 真实 API → Mock 透明切换，离线可展示
+```
+START → Router → [Visual?] → Retrieval → Reranker → EvidenceCheck → Decision → Response → Guard → END
+            ↘ (chitchat) ──────────────────────────────────────────→ Response
+                         ↘ (有图片时 Router ∥ Visual 并行)
+```
 
 ---
 
-## 3. 技术栈
+## 技术栈
 
-### Android 客户端
-| 类别 | 技术 |
-|------|------|
-| 语言 | Kotlin |
-| UI | Jetpack Compose + Material 3 |
-| 架构 | MVVM (ViewModel + StateFlow) |
-| 异步 | Kotlin Coroutines |
-| 网络 | Retrofit 2.11 + OkHttp 4.12 + Gson |
-| 图片 | Coil 2.6 |
-| 图片选择 | Android Photo Picker |
-| 导航 | Jetpack Compose Navigation |
-| 构建 | Gradle 8.7 + AGP 8.5.0 + Kotlin 2.0.0 |
-
-### 后端
-| 类别 | 技术 |
-|------|------|
-| 语言 | Python 3.11 |
-| 框架 | FastAPI + Pydantic v2 |
-| Agent | LangGraph StateGraph (8 节点 Workflow) |
-| 数据库 | PostgreSQL 18 (6 表) + SQLAlchemy 2.0 (async) |
-| 向量库 | Qdrant 1.18 (1024d COSINE) |
-| 缓存 | Redis 7 + redis-py async (四级缓存 + 透明降级) |
-| 模型 | Qwen (Chat / Vision / Embedding / Reranker / Omni) |
-| MCP | mcp 1.27 (JSON-RPC 2.0 over stdio/SSE) |
-| 分词 | jieba 中文分词 |
-| 检索融合 | RRF (Reciprocal Rank Fusion, k=60) |
-| 迁移 | Alembic |
-| 异步桥接 | nest_asyncio |
-
-### 协作与工程
-| 类别 | 技术 |
-|------|------|
-| 版本控制 | Git + GitHub Private Repository |
-| 分支策略 | feature branch workflow |
-| 环境管理 | Conda (omnicart 环境) + pip |
-| 配置 | .env / .env.example |
-| 文档 | 蓝图 / 开发规则 / 进度 / 知识 / 决策 / 变更日志 / 答辩QA手册(20章+附录) / 数据库设计详解 |
+| 层次 | 技术 | 说明 |
+|------|------|------|
+| **客户端** | Kotlin + Jetpack Compose + Material 3 | Android 原生，MVVM 架构 |
+| **网络** | Retrofit + OkHttp + Coroutines | HTTP REST + SSE 流式 |
+| **图片** | Coil | 异步图片加载 |
+| **后端** | Python 3.11 + FastAPI | 异步 Web 框架 |
+| **AI 模型** | 通义千问 (Qwen) | qwen-turbo(意图/生成), qwen-vl-max(视觉), qwen3-rerank(精排), text-embedding-v4(向量化) |
+| **工作流** | LangGraph | StateGraph 有向图编排 5 Agent |
+| **向量库** | Qdrant | ANN 语义检索 + 本地降级 |
+| **数据库** | PostgreSQL (asyncpg + SQLAlchemy) | 商品、购物车、订单、会话、偏好 |
+| **缓存** | Redis | 视觉(1h)/搜索(5min)/改写(30min)/工作流(5min) 四级缓存, 优雅降级 |
+| **语音** | Qwen-Omni | ASR 语音转文字 + TTS 文字转语音 |
+| **分词** | jieba | 中文关键词提取 |
 
 ---
 
-## 4. 仓库目录结构
+## 目录结构
 
 ```
 OmniCart-Agent/
-├── backend/                        # FastAPI 后端 Agent Runtime
-│   ├── app/
-│   │   ├── main.py                 # 应用入口，路由注册，启动事件
-│   │   ├── api/                    # HTTP API 层（协议适配，不写业务逻辑）
-│   │   │   ├── health.py           # GET /api/health
-│   │   │   ├── recommend.py        # POST /api/recommend/v2
-│   │   │   ├── products.py         # GET /api/products, GET /api/products/{id}
-│   │   │   ├── cart.py             # CRUD /api/cart
-│   │   │   ├── checkout.py         # POST /api/checkout
-│   │   │   ├── auth.py             # POST /api/auth/register, /login, GET /profile
-│   │   │   ├── address.py          # CRUD /api/addresses
-│   │   │   ├── preference.py       # GET/PUT/DELETE /api/preferences
-│   │   │   ├── agent_actions.py    # POST /api/agent/action
-│   │   │   ├── agent_stream.py     # SSE /api/agent/stream (V2)
-│   │   │   ├── voice.py            # POST /api/voice/transcribe, /chat/v2 (V2)
-│   │   │   ├── eval.py             # POST /api/eval/run, GET /results (V2)
-│   │   │   ├── eval_dashboard.py   # GET /eval 可视化面板 (V2)
-│   │   │   ├── observability.py    # GET /api/observability/* (V2)
-│   │   │   └── upload.py           # POST /api/upload
-│   │   ├── agents/                 # 5 个核心 Agent
-│   │   │   ├── base.py             # Agent 抽象基类
-│   │   │   ├── router_agent.py     # 意图识别 + 约束抽取 + 检索计划
-│   │   │   ├── visual_agent.py     # 截图 → 结构化视觉结果
-│   │   │   ├── retrieval_agent.py  # text/review/policy 三通道证据检索
-│   │   │   ├── decision_agent.py   # 硬约束过滤 + 7 维加权评分
-│   │   │   └── response_agent.py   # LLM 证据引用回答
-│   │   ├── core/                   # 全局基础设施
-│   │   │   ├── config.py           # 环境变量读取 + 配置导出
-│   │   │   ├── database.py         # Async SQLAlchemy engine + session factory
-│   │   │   ├── qdrant_client.py    # Qdrant client singleton
-│   │   │   ├── redis_client.py     # Redis client singleton (V2)
-│   │   │   └── cache.py            # 四级缓存层 (V2)
-│   │   ├── models/                 # SQLAlchemy ORM 模型
-│   │   │   ├── product.py          # 商品表（JSONB skus + rag_knowledge）
-│   │   │   ├── cart_item.py        # 购物车表（商品快照反范式）
-│   │   │   ├── user.py             # 用户表（pbkdf2 密码哈希 + token）
-│   │   │   ├── user_preference.py  # 用户偏好表（JSONB）
-│   │   │   └── address.py          # 收货地址表
-│   │   ├── repositories/           # 数据访问层（ABC + 工厂 + 双实现）
-│   │   │   ├── base_product_repo.py  # 商品仓库 ABC
-│   │   │   ├── json_product_repo.py  # JSON 文件实现
-│   │   │   ├── pg_product_repo.py    # PostgreSQL 实现（sync-async 桥接）
-│   │   │   ├── product_repo.py       # 工厂 re-export
-│   │   │   ├── base_vector_repo.py   # 向量仓库 ABC
-│   │   │   ├── qdrant_vector_repo.py # Qdrant 实现
-│   │   │   ├── stub_vector_repo.py   # 无向量库降级实现
-│   │   │   ├── vector_repo.py        # 工厂 re-export
-│   │   │   ├── pg_cart_repo.py       # 购物车（PG + 内存双模）
-│   │   │   ├── pg_preference_repo.py # 偏好（PG + 内存双模）
-│   │   │   ├── user_repo.py          # 用户（PG + 内存双模）
-│   │   │   └── address_repo.py       # 地址（PG + 内存双模）
-│   │   ├── schemas/                # Pydantic 数据契约
-│   │   │   ├── product.py          # Product / Sku / RagKnowledge
-│   │   │   ├── workflow.py         # WorkflowState / Constraints / RetrievalPlan / TraceStep
-│   │   │   ├── a2a.py              # AgentCard / AgentMessage / Artifact
-│   │   │   ├── cart.py             # CartItem / Cart / CheckoutRequest/Response
-│   │   │   ├── auth.py             # RegisterRequest / LoginRequest / AuthResponse
-│   │   │   ├── address.py          # AddressCreate/Update/Response
-│   │   │   ├── preference.py       # PreferenceUpdate/Response
-│   │   │   ├── decision_result.py  # DecisionResult / ScoreBreakdown
-│   │   │   ├── evidence.py         # Evidence / EvidenceType
-│   │   │   └── visual.py           # VisualResult / VisualEvidence
-│   │   ├── retrieval/              # 检索层
-│   │   │   └── text_retriever.py   # jieba 关键词 + Qdrant 向量 RRF 融合
-│   │   ├── decision/               # 决策层
-│   │   │   ├── scoring.py          # 7 维 Decision Scoring 公式
-│   │   │   ├── rules.py            # 品类/预算/场景规则检测 (V2 重构)
-│   │   │   └── counterfactual.py   # 反事实推荐 (0 结果兜底)
-│   │   ├── model_gateway/          # Qwen 模型网关
-│   │   │   ├── gateway.py          # 统一调用入口
-│   │   │   ├── qwen_chat.py        # Chat 能力
-│   │   │   ├── qwen_vision.py      # Vision 能力
-│   │   │   ├── qwen_embedding.py   # Embedding 能力
-│   │   │   ├── qwen_reranker.py    # Reranker 能力
-│   │   │   └── mock_model.py       # Mock 降级
-│   │   ├── workflow/               # LangGraph 工作流
-│   │   │   └── graph.py            # StateGraph 编排：Router→Visual→Retrieval→Reranker→Decision→Response→Guard
-│   │   ├── context/                # 上下文编译器
-│   │   │   └── compiler.py         # 结构化编译决策上下文
-│   │   ├── memory/                 # 偏好记忆
-│   │   │   ├── preference_memory.py # 多轮对话约束合并 + 话题切换检测
-│   │   │   └── long_term.py         # V2 长期偏好记忆 (跨会话学习)
-│   │   ├── mcp/                     # V2 标准 MCP Server
-│   │   │   ├── server.py            # MCP Server (stdio + SSE)
-│   │   │   └── tools.py             # 8 Tool 定义 + Handler
-│   │   ├── observability/           # V2 可观测性
-│   │   │   └── collector.py         # TraceCollector + LLMSpan
-│   │   └── verification/           # 验证层
-│   │       ├── evidence_checker.py # 证据充足性检查
-│   │       └── response_guard.py   # 5 项回答守门规则
-│   └── requirements.txt            # Python 依赖
+├── android-client/              # Android 原生客户端
+│   └── app/src/main/java/com/omnicart/agent/
+│       ├── core/                # 配置/网络/模型/主题
+│       ├── feature/             # 各功能模块
+│       │   ├── chat/            # 豆仔智能对话 (SSE流式/语音/图片)
+│       │   ├── product/         # 商品卡片/详情/图片
+│       │   ├── cart/            # 购物车 CRUD
+│       │   ├── order/           # 订单列表
+│       │   ├── address/         # 收货地址管理
+│       │   ├── preference/      # 购物偏好设置
+│       │   ├── profile/         # 个人中心
+│       │   ├── shop/            # 商品浏览(分类筛选)
+│       │   ├── panel/           # Agent 洞察面板
+│       │   ├── auth/            # 登录注册
+│       │   └── demo/            # 演示场景/快捷菜单
+│       └── MainActivity.kt
 │
-├── android-client/                 # Android 原生客户端（主交付端）
-│   ├── settings.gradle.kts
-│   ├── build.gradle.kts
+├── backend/                     # FastAPI 后端
 │   └── app/
-│       ├── build.gradle.kts
-│       └── src/main/java/com/omnicart/agent/
-│           ├── MainActivity.kt
-│           ├── MainScreen.kt       # 全局 Scaffold + 底部导航 + NavHost
-│           ├── core/
-│           │   ├── config/AppConfig.kt
-│           │   ├── network/ApiClient.kt    # Retrofit + OkHttp + Auth 拦截器
-│           │   ├── network/OmniCartApi.kt  # 全部 API 接口定义 + 数据类
-│           │   ├── model/                  # RecommendRequest/Response, Product, DecisionResult
-│           │   └── theme/                  # Color / Type / Theme (Material 3)
-│           └── feature/
-│               ├── chat/           # 豆仔智能（ChatScreen + ChatViewModel + ChatUiState）
-│               ├── shop/           # 商品展示（ProductListScreen + ProductCard）
-│               ├── cart/           # 购物车（CartScreen + CartViewModel）
-│               ├── profile/        # 个人中心（ProfileScreen）
-│               ├── auth/           # 登录/注册（LoginScreen + AuthViewModel + AuthManager）
-│               └── address/        # 地址管理（AddressScreen + AddressViewModel）
+│       ├── agents/              # 5 Agent (Router/Visual/Retrieval/Decision/Response)
+│       ├── api/                 # REST API (15 端点)
+│       ├── services/            # 业务服务 (会话/偏好/追问/压缩)
+│       ├── repositories/        # 数据仓库 (PG + 内存双实现)
+│       ├── models/              # SQLAlchemy ORM
+│       ├── schemas/             # Pydantic 数据模型
+│       ├── retrieval/           # 检索 (语义/分块/LLM评估)
+│       ├── verification/        # 回答守门 + 证据检查
+│       ├── vision/              # 视觉解析 (Qwen-VL)
+│       ├── decision/            # 评分公式 + 共享规则 + 证据指标
+│       ├── context/             # 上下文编译器
+│       ├── workflow/            # LangGraph 工作流编排
+│       ├── model_gateway/       # 模型统一网关 (7能力)
+│       ├── core/                # 配置/缓存/数据库/Redis/Qdrant
+│       ├── observability/       # LLM 全链路追踪+统计
+│       └── main.py              # 应用入口
 │
-├── data/                           # 本地商品数据（JSON）+ golden_queries
-├── ecommerce_agent_dataset/        # 官方数据集（100 件商品，4 品类，含实拍 JPG）
-├── docs/                           # 项目文档
-│   ├── OMNICART_AGENT_COMPLETE_BLUEPRINT.md   # 最终蓝图（默认只读）
-│   ├── DEVELOPMENT_DIRECTORY_STRUCTURE.md     # 目标目录结构 + 施工规范
-│   ├── DEVELOPMENT_RULES.md                   # AI Agent 开发行为规则
-│   ├── DEVELOPMENT_PROGRESS.md                # 开发进度记录
-│   ├── PRODUCT_FUNCTIONS_AND_USER_GUIDE.md    # 产品功能与用户指南
-│   ├── CHANGELOG.md                           # 变更日志
-│   ├── KNOWLEDGE_LOG.md                       # 技术知识沉淀
-│   ├── DECISION_LOG.md                        # 关键技术决策
-│   ├── 答辩QA手册.md                          # 答辩 QA 手册（13 章）
-│   ├── DATABASE_DESIGN.md                     # 数据库设计详解
-│   ├── AGENT_TECH_ADVANCEMENT_AND_EVALUATION.md  # Agent 技术进阶与评测分析
-│   ├── DATASET_FEATURE_RAG_OPTIMIZATION_ANALYSIS.md  # 数据集特征与 RAG 优化分析
-│   ├── TASK_LIST.md                           # V2 阶段任务清单
-│   └── PROJECT_RESUME_BRIEF.md                # 项目简历事实材料（17 章）
-│
-├── scripts/                        # 自动化脚本
-│   ├── smoke_recommend.py          # 推荐链路快速验证
-│   ├── seed_postgresql.py          # JSON → PostgreSQL 数据迁移
-│   └── seed_qdrant.py              # Product Embedding → Qdrant 索引
-│
-├── alembic/                        # 数据库迁移（Alembic）
-├── tests/                          # 测试
-├── frontend/                       # ⚠️ 已废弃（Next.js），仅历史参考
-│
-├── run.py                          # 一键启动后端
-├── requirements.txt                # Python 依赖
-├── .env.example                    # 环境变量模板
-├── .gitignore
-├── CLAUDE.md                       # Claude Code 项目指令
-└── README.md                       # 本文件
+├── ecommerce_agent_dataset/     # 商品数据集 (105件/4品类/42子类)
+├── docs/                        # 项目文档
+├── data/                        # 评测数据/Golden Queries
+├── scripts/                     # 工具脚本 (播种/评测/清理)
+├── tests/                       # 测试 (70单元+21集成)
+├── requirements.txt             # Python 依赖
+└── README.md
 ```
-
-> **注意**：上述目录是**当前实际结构**（非目标结构）。遵循"竖向闭环优先"原则，文件按里程碑逐步创建，**禁止一次性创建空壳目录**。
 
 ---
 
-## 5. GitHub 私有仓库协作流程
+## 配置说明
 
-### 5.1 克隆仓库
+### 环境变量 (.env)
 
 ```bash
-git clone git@github.com:TheodoreYang6/OmniCart-Agent.git
-cd OmniCart-Agent
+OMNICART_PORT=8006
+OMNICART_DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/omnicart
+USE_POSTGRES=true
+QWEN_API_KEY=your-dashscope-api-key
+USE_REDIS=true
+REDIS_URL=redis://localhost:6379
+OMNICART_MOCK_MODE=false
+OMNICART_FAST_MODE=false
 ```
 
-### 5.2 配置开发环境
+### 模型配置 (model_config.yaml)
 
-#### 后端环境（Python 3.11.15 + Conda）
-
-```bash
-# 创建 conda 环境
-conda create -n omnicart python=3.11 -y
-conda activate omnicart
-
-# 安装依赖（使用清华镜像）
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```yaml
+capabilities:
+  intent_understanding:  qwen-turbo
+  chat_generation:       qwen-turbo
+  visual_understanding:  qwen-vl-max
+  text_embedding:        text-embedding-v4
+  text_reranking:        qwen3-rerank
+  context_compression:   qwen-turbo
 ```
 
-#### 环境变量配置
+### Android 配置 (AppConfig.kt)
 
-```bash
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑 .env，填入 QWEN_API_KEY（从团队获取）
-# QWEN_API_KEY=sk-xxxx
-# OMNICART_MOCK_MODE=true  ← 无 API 时可开启 Mock 模式
+```kotlin
+object AppConfig {
+    const val BASE_URL = "http://192.168.1.101:8006/"
+    const val TIMEOUT_SECONDS = 30L
+}
 ```
 
-**`.env` 文件已加入 `.gitignore`，不要提交到仓库。**
+---
 
-#### 数据库（可选，V1 需要）
+## 快速启动
+
+### 1. 安装依赖
 
 ```bash
-# 安装 PostgreSQL 18 + Qdrant 1.18
-# 启动数据库后，初始化数据
+pip install -r requirements.txt
+```
+
+### 2. 初始化数据库
+
+```bash
 python scripts/seed_postgresql.py
 python scripts/seed_qdrant.py
 ```
 
-> 不配置数据库时系统自动降级为 JSON 文件 + jieba 关键词模式。
-
-#### Android 环境
-
-1. 安装 Android Studio Hedgehog (2023.1.1) 或更高版本
-2. 用 Android Studio 打开 `android-client/` 目录
-3. 等待 Gradle Sync 完成
-4. 创建模拟器（API 35）或连接真机（开启 USB 调试）
-5. 在 `AppConfig.kt` 中配置后端地址：
-   - 模拟器：`http://10.0.2.2:8006/`（默认，映射宿主机 localhost）
-   - 真机：`http://<电脑局域网IP>:8006/`
-
-### 5.3 启动开发环境
-
-#### 启动后端
-
-```bash
-# 方式一：一键启动
-python run.py
-
-# 方式二：直接 uvicorn
-cd backend && uvicorn app.main:app --host 127.0.0.1 --port 8006
-```
-
-验证：
-```bash
-curl http://127.0.0.1:8006/api/health
-# → {"status":"ok","service":"omnicart-agent","version":"2.0.0"}
-```
-
-#### 启动 Android 客户端
-
-```bash
-cd android-client
-
-# 编译 Debug APK
-./gradlew assembleDebug
-
-# 安装到模拟器/真机
-adb install app/build/outputs/apk/debug/app-debug.apk
-
-# 或直接在 Android Studio 中点击 Run 'app'
-```
-
-#### ADB 反向代理（真机 USB 连接时）
-
-```bash
-# 将手机 8006 端口转发到电脑 8006 端口
-adb reverse tcp:8006 tcp:8006
-```
-
-### 5.4 Git 分支协作规范
-
-```
-main         ← 稳定版本，只接受经过测试的 PR
-  └─ dev     ← 日常开发主线
-       ├─ feature/auth        ← 用户登录/注册
-       ├─ feature/address     ← 地址管理
-       ├─ feature/cart-fix    ← 购物车修复
-       └─ feature/...
-```
-
-**工作流程：**
-
-```bash
-# 1. 从 dev 创建功能分支
-git checkout dev
-git pull origin dev
-git checkout -b feature/xxx
-
-# 2. 开发 + 测试 + 提交
-git add <files>
-git commit -m "feat: xxx"
-
-# 3. 推送到远程
-git push origin feature/xxx
-
-# 4. 在 GitHub 上创建 PR → dev
-# 5. Code Review 通过后合并
-```
-
-**Commit Message 格式：**
-```
-feat: 新增用户登录/注册 API
-fix: 修复 PreferenceMemory 话题切换时 category 未清除
-refactor: 重构 CartViewModel 为真实 API
-docs: 更新答辩QA手册
-```
-
-### 5.5 不可提交的文件
-
-以下文件**严禁提交**到仓库：
-
-| 文件 | 原因 |
-|------|------|
-| `.env` | 包含 API 密钥 |
-| `local.properties` | Android SDK 本地路径 |
-| `*.apk / *.aab` | 二进制产物 |
-| `.gradle/` / `build/` | 构建产物 |
-| `__pycache__/` | Python 缓存 |
-| `.idea/` | IDE 个人配置 |
-| `data/uploads/` | 运行时上传文件 |
-| `.claude/` | Claude Code 内部数据 |
-
-### 5.6 开发后必须做的事
-
-1. 运行测试：`python -m pytest tests/ -v`
-2. 运行编译：`./gradlew assembleDebug`
-3. 更新 `docs/DEVELOPMENT_PROGRESS.md`（进度记录）
-4. 更新 `docs/CHANGELOG.md`（变更日志）
-5. 如有关键技术取舍，更新 `docs/DECISION_LOG.md`
-
----
-
-## 6. API 端点总览（30+ 个）
-
-### 健康检查
-```
-GET /api/health
-```
-
-### 商品
-```
-GET  /api/products                   # 商品列表（支持 category/page/page_size）
-GET  /api/products/{product_id}       # 商品详情
-```
-
-### 推荐（核心）
-```
-POST /api/recommend/v2                # Agent Workflow 推荐（文本 + 图片）
-```
-
-### 图片上传
-```
-POST /api/upload                      # multipart/form-data 图片上传
-```
-
-### 用户认证
-```
-POST /api/auth/register               # 注册
-POST /api/auth/login                  # 登录
-GET  /api/auth/profile                # 获取个人信息（需 Bearer Token）
-```
-
-### 地址管理
-```
-GET    /api/addresses                 # 地址列表
-POST   /api/addresses                 # 新增地址
-PUT    /api/addresses/{address_id}    # 编辑地址
-DELETE /api/addresses/{address_id}    # 删除地址
-```
-
-### 偏好设置
-```
-GET    /api/preferences?session_id=   # 获取偏好
-PUT    /api/preferences?session_id=   # 更新偏好（增量合并）
-DELETE /api/preferences?session_id=   # 重置偏好
-```
-
-### 购物车
-```
-GET    /api/cart                      # 获取购物车
-POST   /api/cart/items                # 加入购物车
-PUT    /api/cart/items/{cart_item_id} # 修改数量/选择状态
-DELETE /api/cart/items/{cart_item_id} # 移除商品
-POST   /api/cart/select-all           # 全选/取消全选
-DELETE /api/cart/clear                # 清空购物车
-```
-
-### 结算
-```
-POST /api/checkout                    # 模拟结算（mock checkout，不接入真实支付）
-```
-
-### Agent 受控操作
-```
-POST /api/agent/action                # 豆仔受控操作（add_to_cart 等）
-GET  /api/agent/stream                # SSE 流式推荐（V2）
-```
-
-### 语音导购（V2）
-```
-POST /api/voice/transcribe            # ASR 纯转写
-POST /api/voice/chat/v2               # ASR → Agent → TTS 完整链路
-```
-
-### 评测（V2）
-```
-GET  /eval                            # HTML 可视化评测面板
-POST /api/eval/run                    # 运行 golden query 评测
-GET  /api/eval/results                # 历史评测记录
-GET  /api/eval/results/{run_id}       # 单次评测详情
-```
-
-### 可观测性（V2）
-```
-GET  /api/observability/traces        # LLM 调用追踪列表
-GET  /api/observability/stats         # 聚合统计（Token/延迟/错误率）
-GET  /api/cache/stats                 # Redis 缓存命中率
-```
-
-### 长期偏好（V2）
-```
-GET    /api/preferences/long-term/{user_id}   # 获取长期偏好画像
-DELETE /api/preferences/long-term/{user_id}   # 重置长期偏好
-```
-
----
-
-## 7. 测试
-
-### 运行后端测试
+### 3. 启动后端
 
 ```bash
 cd backend
-python -m pytest tests/ -v
+uvicorn app.main:app --host 0.0.0.0 --port 8006
 ```
 
-### 运行 Smoke Test（需后端运行中）
+### 4. 构建 Android
 
 ```bash
+cd android-client
+./gradlew assembleDebug
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+### 5. 验证
+
+```bash
+curl http://localhost:8006/api/health
 python scripts/smoke_recommend.py
 ```
 
-### 测试要求
+---
 
-- V1-Core 必须通过 Agent Workflow 完整链路测试
-- 每个关键模块必须有单元测试或 smoke test
-- Demo Mode 下完整链路可复现
+## 核心功能
+
+| 功能 | 说明 | 状态 |
+|------|------|------|
+| 文字导购 | 自然语言输入→RAG检索→推荐回复 | ✅ |
+| 流式输出 | SSE 逐字打字机效果 | ✅ |
+| 拍照识图 | 拍照→Qwen-VL解析→同类商品检索 | ✅ |
+| 语音导购 | 长按录音→ASR→推荐→TTS朗读 | ✅ |
+| 多轮对话 | 追问/指代/品类继承/上下文管理 | ✅ |
+| 商品对比 | 多商品并行检索+维度对比 | ✅ |
+| 购物车 | 对话加购/自然语言管理/模拟结算 | ✅ |
+| 下单流程 | 地址确认→订单汇总→模拟下单→持久化 | ✅ |
+| 偏好记忆 | 条目化偏好+品类感知注入+Android管理 | ✅ |
+| 快速模式 | 跳过LLM的模板回答(⚡开关) | ✅ |
+| 幻觉检测 | 品牌验证+证据绑定+价格准确+风险覆盖 | ✅ |
+| 评测仪表盘 | 10 Golden Query+可视化趋势 | ✅ |
 
 ---
 
-## 8. 安全红线
+## Agent 协同
 
-- **禁止**硬编码 API Key — 使用 `.env` 文件
-- **禁止**提交 `.env` 到仓库
-- **禁止**接入真实支付 SDK 或真实支付网关
-- **禁止**Agent 直接操作数据库（必须通过 Repository 层）
-- V1 工具**默认只读**（不执行下单、支付、账号操作）
-- **禁止**绕过 ToolManager 直接调用外部工具
-- **禁止**伪造测试结果
+> 详见 [AGENT_COLLABORATION.md](docs/AGENT_COLLABORATION.md)
 
----
+5 个 Agent 通过 LangGraph StateGraph 编排：
 
-## 9. 团队角色
+| Agent | 模型 | 职责 |
+|-------|------|------|
+| Router | qwen-turbo + 规则 | 意图识别、品类/预算/场景约束提取、检索计划 |
+| Visual | qwen-vl-max | 图像解析、品类映射、DB 精确匹配 |
+| Retrieval | text-embedding-v4 + qwen3-rerank | 语义检索、精排、证据补充(三通道并行) |
+| Decision | 规则公式 | 7维加权评分、避雷过滤、推荐等级判定 |
+| Response | qwen-turbo + 模板 | 上下文编译、LLM生成、模板兜底 |
 
-| 角色 | 职责 |
-|------|------|
-| 后端开发 | FastAPI / Agent Workflow / RAG / Agent / Decision Scoring |
-| Android 开发 | Compose UI / ViewModel / API 对接 / Demo Mode |
-| 数据工程 | 商品数据集 / Golden Queries / 评测脚本 |
-| 文档 & 答辩 | 蓝图维护 / 答辩 QA / Demo 脚本 |
+性能优化：Router+Visual(有图)并行、品类预填时跳过Router LLM、快速模式跳过全部LLM。
 
 ---
 
-## 10. 快速开始（新成员 5 分钟上手）
+## RAG 全链路
 
-```bash
-# 1. 克隆仓库
-git clone git@github.com:TheodoreYang6/OmniCart-Agent.git
-cd OmniCart-Agent
+> 详见 [RAG_PIPELINE.md](docs/RAG_PIPELINE.md)
 
-# 2. 安装 Python 依赖
-conda create -n omnicart python=3.11 -y && conda activate omnicart
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 3. 配置环境变量
-cp .env.example .env
-# 编辑 .env，设置 OMNICART_MOCK_MODE=true，OMNICART_PORT=8006
-
-# 4. 启动后端
-python run.py
-
-# 5. 验证
-curl http://127.0.0.1:8006/api/health
-# → {"status":"ok", ...}
-
-# 6. Android 客户端（可选）
-# 用 Android Studio 打开 android-client/，Gradle Sync 后 Run
+```
+Query → Embedding(1024d) → Qdrant ANN → 品类/价格过滤
+  → Qwen3-Reranker精排(0.68+0.38*score) → 视觉置顶(0.99)
+  → 避雷硬过滤 → 证据补充(3通道并行) → Context Compiler → Response
 ```
 
+- 向量库: Qdrant, 1024维, 210商品, 余弦相似度
+- 证据: review/policy/FAQ 三通道并行检索
+- 评测: Hit@K, MRR, Recall, NDCG, 10 Golden Queries
+- 缓存: Redis 4级, 优雅降级到本地
+
 ---
 
-**OmniCart Agent** — 不只是导购，是可解释的 Agent 购物决策系统。
+## 记忆系统
+
+> 详见 [MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)
+
+三层记忆架构：
+
+| 层次 | 存储 | 内容 |
+|------|------|------|
+| 短期 | context_snapshot (PG JSONB) | 约束/上轮对话/pending_question |
+| 长期 | user_preference_entries (PG) | 品类+品牌+场景+避雷标签 |
+| 会话 | conversations + messages (PG) | 对话历史+消息持久化 |
+
+- FollowUpEngine: 7种追问模式检测
+- 品类感知注入: 检测query品类→仅注入匹配条目
+- 上下文压缩: qwen-turbo增量摘要
+- Android PreferenceScreen: 自然语言输入→解析→保存
+
+---
+
+## 关键问题与解决方案
+
+### LLM 延迟优化
+
+Router(4s+) → 切换qwen-turbo(~1s) + Prompt压缩(1200t→740t) + 品类预填跳过LLM + 快速模式(模板秒回)
+
+### 拍照识图品类偏差
+
+Visual prompt 只列美妆类别 → 对齐数据集全品类(210商品/4品类/42子类) + 不在库内设低confidence
+
+### 品类约束泄漏
+
+上轮"T恤"锁死后续搜索 → 当前query不含子品类关键词时不继承
+
+### 肯定回复链路断裂
+
+"要"→搜索无结果 → pending_question检测+肯定词→query自动替换为问题内容
+
+### 品牌中英文不对齐
+
+"不要Nike"无法匹配"耐克" → BRAND_ALIASES 60+品牌中英双向映射
+
+### 地址 user_id 绑定
+
+Android端缺userId→地址存为空 → 全部API传入AuthManager.effectiveUserId
+
+---
+
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| [README.md](README.md) | 项目总览 |
+| [AGENT_COLLABORATION.md](docs/AGENT_COLLABORATION.md) | 5 Agent 协同设计 |
+| [RAG_PIPELINE.md](docs/RAG_PIPELINE.md) | RAG 全链路 |
+| [MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) | 记忆系统 |
+| [OMNICART_AGENT_COMPLETE_BLUEPRINT.md](docs/OMNICART_AGENT_COMPLETE_BLUEPRINT.md) | 完整蓝图 |
+| [SCORING_SYSTEM_COMPLETE_REFERENCE.md](docs/SCORING_SYSTEM_COMPLETE_REFERENCE.md) | 评分体系 |
+| [DATABASE_DESIGN.md](docs/DATABASE_DESIGN.md) | 数据库设计 |
+| [答辩QA手册.md](docs/答辩QA手册.md) | 答辩问答 |
+| [DEVELOPMENT_RULES.md](docs/DEVELOPMENT_RULES.md) | 开发规范 |
+| [CHANGELOG.md](docs/CHANGELOG.md) | 变更日志 |

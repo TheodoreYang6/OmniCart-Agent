@@ -1,10 +1,91 @@
-"""共享约束解析规则 — 品类关键词、预算提取、场景检测。
+"""共享约束解析规则 — 品类关键词、预算提取、场景检测、品牌别名。
 
 供 recommend.py (V0) 和 router_agent.py (V2) 共同引用，
 避免两处独立维护导致规则漂移。
 """
 
 import re
+
+# ============================================================
+# 品牌中英文别名 — 用户说 "不要Nike" 要能匹配 DB 里的 "耐克"
+# ============================================================
+
+BRAND_ALIASES: dict[str, str] = {
+    # 数码电子
+    "apple": "苹果", "苹果": "apple",
+    "huawei": "华为", "华为": "huawei",
+    "samsung": "三星", "三星": "samsung",
+    "sony": "索尼", "索尼": "sony",
+    "edifier": "漫步者", "漫步者": "edifier",
+    "anker": "安克", "安克": "anker",
+    "oppo": "oppo",  # 无别名，占位防误判
+    "vivo": "vivo",
+    "qcy": "qcy",
+    "lenovo": "联想", "联想": "lenovo",
+    # 服饰运动
+    "nike": "耐克", "耐克": "nike",
+    "adidas": "阿迪达斯", "阿迪达斯": "adidas",
+    "uniqlo": "优衣库", "优衣库": "uniqlo",
+    "thenorthface": "北面", "北面": "thenorthface",
+    "lululemon": "露露乐蒙", "露露乐蒙": "lululemon",
+    "arcteryx": "始祖鸟", "始祖鸟": "arcteryx",
+    "anta": "安踏", "安踏": "anta",
+    "lining": "李宁", "李宁": "lining",
+    "xtep": "特步", "特步": "xtep",
+    "salomon": "萨洛蒙", "萨洛蒙": "salomon",
+    "hoka": "hoka",
+    "osprey": "osprey",
+    "merrell": "迈乐", "迈乐": "merrell",
+    "decathlon": "迪卡侬", "迪卡侬": "decathlon",
+    # 美妆护肤
+    "sk-ii": "skii", "skii": "sk-ii", "sk2": "sk-ii",
+    "esteelauder": "雅诗兰黛", "雅诗兰黛": "esteelauder",
+    "lancome": "兰蔻", "兰蔻": "lancome",
+    "shiseido": "资生堂", "资生堂": "shiseido",
+    "kiehls": "科颜氏", "科颜氏": "kiehls",
+    "loreal": "巴黎欧莱雅", "巴黎欧莱雅": "loreal",
+    "larocheposay": "理肤泉", "理肤泉": "larocheposay",
+    "olay": "玉兰油", "玉兰油": "olay",
+    "theordinary": "theordinary",
+    "ahc": "ahc",
+    "perfectdiary": "完美日记", "完美日记": "perfectdiary",
+    "florasis": "花西子", "花西子": "florasis",
+    "anessa": "安热沙", "安热沙": "anessa",
+    "fancl": "芳珂", "芳珂": "fancl",
+    "winona": "薇诺娜", "薇诺娜": "winona",
+    "proya": "珀莱雅", "珀莱雅": "proya",
+    # 食品饮料
+    "nestle": "雀巢", "雀巢": "nestle",
+    "cocacola": "可口可乐", "可口可乐": "cocacola",
+    "nongfuspring": "农夫山泉", "农夫山泉": "nongfuspring",
+    "yili": "伊利", "伊利": "yili",
+    "mengniu": "蒙牛", "蒙牛": "mengniu",
+    "saturnbird": "三顿半", "三顿半": "saturnbird",
+    "genkiforest": "元气森林", "元气森林": "genkiforest",
+    "masterkong": "康师傅", "康师傅": "masterkong",
+    "uni-president": "统一", "统一": "uni-president",
+    "easternleaf": "东方树叶", "东方树叶": "easternleaf",
+    "redbull": "红牛", "红牛": "redbull",
+    "dongpeng": "东鹏", "东鹏": "dongpeng",
+    "nissin": "日清", "日清": "nissin",
+    "haïtian": "海天", "海天": "haïtian",
+    "leekumkee": "李锦记", "李锦记": "leekumkee",
+    "squirrel": "三只松鼠", "三只松鼠": "squirrel",
+    "bestore": "良品铺子", "良品铺子": "bestore",
+    "beandchef": "百草味", "百草味": "beandchef",
+    "purezen": "纯甄", "纯甄": "purezen",
+    "saty": "金典", "金典": "saty",
+}
+
+
+def expand_brand_aliases(tags: list[str]) -> list[str]:
+    """将排除标签中的品牌名展开为双语版本，确保中英文都能匹配。"""
+    expanded = list(tags)
+    for tag in tags:
+        alias = BRAND_ALIASES.get(tag.lower())
+        if alias and alias not in expanded:
+            expanded.append(alias)
+    return expanded
 
 # ============================================================
 # 品类 → 关键词映射（以 router_agent 版本为 canonical）

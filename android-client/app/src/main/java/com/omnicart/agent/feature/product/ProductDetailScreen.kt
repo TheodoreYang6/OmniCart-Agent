@@ -94,6 +94,7 @@ fun ProductDetailScreen(
                                             ),
                                             userId = userId.ifBlank { AuthManager.effectiveUserId },
                                             sessionId = sessionId,
+                                            conversationId = "",
                                         )
                                         snackbar.showSnackbar("已加入购物车")
                                     } catch (e: Exception) {

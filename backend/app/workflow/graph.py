@@ -6,6 +6,7 @@
 LangGraph StateGraph 控制状态流转，每个 Agent 是一个 node。
 """
 
+import asyncio
 import time
 from langgraph.graph import StateGraph, END
 
@@ -41,8 +42,21 @@ _evidence_checker = EvidenceSufficiencyChecker()
 
 async def _node_router(state: WorkflowState) -> WorkflowState:
     t0 = time.perf_counter()
+
+    # 有图片时：Router 和 Visual 并行（两者无依赖）
+    visual_task = None
+    if state.image_url:
+        visual_task = asyncio.create_task(_visual.parse(state.image_url, state.user_query))
+
     state = await _router.execute(state)
     state.timing["router_ms"] = round((time.perf_counter() - t0) * 1000)
+
+    # 等待并行 Visual 结果
+    if visual_task:
+        try:
+            state._visual_prefetch = await visual_task
+        except Exception:
+            state._visual_prefetch = None
 
     # Memory Lite: 约束合并 → context_snapshot (ConversationService 统一管理)
     conv_svc = get_conversation_service()
@@ -67,7 +81,13 @@ async def _node_visual(state: WorkflowState) -> WorkflowState:
     if not state.image_url:
         state.timing["visual_ms"] = 0
         return state
-    result = await _visual.parse(state.image_url, state.user_query)
+
+    # 优先用 Router 并行预取的结果
+    result = getattr(state, '_visual_prefetch', None)
+    if result is not None:
+        delattr(state, '_visual_prefetch')
+    else:
+        result = await _visual.parse(state.image_url, state.user_query)
     if result:
         # 归一化为 dict（缓存命中返回 VisualResult，反序列化器已修复）
         vr = result if isinstance(result, dict) else result.model_dump()
@@ -79,8 +99,8 @@ async def _node_visual(state: WorkflowState) -> WorkflowState:
         p_specs = vr.get("specs", "") or ""
         p_conf = vr.get("confidence", 0) or 0
 
-        # 视觉信息注入：精确匹配优先，语义搜索补充
-        if p_conf >= 0.5:
+        # 视觉信息注入：高置信度精确匹配，低置信度引导搜索
+        if p_conf >= 0.2:
             extra_info = [x for x in [p_name, p_brand, p_cat, p_specs] if x]
             if extra_info:
                 state.user_query = f"{state.user_query} {' '.join(extra_info)}"
@@ -96,34 +116,33 @@ async def _node_visual(state: WorkflowState) -> WorkflowState:
             state.constraints.budget_min = None
             state.constraints.budget_max = None
 
-            # ② 精确匹配：品牌名 ILIKE + 产品名关键词 OR 匹配
-            try:
-                from app.core.database import get_session_sync
-                from app.models.product import ProductModel
-                from sqlalchemy import select, or_, func
-                factory = get_session_sync()
-                if factory:
-                    async with factory() as session:
-                        conditions = []
-                        # 品牌名精确匹配（跳过疑似噪音品牌如 "mat"）
-                        if p_brand and len(p_brand) >= 2 and not (p_brand.isascii() and len(p_brand) <= 3 and p_brand.isalpha()):
-                            conditions.append(ProductModel.brand.ilike(f"%{p_brand}%"))
-                        # 产品名拆成 2-3 字片段，OR 匹配（容忍"肌活"等差异）
-                        for window in [3, 2]:
-                            for i in range(len(p_name) - window + 1):
-                                kw = p_name[i:i + window]
-                                if kw and len(kw) >= 2:
-                                    conditions.append(ProductModel.title.ilike(f"%{kw}%"))
-                        if conditions:
-                            result = await session.execute(
-                                select(ProductModel.product_id)
-                                .where(or_(*conditions))
-                                .limit(5)
-                            )
-                            pids = [row[0] for row in result.fetchall()]
-                            state.visual_matched_pids = pids[:2]
-            except Exception:
-                pass
+            # ② 精确匹配：仅高置信度(≥0.5)执行，低置信度跳过（同类推荐即可）
+            if p_conf >= 0.5:
+                try:
+                    from app.core.database import get_session_sync
+                    from app.models.product import ProductModel
+                    from sqlalchemy import select, or_, func
+                    factory = get_session_sync()
+                    if factory:
+                        async with factory() as session:
+                            conditions = []
+                            if p_brand and len(p_brand) >= 2 and not (p_brand.isascii() and len(p_brand) <= 3 and p_brand.isalpha()):
+                                conditions.append(ProductModel.brand.ilike(f"%{p_brand}%"))
+                            for window in [3, 2]:
+                                for i in range(len(p_name) - window + 1):
+                                    kw = p_name[i:i + window]
+                                    if kw and len(kw) >= 2:
+                                        conditions.append(ProductModel.title.ilike(f"%{kw}%"))
+                            if conditions:
+                                result = await session.execute(
+                                    select(ProductModel.product_id)
+                                    .where(or_(*conditions))
+                                    .limit(5)
+                                )
+                                pids = [row[0] for row in result.fetchall()]
+                                state.visual_matched_pids = pids[:2]
+                except Exception:
+                    pass
 
         # 记录 trace
         step_num = len(state.trace_steps) + 1
@@ -142,19 +161,37 @@ async def _node_visual(state: WorkflowState) -> WorkflowState:
 
 def _map_visual_category(cat: str) -> str:
     mapping = {
+        # 美妆护肤
         "精华": "美妆护肤", "面霜": "美妆护肤", "防晒": "美妆护肤", "粉底": "美妆护肤",
-        "口红": "美妆护肤", "面膜": "美妆护肤", "洗发水": "美妆护肤", "沐浴露": "美妆护肤",
-        "洁面": "美妆护肤", "化妆水": "美妆护肤", "眼霜": "美妆护肤", "卸妆": "美妆护肤",
-        "手机": "数码电子", "电脑": "数码电子", "耳机": "数码电子", "充电宝": "数码电子",
-        "平板": "数码电子", "手表": "数码电子", "音箱": "数码电子", "键盘": "数码电子",
-        "T恤": "服饰运动", "跑鞋": "服饰运动", "裤子": "服饰运动", "裙子": "服饰运动",
-        "卫衣": "服饰运动", "短裤": "服饰运动",
-        "零食": "食品饮料", "饮料": "食品饮料", "咖啡": "食品饮料", "茶叶": "食品饮料",
-        "矿泉水": "食品饮料", "可乐": "食品饮料", "牛奶": "食品饮料", "气泡水": "食品饮料",
-        "冰淇淋": "食品饮料", "雪糕": "食品饮料", "酸奶": "食品饮料", "坚果": "食品饮料",
-        "方便面": "食品饮料", "巧克力": "食品饮料", "饼干": "食品饮料", "面包": "食品饮料",
+        "粉底液": "美妆护肤", "口红": "美妆护肤", "唇釉": "美妆护肤", "面膜": "美妆护肤",
+        "洁面": "美妆护肤", "化妆水": "美妆护肤", "爽肤水": "美妆护肤", "眼霜": "美妆护肤",
+        "卸妆": "美妆护肤", "眉笔": "美妆护肤", "蜜粉": "美妆护肤", "散粉": "美妆护肤",
+        "护肤品": "美妆护肤", "彩妆": "美妆护肤",
+        # 数码电子
+        "手机": "数码电子", "智能手机": "数码电子", "电脑": "数码电子", "笔记本": "数码电子",
+        "笔记本电脑": "数码电子", "耳机": "数码电子", "真无线耳机": "数码电子", "蓝牙耳机": "数码电子",
+        "充电宝": "数码电子", "移动电源": "数码电子", "平板": "数码电子", "平板电脑": "数码电子",
+        "充电器": "数码电子", "数据线": "数码电子", "键盘": "数码电子", "鼠标": "数码电子",
+        "音箱": "数码电子", "手表": "数码电子",
+        # 服饰运动
+        "T恤": "服饰运动", "短袖": "服饰运动", "短袖T恤": "服饰运动", "速干T恤": "服饰运动",
+        "跑鞋": "服饰运动", "跑步鞋": "服饰运动", "篮球鞋": "服饰运动", "运动鞋": "服饰运动",
+        "徒步鞋": "服饰运动", "登山鞋": "服饰运动", "裤子": "服饰运动", "运动长裤": "服饰运动",
+        "运动短裤": "服饰运动", "户外裤": "服饰运动", "瑜伽裤": "服饰运动", "紧身裤": "服饰运动",
+        "卫衣": "服饰运动", "背包": "服饰运动", "双肩包": "服饰运动", "帽子": "服饰运动",
+        "棒球帽": "服饰运动",
+        # 食品饮料
+        "零食": "食品饮料", "坚果": "食品饮料", "饮料": "食品饮料", "咖啡": "食品饮料",
+        "速溶咖啡": "食品饮料", "茶叶": "食品饮料", "茶饮": "食品饮料", "牛奶": "食品饮料",
+        "酸奶": "食品饮料", "气泡水": "食品饮料", "碳酸饮料": "食品饮料", "功能饮料": "食品饮料",
+        "方便面": "食品饮料", "方便食品": "食品饮料", "调味品": "食品饮料", "酱油": "食品饮料",
+        "矿泉水": "食品饮料", "可乐": "食品饮料",
     }
-    return mapping.get(cat, "")
+    # 模糊匹配：子串命中即可
+    for k, v in mapping.items():
+        if k in cat:
+            return v
+    return ""
 
 
 async def _node_retrieval(state: WorkflowState) -> WorkflowState:
@@ -183,6 +220,21 @@ async def _node_retrieval(state: WorkflowState) -> WorkflowState:
         for p in matched:
             p["reranker_score"] = max(p.get("reranker_score", 0), 0.95)
             p["_visual_exact_match"] = True
+    # 避雷硬过滤: 从检索结果中移除匹配 exclude_tags 的商品
+    exclude_tags = getattr(state.constraints, "exclude_tags", None) or []
+    if exclude_tags and result.retrieved_products:
+        before = len(result.retrieved_products)
+        result.retrieved_products = [
+            p for p in result.retrieved_products
+            if not any(
+                tag.lower() in (p.get("title", "") + p.get("brand", "")).lower()
+                for tag in exclude_tags
+            )
+        ]
+        filtered = before - len(result.retrieved_products)
+        if filtered:
+            _log.info(f"Hard-excluded {filtered} products matching exclude_tags: {exclude_tags}")
+
     # 检索完成后恢复原始 query（仅限 profile hints 污染，视觉信息保留给精排和回复）
     if getattr(state, "user_query_original", None):
         state.user_query = state.user_query_original
@@ -195,6 +247,10 @@ async def _node_reranker(state: WorkflowState) -> WorkflowState:
     """Qwen Reranker 精排：对语义检索结果进行语义重排序"""
     t0 = time.perf_counter()
     products = state.retrieved_products
+    # 快速模式：跳过 Reranker LLM 调用
+    if state.context_prompt and "[FAST_MODE]" in (state.context_prompt or ""):
+        state.timing["rerank_ms"] = 0
+        return state
     if len(products) <= 1:
         state.timing["rerank_ms"] = 0
         return state
@@ -445,16 +501,17 @@ def get_workflow_no_response():
 async def run_workflow(user_query: str, image_url: str | None = None, session_id: str = "",
                       user_id: str = "", conversation_id: str = "", enable_checkpoint: bool = True,
                       prefill_state: WorkflowState | None = None,
-                      context_prompt: str = "", no_response: bool = False) -> WorkflowState:
+                      context_prompt: str = "", no_response: bool = False,
+                      fast_mode: bool = False) -> WorkflowState:
     wf = get_workflow_no_response() if no_response else get_workflow()
 
     # ---- Workflow 级缓存：相同 query + image 在 TTL 内直接返回 ----
     cache_key = make_key("workflow", user_query, image_url or "noimg", user_id, session_id)
     if not enable_checkpoint:
-        state = await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt)
+        state = await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt, fast_mode)
     else:
         async def _do_run():
-            return await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt)
+            return await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt, fast_mode)
 
         state = await cached(
             cache_key, REDIS_CACHE_TTL_WORKFLOW, _do_run,
@@ -472,7 +529,10 @@ async def run_workflow(user_query: str, image_url: str | None = None, session_id
 async def _run_uncached(user_query: str, image_url: str | None, session_id: str,
                         user_id: str, conversation_id: str, wf, enable_checkpoint: bool,
                         prefill_state: WorkflowState | None = None,
-                        context_prompt: str = "") -> WorkflowState:
+                        context_prompt: str = "", fast_mode: bool = False) -> WorkflowState:
+    # 快速模式：context_prompt 前缀标记，Router 和 Reranker 节点读取
+    if fast_mode:
+        context_prompt = "[FAST_MODE]" + (context_prompt or "")
     if prefill_state is not None:
         state = prefill_state
         state.user_query = user_query

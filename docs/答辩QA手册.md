@@ -1,13 +1,13 @@
 # OmniCart Agent 答辩 QA 手册
 
 > 适用：字节跳动 Agent 挑战赛答辩 / 技术面试 / 项目汇报
-> 更新：2026-05-23（基于 V1 全部完成架构 — 51/51 项，含 Redis 四级缓存体系）
+> 更新：2026-06-09（V2 最终交付版）
 
 ---
 
 ## 一句话定位
 
-> OmniCart Agent 是一个面向购买前决策的 Android 原生多模态购物决策 Agent，融合 Qwen 全栈模型、LLM 查询改写 + Qdrant 语义向量 + jieba 关键词 RRF 混合检索、LangGraph 8 节点 Multi-Agent 编排、PostgreSQL 6 表持久化、7 维可解释决策评分、标准 MCP Protocol 8 Tool + JSON-RPC 2.0 + Skill Registry + ToolManager、State Checkpoint、Decision Harness 验证框架、Redis 四级缓存、LLM 全链路可观测性、Qwen-Omni 语音导购、闲聊模式 + 完整用户体系 + Android 四 Tab 原生客户端 + V1-Plus Agent 洞察面板。
+> OmniCart Agent 是一个面向购买前决策的 Android 原生多模态购物决策 Agent，融合 Qwen 全栈模型、Qdrant 语义向量检索 + Qwen3-Reranker 精排、LangGraph 5 Agent 工作流编排、PostgreSQL 8 表持久化、7 维可解释决策评分、Redis 四级缓存、LLM 全链路可观测性、Qwen-Omni 语音导购、三层记忆系统（短期/长期/会话）、完整购物闭环（加购/管理/下单） + Android 四 Tab 原生客户端 + Agent 洞察面板。
 
 ---
 
@@ -17,17 +17,17 @@
 Android App (Kotlin/Compose/MVVM) — 四个 Tab + 10 个子页面
     │ Retrofit + OkHttp + Auth Bearer Token 拦截器
     ▼
-FastAPI Backend (Python 3.11) — 26 个 API 端点
+FastAPI Backend (Python 3.11) — 30+ API 端点
     │
-    ├─ POST /api/recommend/v2 ──→ LangGraph 8 节点 Workflow
-    │   Router → Visual(Qwen-VL) → Retrieval(LLM改写+三通道并行) → Reranker
-    │       → EvidenceCheck → Decision → Response(Qwen) → Guard → Harness
+    ├─ POST /api/recommend/stream ──→ SSE 流式 + LangGraph 工作流
+    │   Router → Visual(Qwen-VL) → Retrieval → Reranker
+    │       → EvidenceCheck → Decision → Response → Guard
     │
-    ├─ /api/auth/*       ──→ PgUserRepository (PBKDF2 100k + Bearer Token)
-    ├─ /api/addresses/*  ──→ PgAddressRepository (省/市/区/详细 + is_default互斥)
-    ├─ /api/preferences  ──→ PreferenceMemory + PgPreferenceRepository
-    ├─ /api/products     ──→ PgProductRepository (100件商品 JSONB)
-    ├─ /api/cart/*       ──→ PgCartRepository (购物车商品快照)
+    ├─ /api/auth/*       ──→ 用户认证 (登录/注册/Token)
+    ├─ /api/addresses/*  ──→ 收货地址 CRUD
+    ├─ /api/preferences  ──→ 条目化偏好 (user_preference_entries)
+    ├─ /api/products     ──→ 商品列表/详情 (105件商品 4品类)
+    ├─ /api/cart/*       ──→ 购物车 CRUD + 全选/清空
     ├─ /api/checkout     ──→ Mock 结算（不接入真实支付）
     ├─ /api/agent/action ──→ 豆仔加购（受控操作 + ToolCallRecord）
     └─ /api/upload       ──→ 图片上传 + Qwen-VL 解析

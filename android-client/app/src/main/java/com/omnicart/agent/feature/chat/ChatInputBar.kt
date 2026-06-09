@@ -34,6 +34,8 @@ fun ChatInputBar(
     enabled: Boolean,
     hasImage: Boolean = false,
     isRecording: Boolean = false,
+    fastMode: Boolean = false,
+    onFastModeToggle: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val canSend = queryText.isNotBlank() || hasImage
@@ -50,23 +52,29 @@ fun ChatInputBar(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FlatIconButton(
-                icon = Icons.Filled.CameraAlt,
-                onClick = onCameraClick,
-                enabled = enabled,
-                contentDescription = "拍照或相册",
-            )
+            // 快速回答开关
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.height(40.dp),
+            ) {
+                Text("⚡", style = MaterialTheme.typography.labelMedium)
+                Switch(
+                    checked = fastMode,
+                    onCheckedChange = { onFastModeToggle() },
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
 
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(6.dp))
 
             // 中间：输入框
             OutlinedTextField(
                 value = queryText,
                 onValueChange = onQueryChange,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).padding(vertical = 2.dp),
                 placeholder = {
                     Text(
-                        "说说想买什么、预算和使用场景",
+                        "说说想买什么",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 },
@@ -82,7 +90,7 @@ fun ChatInputBar(
                 ),
             )
 
-            Spacer(modifier = Modifier.width(2.dp))
+            Spacer(modifier = Modifier.width(6.dp))
 
             // 右侧：语音按钮 + 加号 / 发送
             if (canSend) {
@@ -153,12 +161,14 @@ private fun FlatIconButton(
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = if (emphasized) {
-            Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary)
-        } else Modifier,
+        modifier = Modifier
+            .size(40.dp)
+            .then(
+                if (emphasized) Modifier
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                else Modifier
+            ),
     ) {
         Icon(
             imageVector = icon,

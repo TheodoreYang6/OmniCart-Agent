@@ -155,14 +155,13 @@ class DecisionAgent(BaseAgent):
                     spec_keywords=constraints.spec_keywords if hasattr(constraints, 'spec_keywords') else None,
                 )
 
-                # 排除标签软降权（不硬过滤）
+                # 避雷商品应在检索层已被硬过滤，此处仅记录漏网之鱼
                 exclude_hit = any(
                     tag.lower() in product.title.lower() or tag.lower() in product.brand.lower()
                     for tag in (constraints.exclude_tags or [])
                 )
                 if exclude_hit:
-                    decision.final_score = max(0.0, decision.final_score * 0.6)
-                    decision.display_score = round(decision.final_score * 10, 1)
+                    _log.warning(f"Exclude tag leak: {product.product_id} matched {constraints.exclude_tags}")
 
                 # Override for hard constraint failures (品类/预算不匹配)
                 if hc_failed:

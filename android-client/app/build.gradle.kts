@@ -28,6 +28,7 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            buildConfigField("String", "BASE_URL", "\"http://192.168.1.101:8006/\"")
         }
         release {
             isMinifyEnabled = true
@@ -36,6 +37,7 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("release")
+            buildConfigField("String", "BASE_URL", "\"http://192.168.1.101:8006/\"")
         }
     }
 

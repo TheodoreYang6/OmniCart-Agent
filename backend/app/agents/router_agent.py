@@ -20,22 +20,16 @@ _ROUTER_PROMPT = """你是一个购物决策路由Agent。分析用户的购物�
 ## 用户输入
 {query}
 
-## 当前支持的品类
-- 数码电子：手机、耳机、笔记本、平板、手表、音箱、充电宝等
-- 美妆护肤：精华、面霜、防晒、洁面、面膜、粉底等
-- 服饰运动：T恤、跑鞋、羽绒服、瑜伽裤、登山鞋等
-- 食品饮料：咖啡、零食、饮料、保健品、方便食品等
+## 品类
+仅限：数码电子 / 美妆护肤 / 服饰运动 / 食品饮料
 
-## 重要规则
-- 如果是追问（如"有没有便宜一点的""降噪好一点的呢"），必须继承上一轮的品类和场景，除非用户明确换了话题
-- "便宜一点""性价比高的" → 不是换品类，保持原品类，降低预算或偏好低价
-- "好一点的""更好的" → 不是换品类，保持原品类，提升品质要求
-- "有没有别的""其他" → 保持品类，但放宽约束
-- **回答豆仔的问题**: 如果上一轮豆仔回复中问了用户一个问题（末尾有"？"或含"要不要""喜欢哪个""选哪个""可以吗"等），用户的简短回复（"要""好""行""可以""对""是的""嗯""买""换一个"等）很可能是在回答豆仔的问题，而不是新话题或乱输入。你必须从豆仔的问题中推断品类、场景等约束信息。
-- **闲聊/乱输入识别**: 如果用户只是打招呼、表达情感（想你/无聊/累了）、闲聊（天气/心情）、说与购物无关的话、或者明显是乱打/手滑（如"阿巴阿巴""asdf""123""...""？？？"）→ intent="chitchat"，其他字段可为空。**但注意**: 如果上下文显示用户正在回答豆仔的问题，不要把简短回复误判为闲聊。
+## 规则
+- 追问（便宜点/好一点/有没有别的）→ 继承上轮品类和场景，不换品类
+- 上文豆仔问了问题 → 用户的简短回复（要/好/行/对/嗯/换一个）是在回答它，从问题推断意图
+- 购物无关的闲聊或乱输入 → intent="chitchat"，其他字段可为空
 
 ## 任务
-提取以下信息，只输出JSON，不要多余内容：
+提取以下信息，只输出JSON：
 
 {
   "intent": "chitchat|recommend|compare|risk_check|compatibility_check|alternative|shop_action",
@@ -44,13 +38,10 @@ _ROUTER_PROMPT = """你是一个购物决策路由Agent。分析用户的购物�
   "budget_max": 最高预算金额(数字)或null,
   "budget_min": 最低预算金额(数字)或null,
   "scenario": "commute|business_trip|flight|sport|outdoor|desk|travel|null",
-  "scenario_keywords": [该场景下商品应具备的特征词列表，如爬山→["防滑","透气","耐磨","轻量","缓震"]；无场景则为空数组],
-  "spec_keywords": [为该品类提取品质规格关键词(8-12个)。优先用户提到的，用户没提则给出品类通用品质规格词。如耳机→["降噪","续航","蓝牙","音质","快充","通透","低延迟"]；跑鞋→["缓震","透气","碳板","回弹","轻量","耐磨","防滑","支撑"]。必须填充，不能为空],
-  "must_have": [用户明确说"必须要有""一定要有"的关键词，或用户明确命名的品类/品牌/特征词。注意：品质规格词应该放在spec_keywords里，不是must_have。如果用户没有明确说必须有什么，这个数组留空],
-  "avoid": [用户明确说"不要""不喜欢""讨厌"的关键词。如果用户没有明确说不要什么，这个数组留空],
-  "need_visual": true或false,
-  "need_policy_check": true或false,
-  "need_compatibility_check": true或false,
+  "scenario_keywords": [场景特征词，如爬山场景可填"防滑""透气""轻量"等；无场景则为空数组],
+  "spec_keywords": [3-5个品质关键词。优先用户提到的，没提则给品类通用词。如耳机→"降噪""音质""续航"；跑鞋→"缓震""透气""轻量"；精华→"保湿""抗老""修护"。必须填充，不能为空],
+  "must_have": [用户明确要求必须有的关键词。没有则留空],
+  "avoid": [用户明确说不要/不喜欢的词。没有则留空],
   "retrieval_channels": ["text","review","policy"] 中至少包含"text"和"review"
 }
 
@@ -83,9 +74,22 @@ class RouterAgent(BaseAgent):
         # 构建会话上下文（供 LLM 理解追问）
         context = self._build_session_context(state)
 
-        # 尝试 LLM 增强（预填约束时跳过，失败时静默降级到规则结果）
+        # 豆仔问了问题，用户回复简短肯定词 → 从 pending_question 推断搜索意图
+        _AFFIRMATIVE = {"要", "好", "行", "可以", "对", "是的", "嗯", "买", "要的", "好的", "行的", "对啊", "是", "要买", "想看", "想买", "想看下", "看看吧", "试试", "来一个", "整一个", "搞一个"}
+        if "豆仔上一轮问了用户一个问题" in (context or "") and state.user_query.strip() in _AFFIRMATIVE:
+            # 从 pending_question 提取品类关键词，替换 query
+            import re
+            pq_match = re.search(r"「(.+?)」", context)
+            if pq_match:
+                pending_q = pq_match.group(1)
+                # 用 pending_question 作为实际搜索 query
+                state.user_query = pending_q
+                rule_result = _rule_based_parse(pending_q)
+
+        # 快速模式或预填约束：跳过 LLM，只用规则
+        fast_mode = state.context_prompt and "[FAST_MODE]" in (state.context_prompt or "")
         llm_result = {}
-        if not has_prefilled:
+        if not has_prefilled and not fast_mode:
             try:
                 from app.core.cache import cached, make_key
                 from app.core.config import REDIS_CACHE_TTL_REWRITE
@@ -120,14 +124,17 @@ class RouterAgent(BaseAgent):
 
         # 规则强检测的意图不被 LLM 覆盖 (词库匹配比 LLM 语义判断更可靠)
         HIGH_CONFIDENCE_INTENTS = {"chitchat", "risk_check", "shop_action"}
+        # 规则强检测的意图不被 LLM 覆盖
         if rule_result.get("intent") in HIGH_CONFIDENCE_INTENTS:
             merged["intent"] = rule_result["intent"]
-            # chitchat 不需要品类/预算等约束
             if rule_result["intent"] == "chitchat":
                 merged["category"] = None
                 merged["sub_category"] = None
                 merged["budget_max"] = None
                 merged["retrieval_channels"] = []
+        # LLM 不能把明确的购物意图降级为闲聊
+        if rule_result.get("intent") == "recommend" and merged.get("intent") == "chitchat":
+            merged["intent"] = "recommend"
 
         # 如果引导流程预填了约束，直接沿用，不被规则/LLM覆盖
         if has_prefilled:
@@ -137,6 +144,10 @@ class RouterAgent(BaseAgent):
                 merged["budget_max"] = c.budget_max
             if c.budget_min is not None:
                 merged["budget_min"] = c.budget_min
+        # Profile 偏好中的避雷标签始终合并（不被 LLM 覆盖）
+        prefill_avoid = getattr(c, "exclude_tags", None) or []
+        if prefill_avoid:
+            merged["avoid"] = list(set((merged.get("avoid") or []) + prefill_avoid))
 
         state.intent = merged.get("intent", "recommend")
         state.constraints = Constraints(
@@ -217,14 +228,19 @@ class RouterAgent(BaseAgent):
             if last_q and last_q != state.user_query:
                 parts.append(f"上一轮用户说了: 「{last_q}」")
             if last_answer:
-                answer_short = last_answer[-300:] if len(last_answer) > 300 else last_answer
+                answer_short = last_answer[-200:] if len(last_answer) > 200 else last_answer
                 parts.append(f"上一轮豆仔回复: 「{answer_short}」")
             if last_intent:
                 parts.append(f"上一轮意图: {last_intent}")
             if acc.get("category"):
                 parts.append(f"当前话题品类: {acc['category']}")
             if acc.get("sub_category"):
-                parts.append(f"当前话题子品类: {acc['sub_category']}")
+                # 仅当当前 query 仍包含子品类关键词时才继承，防止话题已切换但子品类锁死
+                from app.decision.rules import detect_sub_category
+                cur_sub = detect_sub_category(state.user_query, acc.get("category"))
+                if cur_sub:
+                    parts.append(f"当前话题子品类: {cur_sub}")
+                # 否则不注入旧子品类，让 LLM 自由判断
             if acc.get("budget_max") is not None:
                 parts.append(f"当前预算上限: ¥{acc['budget_max']}")
             if acc.get("scenario"):
@@ -236,7 +252,7 @@ class RouterAgent(BaseAgent):
                     f"#{i+1} {p.get('brand','')} {p.get('title','')[:30]}"
                     if isinstance(p, dict)
                     else f"#{i+1} {p}"
-                    for i, p in enumerate(products[:5])
+                    for i, p in enumerate(products[:3])
                 )
                 parts.append(f"上一轮推荐商品: {product_summary}")
 
@@ -246,7 +262,7 @@ class RouterAgent(BaseAgent):
                 prev_turns = recent[:-1]  # exclude current turn
                 if prev_turns:
                     parts.append(f"最近{len(prev_turns)}轮对话摘要:")
-                    for i, t in enumerate(prev_turns[-3:]):
+                    for i, t in enumerate(prev_turns[-2:]):
                         uq = t.get("user_query", "")[:80]
                         aa = t.get("assistant_answer", "")[:80]
                         parts.append(f"  第{i+1}轮 — 用户: 「{uq}」→ 豆仔: 「{aa}」")
@@ -265,6 +281,8 @@ def _rule_based_parse(query: str) -> dict:
     但返回 intent="recommend" 而不是 "chitchat"，让 LLM (非Mock模式) 或
     MockChat 智能推断覆盖。当 LLM 不可用时，短文本默认走推荐流程。
     """
+    import re
+    q = query.lower()
     result = {
         "intent": "recommend",
         "category": None,
@@ -282,7 +300,9 @@ def _rule_based_parse(query: str) -> dict:
         "retrieval_channels": ["text", "review"],
     }
 
-    q = query.lower()
+    # 豆仔问了用户一个问题，用户回答"要/好/行" → 从问题中提取搜索意图
+    # 在 _build_session_context 中已传递 pending_question，此处做规则兜底
+    # (实际替换逻辑在 execute() 中根据上下文完成)
 
     # 词库快速拦截: 命中→直接chitchat省LLM调用, 未命中→LLM Router判断
     chitchat_patterns = [
@@ -347,18 +367,25 @@ def _rule_based_parse(query: str) -> dict:
     result["budget_max"] = detect_budget(query)
     result["scenario"] = detect_scenario(query)
 
-    # 排除关键词: 支持多个 "不要XX"/"不想买XX"/"排除XX" (用 findall 而非 search)
-    import re
+    # 排除关键词: 严格匹配 "不要XX"/"不想买XX"/"排除XX"
+    # 常见的非品牌噪音词 — 被正则抓到但不应作为避雷标签
+    _NOISE_TAGS = {"东西", "商品", "这些", "那些", "这个", "那个", "什么", "一点",
+                   "贵的", "便宜的", "太贵", "太便宜", "国产", "进口", "的"}
     exclude_patterns = [
-        r'不要\s*([^\s，。,]+)',      # "不要小米" "不要含酒精的" (遇到逗号/空格停止)
+        r'不要\s*([^\s，。,]+)',      # "不要小米" "不要含酒精的"
         r'不想[买要]\s*([^\s，。,]+)', # "不想买索尼"
         r'排除\s*([^\s，。,]+)',      # "排除华为"
-        r'除了\s*([^\s，。,]+)',      # "除了兰蔻"
+        r'除了\s*([^\s，。，]+)(?:以外|之外|不要[买要]?)',  # "除了兰蔻以外/不要" (排除)
     ]
     for pat in exclude_patterns:
         for m in re.finditer(pat, q):
             tag = m.group(1).strip().rstrip('，。、的')
-            if tag and len(tag) >= 1 and tag not in result["avoid"]:
+            # 严格门槛: ≥2字符 且 不是无意义噪音词
+            if tag and len(tag) >= 2 and tag not in _NOISE_TAGS and tag not in result["avoid"]:
                 result["avoid"].append(tag)
+
+    # 展开品牌中英文别名 (用户说"不要Nike" → 同时排除 "Nike" 和 "耐克")
+    from app.decision.rules import expand_brand_aliases
+    result["avoid"] = expand_brand_aliases(result["avoid"])
 
     return result

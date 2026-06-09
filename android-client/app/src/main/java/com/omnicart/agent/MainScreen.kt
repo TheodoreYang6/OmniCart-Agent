@@ -1,6 +1,18 @@
 package com.omnicart.agent
 
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Person
@@ -13,6 +25,8 @@ import com.omnicart.agent.core.network.ApiClient
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -61,8 +75,10 @@ fun MainScreen() {
         AuthManager.init(context)
     }
 
-    // 隐藏底部 Tab 的页面路由
-    val hideBottomBar = currentDestination?.route in listOf("login", "address", "preference", "product_detail/{productId}")
+    // 隐藏底部 Tab：特定页面 或 键盘弹起时（>100dp 阈值防抖，避免动画期间频繁重绘）
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    val keyboardOpen by remember(imeBottom) { derivedStateOf { imeBottom > 100 } }
+    val hideBottomBar = keyboardOpen || currentDestination?.route in listOf("login", "address", "address_select", "preference", "product_detail/{productId}")
 
     // 问问豆仔状态
     var askDouzaiProductId by remember { mutableStateOf("") }
@@ -74,6 +90,7 @@ fun MainScreen() {
                 NavigationBar(
                     tonalElevation = 8.dp,
                     containerColor = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars),
                 ) {
                     tabs.forEach { tab ->
                         val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
@@ -104,6 +121,8 @@ fun MainScreen() {
             navController = navController,
             startDestination = "chat",
             modifier = Modifier.padding(padding),
+            enterTransition = { fadeIn(tween(300)) },
+            exitTransition = { fadeOut(tween(300)) },
         ) {
             composable("shop") {
                 ProductListScreen(
@@ -122,6 +141,7 @@ fun MainScreen() {
                         askDouzaiTitle = askDouzaiTitle,
                         onAskDouzaiConsumed = { askDouzaiProductId = ""; askDouzaiTitle = "" },
                         onProductClick = { productId -> navController.navigate("product_detail/$productId") },
+                        onNavigateToAddress = { navController.navigate("address_select") },
                     )
                 }
             }
@@ -202,6 +222,15 @@ fun MainScreen() {
             }
             composable("address") {
                 AddressScreen(onBack = { navController.popBackStack() })
+            }
+            composable("address_select") {
+                AddressScreen(
+                    onBack = { navController.popBackStack() },
+                    selectionMode = true,
+                    onAddressSelected = {
+                        navController.popBackStack()
+                    },
+                )
             }
             composable("preference") {
                 PreferenceScreen(

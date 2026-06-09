@@ -1,5 +1,8 @@
 package com.omnicart.agent.feature.chat
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -26,7 +29,11 @@ fun VoiceInputOverlay(
     recordingSeconds: Int,
     onCancel: () -> Unit,
 ) {
-    if (!isRecording) return
+    AnimatedVisibility(
+        visible = isRecording,
+        enter = fadeIn(tween(200)),
+        exit = fadeOut(tween(200)),
+    ) {
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
@@ -94,6 +101,7 @@ fun VoiceInputOverlay(
                 fontSize = 12.sp,
             )
         }
+    }
     }
 }
 

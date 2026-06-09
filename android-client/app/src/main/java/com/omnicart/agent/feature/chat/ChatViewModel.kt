@@ -292,6 +292,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     addProperty("conversation_id", _uiState.value.conversationId)
                     addProperty("message", finalQuery)
                     if (imageUrl != null) addProperty("image_url", imageUrl)
+                    addProperty("fast_mode", _uiState.value.fastMode)
                 }
 
                 var fullText = ""
@@ -396,6 +397,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     addProperty("mode", "product_focused_analysis")
                     addProperty("target_product_id", productId)
                     addProperty("allow_same_category_comparison", true)
+                    addProperty("fast_mode", _uiState.value.fastMode)
                 }
                 var fullText = ""
                 var resultData: JsonObject? = null
@@ -449,31 +451,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun showAddressForm() {
-        _uiState.update { it.copy(showAddressForm = true) }
-    }
-
-    fun dismissAddressForm() {
-        _uiState.update { it.copy(showAddressForm = false) }
-    }
-
-    fun submitAddress(name: String, phone: String, province: String, city: String,
-                      district: String, detail: String, onDone: () -> Unit) {
-        viewModelScope.launch {
-            try {
-                ApiClient.api.createAddress(
-                    com.omnicart.agent.core.network.AddressCreateRequest(
-                        name = name, phone = phone, province = province,
-                        city = city, district = district, detail = detail,
-                        isDefault = false,
-                    )
-                )
-                _uiState.update { it.copy(showAddressForm = false) }
-                onDone()
-            } catch (e: Exception) {
-                _uiState.update { it.copy(errorMessage = "保存地址失败: ${e.message}") }
-            }
-        }
+    fun toggleFastMode() {
+        _uiState.update { it.copy(fastMode = !it.fastMode) }
     }
 
     fun onNewConversation() {
@@ -550,10 +529,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val response = ApiClient.api.getConversationMessages(conversationId)
+                val productsMap = response.products ?: emptyMap()
                 val historyMessages = response.messages.map { item ->
+                    val pids = item.productRefs
+                    val prods = pids.mapNotNull { productsMap[it] }.map { p ->
+                        com.omnicart.agent.core.model.Product(
+                            productId = p["product_id"]?.toString() ?: "",
+                            title = p["title"]?.toString() ?: "",
+                            brand = p["brand"]?.toString() ?: "",
+                            price = (p["price"] as? Number)?.toDouble() ?: 0.0,
+                            imageUrls = (p["image_urls"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
+                        )
+                    }
                     ChatMessage(
                         role = if (item.role == "user") MessageRole.User else MessageRole.Assistant,
                         text = item.content,
+                        products = prods,
+                        imageUri = if (!item.imageUrl.isNullOrBlank()) android.net.Uri.parse(item.imageUrl) else null,
                     )
                 }
                 _uiState.update {
@@ -721,6 +713,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     addProperty("user_id", AuthManager.effectiveUserId)
                     addProperty("conversation_id", _uiState.value.conversationId)
                     addProperty("message", transcribed)
+                    addProperty("fast_mode", _uiState.value.fastMode)
                 }
                 var voiceFullText = ""
                 var voiceResultData: JsonObject? = null

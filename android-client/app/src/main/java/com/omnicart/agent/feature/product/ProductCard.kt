@@ -197,7 +197,9 @@ fun ProductCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { onScoreDetail?.invoke() },
+                modifier = Modifier
+                    .clickable { onScoreDetail?.invoke() }
+                    .padding(vertical = 8.dp, horizontal = 4.dp),
             )
             if (onAddToCart != null) {
                 Button(

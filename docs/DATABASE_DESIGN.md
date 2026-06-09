@@ -1,6 +1,6 @@
 # OmniCart Agent 数据库设计详解
 
-> 更新：2026-05-22 | 数据库：PostgreSQL 18 + Qdrant 1.18 | ORM：SQLAlchemy 2.0 Async | 迁移：Alembic
+> 更新：2026-06-09 | 数据库：PostgreSQL + Qdrant | ORM：SQLAlchemy 2.0 Async | 迁移：Alembic
 
 ---
 
@@ -32,7 +32,7 @@ def get_product_repo():
 
 ---
 
-## 六张表逐一分析
+## 数据表逐一分析
 
 ### 1. products — 商品主表
 
@@ -272,16 +272,72 @@ CREATE TABLE user_preferences (
 }
 ```
 
-#### 为什么不用产品级的用户画像表？
+#### 长期用户偏好 — user_preference_entries
 
-比赛版 session 级偏好就够了。如果是长期用户画像（跨会话），应该：
-1. 用户画像表：`user_profiles(user_id, preference_vector, favorite_categories, avg_budget, ...)`
-2. 行为表：`user_behaviors(user_id, action, product_id, timestamp)`
-3. 推荐模型消费以上两张表
+已实现条目化偏好存储（详见 `MEMORY_SYSTEM.md`），每条偏好独立 entry_id，支持品类感知注入、启用/禁用、单独删除。
 
 ---
 
-### 6. alembic_version — 迁移版本表
+### 6. orders — 订单表
+
+```sql
+CREATE TABLE orders (
+    order_id    VARCHAR(64) PRIMARY KEY,       -- ORD-XXXXXXXX
+    user_id     VARCHAR(128) NOT NULL,
+    items       JSONB NOT NULL,                -- [{product_id,title,brand,price,quantity}]
+    total_price DOUBLE PRECISION NOT NULL,
+    status      VARCHAR(32) DEFAULT 'pending', -- pending/shipped/completed
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+仅模拟下单，不接入真实支付。订单在 checkout 时持久化，Android OrderScreen 从 `GET /api/orders` 读取。
+
+---
+
+### 7. conversations — 会话表 + context_snapshot
+
+```sql
+CREATE TABLE conversations (
+    conversation_id  VARCHAR(64) PRIMARY KEY,  -- CONV-xxxxxxxxxxxx
+    user_id          VARCHAR(128) NOT NULL,
+    session_id       VARCHAR(64),
+    title            VARCHAR(256),
+    status           VARCHAR(32) DEFAULT 'active',
+    summary          TEXT,
+    context_snapshot JSONB DEFAULT '{}',       -- 短期记忆核心
+    last_message     TEXT,
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ
+);
+```
+
+`context_snapshot` (JSONB) 是短期记忆核心，存储：约束(constraints)、上轮对话(last_query/last_answer)、商品列表(last_products)、待回答问题(pending_question)、最近3轮摘要(recent_turns)、对话摘要(conversation_summary)。
+
+### 8. conversation_messages — 消息表
+
+```sql
+CREATE TABLE conversation_messages (
+    message_id      VARCHAR(64) PRIMARY KEY,
+    conversation_id VARCHAR(64) REFERENCES conversations,
+    user_id         VARCHAR(128),
+    session_id      VARCHAR(64),
+    role            VARCHAR(16),               -- user / assistant
+    content         TEXT,
+    image_url       TEXT,
+    product_refs    JSONB,                      -- [product_id, ...]
+    evidence_refs   JSONB,
+    memory_refs     JSONB,
+    extra_data      JSONB,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+消息支持图片、商品引用、证据引用、记忆引用。Android 会话恢复时从 `GET /api/conversations/{id}/messages` 加载历史。
+
+---
+
+### alembic_version — 迁移版本表
 
 由 Alembic 自动管理，记录当前数据库的迁移版本号。每次 `alembic upgrade head` 检查此表决定需要执行哪些迁移。
 
