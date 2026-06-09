@@ -15,4 +15,4 @@ fi
 
 echo "--> Starting Uvicorn..."
 cd /app/backend
-exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8006 --log-level info
+exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8006 --log-level info --loop asyncio
