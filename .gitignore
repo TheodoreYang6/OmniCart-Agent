@@ -48,6 +48,16 @@ Desktop.ini
 
 # ===== Claude / AI Agent (internal files only) =====
 .claude/
+AGENTS.md
+claude-auto.bat
+
+# ===== Docs (internal design docs, not for public) =====
+docs/
+
+# ===== Temp & Misc =====
+bug.txt
+snapshots/
+课题说明会*.pdf
 
 # ===== Logs =====
 *.log
