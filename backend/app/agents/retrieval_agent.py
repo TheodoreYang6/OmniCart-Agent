@@ -190,6 +190,27 @@ class RetrievalAgent(BaseAgent):
         # sub_category 无结果时自动放宽（Router 提取的 sub_category 可能与数据集不一致）
         if not results and sub_cat:
             results = await _do_search(None)
+
+        # category 也无结果时，回退到全品类搜索（推荐同大类或全库商品）
+        if not results and (constraints.category or state.retrieval_plan.category):
+            try:
+                results = await self._text_retriever.search_chunked(
+                    query=search_query,
+                    top_k=state.retrieval_plan.top_k,
+                    category=None,
+                    sub_category=None,
+                    price_max=constraints.budget_max,
+                    price_min=constraints.budget_min,
+                )
+            except Exception:
+                results = await self._text_retriever.search(
+                    query=search_query,
+                    top_k=state.retrieval_plan.top_k,
+                    category=None,
+                    sub_category=None,
+                    price_max=constraints.budget_max,
+                    price_min=constraints.budget_min,
+                )
         evidence = []
         for item in results:
             raw_score = item.get("score", 0)
