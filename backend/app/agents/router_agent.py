@@ -140,6 +140,7 @@ class RouterAgent(BaseAgent):
                 or rule_result.get("budget_max")
                 or (rule_result.get("spec_keywords") and len(rule_result.get("spec_keywords", [])) >= 2)
                 or rule_result.get("must_have")
+                or state.image_url  # 有图片→用户想搜商品，不是闲聊
             )
             if rule_has_signal:
                 merged["intent"] = "recommend"

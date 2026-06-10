@@ -64,7 +64,10 @@ class ResponseAgent(BaseAgent):
             fast_mode = state.context_prompt and "[FAST_MODE]" in (state.context_prompt or "")
             if fast_mode:
                 state.context_prompt = (state.context_prompt or "").replace("[FAST_MODE]", "")
-            if state.intent == "chitchat":
+            # 有图片或有检索结果时，即使Router判为chitchat也走推荐流程
+            has_products = bool(state.retrieved_products or state.decision_results)
+            has_image = bool(state.image_url)
+            if state.intent == "chitchat" and not has_products and not has_image:
                 state.answer = await self._handle_chitchat(state.user_query)
             elif fast_mode:
                 state.answer = self._generate_template(state)
