@@ -164,7 +164,8 @@ class DecisionAgent(BaseAgent):
                     _log.warning(f"Exclude tag leak: {product.product_id} matched {constraints.exclude_tags}")
 
                 # Override for hard constraint failures (品类/预算不匹配)
-                if hc_failed:
+                # 拍照识图时品类来自视觉识别，可能与DB分类不一致，不降分
+                if hc_failed and not state.visual_result:
                     decision.final_score = min(decision.final_score, 0.45)
                     decision.display_score = round(decision.final_score * 10, 1)
                     decision.recommendation_level = "not_recommended"
