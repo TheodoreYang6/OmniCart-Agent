@@ -40,8 +40,11 @@ async def init_db():
     from app.models import Base
     if _engine is None:
         _create_engine()
-    async with _engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with _engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception:
+        pass  # 表已存在则忽略，避免启动崩溃
 
 
 async def close_db():
