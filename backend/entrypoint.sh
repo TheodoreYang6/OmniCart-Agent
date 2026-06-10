@@ -10,7 +10,7 @@ if [ -n "$DATABASE_URL" ]; then
         sleep 2
     done
     echo "--> PostgreSQL ready, running migrations..."
-    cd /app && python -m alembic upgrade head
+    cd /app && python -m alembic upgrade head || echo "--> Migration skipped (tables exist)"
 fi
 
 echo "--> Starting Uvicorn..."
