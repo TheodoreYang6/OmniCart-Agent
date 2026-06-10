@@ -132,9 +132,18 @@ class RouterAgent(BaseAgent):
                 merged["sub_category"] = None
                 merged["budget_max"] = None
                 merged["retrieval_channels"] = []
-        # LLM 不能把明确的购物意图降级为闲聊
+        # LLM 不能把明确的购物意图降级为闲聊 — 但仅当规则解析有明确购物信号时才拦截
+        # (规则默认 intent="recommend"，无信号时 LLM 的 chitchat 判断应生效)
         if rule_result.get("intent") == "recommend" and merged.get("intent") == "chitchat":
-            merged["intent"] = "recommend"
+            rule_has_signal = bool(
+                rule_result.get("category")
+                or rule_result.get("budget_max")
+                or (rule_result.get("spec_keywords") and len(rule_result.get("spec_keywords", [])) >= 2)
+                or rule_result.get("must_have")
+            )
+            if rule_has_signal:
+                merged["intent"] = "recommend"
+            # 否则保持 LLM 的 chitchat 判断
 
         # 如果引导流程预填了约束，直接沿用，不被规则/LLM覆盖
         if has_prefilled:
@@ -311,7 +320,7 @@ def _rule_based_parse(query: str) -> dict:
         "谢谢", "感谢", "多谢", "拜拜", "再见", "晚安", "回头见",
         # 问身份/能力
         "你是谁", "你叫什么", "你的名字", "你是什么", "介绍一下自己",
-        "你能做什么", "你会什么", "你有什么功能", "你能干嘛",
+        "你能做什么", "你会什么", "你有什么功能", "你能干嘛", "你能干什么",
         "你是AI", "你是机器人", "你是人工",
         # AI/助手相关闲聊
         "豆包", "豆仔", "豆包和", "你和豆包", "豆包是谁", "claude", "gpt", "chatgpt",
@@ -328,7 +337,7 @@ def _rule_based_parse(query: str) -> dict:
         # 单字闲聊 (不要误判为商品搜索)
         "哈哈", "呵呵", "嘿嘿", "哦", "嗯", "啊", "哎",
         # emoji/符号类
-        "？", "？？", "？？？", "。。。", "...",
+        "？", "？？", "？？？", "。。。", "...", "。", ".", "!", "！",
     ]
     # "喜欢XX品牌"可能被个别模式(如"苹果")误判 → 含品牌/品类词的跳过
     chitchat_hit = any(w in q for w in chitchat_patterns)
