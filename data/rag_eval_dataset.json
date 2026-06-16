@@ -1,0 +1,146 @@
+[
+  {"query_id":"G001","user_query":"预算200以内，想买一个适合iPhone 15日常用的充电宝","expected_category":"数码电子","relevant_product_ids":["p_digital_028"],"relevance_grades":{"p_digital_028":3},"key_info_points":["预算200元以内","兼容iPhone 15","便携日常通勤使用","PD快充","可带上飞机"]},
+  {"query_id":"G002","user_query":"经常出差需要给MacBook和iPhone同时充电，推荐一个充电宝","expected_category":"数码电子","relevant_product_ids":["p_digital_028","p_digital_029"],"relevance_grades":{"p_digital_028":3,"p_digital_029":2},"key_info_points":["支持多设备同时充电","适合MacBook和iPhone","大容量","出差场景"]},
+  {"query_id":"G003","user_query":"坐飞机可以带20000mAh的充电宝吗？帮我推荐一款","expected_category":"数码电子","relevant_product_ids":["p_digital_028"],"relevance_grades":{"p_digital_028":3},"key_info_points":["20000mAh符合航空规定","可以带上飞机","Anker品牌","22.5W快充","PD双向充电"]},
+  {"query_id":"G012","user_query":"200元左右最适合出差的充电宝","expected_category":"数码电子","relevant_product_ids":["p_digital_028"],"relevance_grades":{"p_digital_028":3},"key_info_points":["¥149在预算范围内","出差场景","20000mAh大容量","可上飞机"]},
+  {"query_id":"G014","user_query":"最便宜的20000mAh充电宝多少钱？","expected_category":"数码电子","relevant_product_ids":["p_digital_028"],"relevance_grades":{"p_digital_028":3},"key_info_points":["Anker安克20000mAh","¥149","22.5W快充","PD双向"]},
+  {"query_id":"G027","user_query":"性价比最高的20000mAh充电宝推荐","expected_category":"数码电子","relevant_product_ids":["p_digital_028"],"relevance_grades":{"p_digital_028":3},"key_info_points":["高性价比","20000mAh","¥149","Anker品牌","22.5W快充"]},
+  {"query_id":"X001","user_query":"推荐一款蓝牙耳机，预算500以内","expected_category":"数码电子","relevant_product_ids":["p_digital_026","p_digital_027","p_digital_030"],"relevance_grades":{"p_digital_026":3,"p_digital_027":2,"p_digital_030":3},"key_info_points":["预算500元以内","QCY MeloBuds ANC ¥199 40dB降噪","漫步者X3s ¥169 aptX","小米Redmi Buds 6 ¥99"]},
+  {"query_id":"X006","user_query":"出差用的充电宝，要能带上飞机","expected_category":"数码电子","relevant_product_ids":["p_digital_028"],"relevance_grades":{"p_digital_028":3},"key_info_points":["出差场景","航空可携带","20000mAh合规","Anker ¥149","22.5W PD快充"]},
+  {"query_id":"X010","user_query":"手机快充头推荐","expected_category":"数码电子","relevant_product_ids":["p_digital_029"],"relevance_grades":{"p_digital_029":3},"key_info_points":["快充充电头","倍思65W GaN氮化镓¥89","三口快充Type-C+USB","兼容苹果安卓笔记本"]},
+
+  {"query_id":"R001","user_query":"预算5000以内，适合学生用的轻薄笔记本电脑推荐","expected_category":"数码电子","relevant_product_ids":["p_digital_004","p_digital_023"],"relevance_grades":{"p_digital_004":3,"p_digital_023":2},"key_info_points":["5000元以内预算","轻薄便携","适合学生使用","华为MateBook 14 ¥6299超出预算","联想ThinkBook 14+ ¥6999稍超"]},
+  {"query_id":"R002","user_query":"程序员开发用的笔记本电脑，要性能强","expected_category":"数码电子","relevant_product_ids":["p_digital_006","p_digital_012","p_digital_022"],"relevance_grades":{"p_digital_006":3,"p_digital_012":3,"p_digital_022":3},"key_info_points":["高性能","开发编程","MacBook Pro M5 16GB","ThinkPad X1 Carbon","16GB以上内存"]},
+  {"query_id":"R003","user_query":"最轻薄的笔记本电脑推荐，经常出差带着","expected_category":"数码电子","relevant_product_ids":["p_digital_020","p_digital_004","p_digital_022"],"relevance_grades":{"p_digital_020":3,"p_digital_004":2,"p_digital_022":2},"key_info_points":["轻薄便携","出差场景","MacBook Air 13英寸 ¥8499","ThinkPad X1 Carbon ¥10999"]},
+  {"query_id":"R004","user_query":"15000以上预算，设计师用的MacBook推荐","expected_category":"数码电子","relevant_product_ids":["p_digital_006","p_digital_012"],"relevance_grades":{"p_digital_006":3,"p_digital_012":3},"key_info_points":["15000以上预算","设计师","MacBook Pro 14英寸 M5 ¥13499","MacBook Pro 16英寸 M5 Pro ¥21999","高色准屏幕"]},
+
+  {"query_id":"R005","user_query":"适合考研党用的平板电脑，主要看网课记笔记","expected_category":"数码电子","relevant_product_ids":["p_digital_011","p_digital_019","p_digital_025"],"relevance_grades":{"p_digital_011":3,"p_digital_019":3,"p_digital_025":3},"key_info_points":["学生党考研","网课笔记","小米平板8 Pro ¥3299","vivo Pad 6 Pro ¥3299","iPad Air 11英寸 ¥4799"]},
+  {"query_id":"R006","user_query":"iPad和华为平板哪个好？预算4000左右","expected_category":"数码电子","relevant_product_ids":["p_digital_005","p_digital_011","p_digital_019","p_digital_025"],"relevance_grades":{"p_digital_005":2,"p_digital_011":3,"p_digital_019":3,"p_digital_025":2},"key_info_points":["iPad vs 华为对比","4000预算","小米平板8 Pro ¥3299","vivo Pad 6 Pro ¥3299","iPad Air ¥4799"]},
+  {"query_id":"R007","user_query":"画画用的平板电脑推荐，要支持手写笔","expected_category":"数码电子","relevant_product_ids":["p_digital_013","p_digital_021","p_digital_024","p_digital_025"],"relevance_grades":{"p_digital_013":3,"p_digital_021":3,"p_digital_024":3,"p_digital_025":2},"key_info_points":["绘画创作","手写笔支持","iPad Pro 13英寸 M5 ¥8999","华为MatePad Pro 13.2 ¥5199","低延迟手写"]},
+  {"query_id":"R008","user_query":"给小学生上网课用的平板，不要太贵2000以内","expected_category":"数码电子","relevant_product_ids":[],"relevance_grades":{},"key_info_points":["2000元以内预算","小学生网课","低价平板","诚实告知无匹配"]},
+
+  {"query_id":"R009","user_query":"拍照最好的手机推荐，预算8000左右","expected_category":"数码电子","relevant_product_ids":["p_digital_001","p_digital_002","p_digital_008","p_digital_015"],"relevance_grades":{"p_digital_001":3,"p_digital_002":3,"p_digital_008":3,"p_digital_015":3},"key_info_points":["8000预算","拍照影像","iPhone 17 Pro ¥8999","华为Pura 90 Pro ¥6999","小米17 Ultra ¥7499","OPPO Find X9 Ultra ¥6999"]},
+  {"query_id":"R010","user_query":"性价比高的国产旗舰手机推荐","expected_category":"数码电子","relevant_product_ids":["p_digital_002","p_digital_008","p_digital_015"],"relevance_grades":{"p_digital_002":3,"p_digital_008":3,"p_digital_015":3},"key_info_points":["国产旗舰","性价比","华为Pura 90 Pro ¥6999","小米17 Ultra ¥7499","OPPO Find X9 Ultra ¥6999"]},
+  {"query_id":"R011","user_query":"折叠屏手机推荐，要大屏的","expected_category":"数码电子","relevant_product_ids":["p_digital_010","p_digital_014"],"relevance_grades":{"p_digital_010":3,"p_digital_014":3},"key_info_points":["折叠屏","大屏","小米MIX Fold 5 ¥9999","OPPO Find N6 ¥9699"]},
+  {"query_id":"R012","user_query":"3000元左右拍照好的手机，给父母用","expected_category":"数码电子","relevant_product_ids":["p_digital_016"],"relevance_grades":{"p_digital_016":3},"key_info_points":["3000元预算","拍照","给父母","OPPO Reno 16 Pro ¥3299","人像摄影"]},
+  {"query_id":"R013","user_query":"iPhone 17 Pro和华为Pura 90 Pro怎么选？","expected_category":"数码电子","relevant_product_ids":["p_digital_001","p_digital_002"],"relevance_grades":{"p_digital_001":3,"p_digital_002":3},"key_info_points":["iPhone 17 Pro ¥8999 256GB","华为Pura 90 Pro ¥6999 12+256GB","iOS vs 鸿蒙","影像对比"]},
+
+  {"query_id":"R014","user_query":"降噪最好的真无线耳机推荐","expected_category":"数码电子","relevant_product_ids":["p_digital_007","p_digital_018","p_digital_026"],"relevance_grades":{"p_digital_007":3,"p_digital_018":3,"p_digital_026":3},"key_info_points":["主动降噪","华为FreeBuds Pro 5 ¥1699","AirPods Pro 3 ¥1899","QCY MeloBuds ANC ¥199 40dB"]},
+  {"query_id":"R015","user_query":"200以内音质好的蓝牙耳机","expected_category":"数码电子","relevant_product_ids":["p_digital_026","p_digital_027","p_digital_030"],"relevance_grades":{"p_digital_026":3,"p_digital_027":2,"p_digital_030":3},"key_info_points":["200以内预算","音质","QCY MeloBuds ANC ¥199","漫步者X3s ¥169 aptX","小米Redmi Buds 6 ¥99"]},
+
+  {"query_id":"R016","user_query":"适合干皮的精华液推荐，预算500左右","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_001","p_beauty_004","p_beauty_005","p_beauty_009"],"relevance_grades":{"p_beauty_001":2,"p_beauty_004":3,"p_beauty_005":3,"p_beauty_009":3},"key_info_points":["干性皮肤","精华液","资生堂红腰子¥590","科颜氏淡斑精华¥520","珀莱雅双抗精华¥280"]},
+  {"query_id":"R017","user_query":"抗衰老精华液推荐，要有效果的","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_001","p_beauty_004","p_beauty_024"],"relevance_grades":{"p_beauty_001":3,"p_beauty_004":3,"p_beauty_024":3},"key_info_points":["抗衰老","紧致淡纹","雅诗兰黛小棕瓶¥720","资生堂红腰子¥590","珀莱雅红宝石精华¥300"]},
+  {"query_id":"R018","user_query":"学生党平价精华液，100元以内","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_018"],"relevance_grades":{"p_beauty_018":3},"key_info_points":["平价","学生党","The Ordinary烟酰胺¥59","控油提亮","100元以内"]},
+  {"query_id":"R019","user_query":"适合熬夜党的提亮精华","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_002","p_beauty_005","p_beauty_009"],"relevance_grades":{"p_beauty_002":3,"p_beauty_005":3,"p_beauty_009":3},"key_info_points":["提亮肤色","熬夜党","兰蔻小黑瓶¥760","科颜氏淡斑精华¥520","珀莱雅双抗精华¥280"]},
+
+  {"query_id":"R020","user_query":"SK-II神仙水到底值不值得买？","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_003"],"relevance_grades":{"p_beauty_003":3},"key_info_points":["SK-II神仙水¥1690 230ml","调理角质","收缩毛孔","性价比分析"]},
+  {"query_id":"R021","user_query":"适合湿敷的化妆水推荐","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_003","p_beauty_019"],"relevance_grades":{"p_beauty_003":3,"p_beauty_019":3},"key_info_points":["湿敷","化妆水","SK-II神仙水¥1690","兰蔻大粉水¥582 400ml","干皮适用"]},
+
+  {"query_id":"R022","user_query":"敏感肌能用的面霜推荐，修复屏障的","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_007","p_beauty_012"],"relevance_grades":{"p_beauty_007":3,"p_beauty_012":3},"key_info_points":["敏感肌","修复屏障","薇诺娜特护霜¥268 50g","理肤泉B5修复霜¥260 40ml"]},
+  {"query_id":"R023","user_query":"抗初老面霜推荐，30岁左右用","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_008"],"relevance_grades":{"p_beauty_008":3},"key_info_points":["抗初老","30岁","玉兰油大红瓶¥239 50g","紧致提拉","淡纹保湿"]},
+  {"query_id":"R024","user_query":"夏天用的清爽面霜，油皮","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_007","p_beauty_008"],"relevance_grades":{"p_beauty_007":1,"p_beauty_008":2},"key_info_points":["油皮","清爽","夏天","面霜","不油腻"]},
+
+  {"query_id":"R025","user_query":"控油定妆蜜粉饼推荐，油皮夏天用","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_013","p_beauty_014"],"relevance_grades":{"p_beauty_013":3,"p_beauty_014":3},"key_info_points":["控油定妆","油皮","方里柔焦蜜粉饼¥99 7g","花西子空气蜜粉¥169 8.5g"]},
+  {"query_id":"R026","user_query":"性价比高的散粉推荐，100元以内","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_013"],"relevance_grades":{"p_beauty_013":3},"key_info_points":["100元以内","性价比","方里柔焦蜜粉饼¥99","控油定妆"]},
+
+  {"query_id":"R027","user_query":"20岁左右用什么眼霜好？黑眼圈重的","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_016","p_beauty_021"],"relevance_grades":{"p_beauty_016":3,"p_beauty_021":2},"key_info_points":["20岁","黑眼圈","AHC全脸眼霜¥139 30ml","科颜氏牛油果眼霜¥320 28g"]},
+  {"query_id":"R028","user_query":"保湿眼霜推荐，眼周干纹多","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_016","p_beauty_021"],"relevance_grades":{"p_beauty_016":2,"p_beauty_021":3},"key_info_points":["保湿滋润","干纹","科颜氏牛油果眼霜¥320","AHC全脸眼霜¥139"]},
+
+  {"query_id":"R029","user_query":"温和不刺激的卸妆产品推荐","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_017"],"relevance_grades":{"p_beauty_017":3},"key_info_points":["温和不刺激","卸妆油","芳珂纳米卸妆油¥178 120ml","深层清洁","无添加"]},
+
+  {"query_id":"R030","user_query":"混油皮适合的持妆粉底液推荐","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_020"],"relevance_grades":{"p_beauty_020":3},"key_info_points":["混油皮","持妆","雅诗兰黛DW粉底液¥440 30ml","遮瑕控油","SPF10"]},
+  {"query_id":"R031","user_query":"遮瑕好的粉底液，要能遮痘印","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_020"],"relevance_grades":{"p_beauty_020":3},"key_info_points":["遮瑕","痘印","雅诗兰黛DW粉底液¥440","持久","控油抗汗"]},
+
+  {"query_id":"R032","user_query":"补水面膜推荐，换季皮肤干","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_022"],"relevance_grades":{"p_beauty_022":3},"key_info_points":["补水保湿","换季","薇诺娜极润面膜¥199 75g","舒缓修护","敏感肌适用"]},
+
+  {"query_id":"R033","user_query":"新手画眉用什么眉笔好？要防水的","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_025"],"relevance_grades":{"p_beauty_025":3},"key_info_points":["新手","防水防晕染","花西子眉笔¥89","双头设计","顺滑显色"]},
+
+  {"query_id":"R034","user_query":"适合夏天用的防晒霜，不油腻","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_006","p_beauty_010","p_beauty_023"],"relevance_grades":{"p_beauty_006":3,"p_beauty_010":3,"p_beauty_023":2},"key_info_points":["清爽不油腻","高倍防晒","巴黎欧莱雅¥170","安热沙¥298","理肤泉¥268"]},
+  {"query_id":"R035","user_query":"敏感肌适用的防晒霜推荐","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_023"],"relevance_grades":{"p_beauty_023":3},"key_info_points":["敏感肌","理肤泉防晒乳¥268 50ml","清爽控油","高倍防晒"]},
+
+  {"query_id":"R036","user_query":"适合送女朋友的口红或唇釉","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_015"],"relevance_grades":{"p_beauty_015":3},"key_info_points":["送礼","完美日记仿生膜唇釉¥120","丝绒哑光","显色持妆"]},
+
+  {"query_id":"R037","user_query":"油皮痘痘肌用什么洗面奶好？","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_011"],"relevance_grades":{"p_beauty_011":3},"key_info_points":["油皮痘痘肌","洁面","珊珂泡沫洁面乳¥52 120g","温和清洁","控油"]},
+
+  {"query_id":"R038","user_query":"日常通勤穿的休闲运动裤推荐","expected_category":"服饰运动","relevant_product_ids":["p_clothes_004","p_clothes_006"],"relevance_grades":{"p_clothes_004":3,"p_clothes_006":3},"key_info_points":["日常通勤","休闲","adidas运动长裤¥299","Nike Sportswear Club ¥349","束脚裤"]},
+  {"query_id":"R039","user_query":"运动长裤推荐，要透气的，300以内","expected_category":"服饰运动","relevant_product_ids":["p_clothes_004","p_clothes_006"],"relevance_grades":{"p_clothes_004":3,"p_clothes_006":2},"key_info_points":["透气","300以内","adidas三条纹¥299","运动长裤"]},
+
+  {"query_id":"R040","user_query":"秋天穿的连帽卫衣推荐，国产品牌","expected_category":"服饰运动","relevant_product_ids":["p_clothes_005","p_clothes_022"],"relevance_grades":{"p_clothes_005":3,"p_clothes_022":1},"key_info_points":["秋季","连帽卫衣","国产品牌","李宁¥259","基础印花"]},
+  {"query_id":"R041","user_query":"潮牌卫衣推荐，要三叶草的","expected_category":"服饰运动","relevant_product_ids":["p_clothes_022"],"relevance_grades":{"p_clothes_022":3},"key_info_points":["潮牌","三叶草","adidas Originals ¥459","经典logo","连帽"]},
+
+  {"query_id":"T001","user_query":"跑步穿的透气运动鞋","expected_category":"服饰运动","relevant_product_ids":["p_clothes_007","p_clothes_008","p_clothes_009","p_clothes_010"],"relevance_grades":{"p_clothes_007":3,"p_clothes_008":3,"p_clothes_009":3,"p_clothes_010":2},"key_info_points":["跑步","透气","缓震","Nike Pegasus 41 ¥899","Adidas Ultraboost 5 ¥1399","HOKA Clifton 9 ¥1099"]},
+  {"query_id":"T002","user_query":"新手跑步5公里，买什么跑鞋好？","expected_category":"服饰运动","relevant_product_ids":["p_clothes_007","p_clothes_008","p_clothes_009"],"relevance_grades":{"p_clothes_007":3,"p_clothes_008":3,"p_clothes_009":3},"key_info_points":["新手跑步","5公里","Nike Pegasus 41 ¥899","Adidas Ultraboost 5 ¥1399","HOKA Clifton 9 ¥1099"]},
+  {"query_id":"T003","user_query":"跑马拉松比赛用的碳板跑鞋推荐","expected_category":"服饰运动","relevant_product_ids":["p_clothes_010"],"relevance_grades":{"p_clothes_010":3},"key_info_points":["马拉松比赛","碳板","特步160X 6.0 PRO ¥999","竞速","轻量"]},
+
+  {"query_id":"T004","user_query":"实战篮球鞋推荐，室外水泥地打的","expected_category":"服饰运动","relevant_product_ids":["p_clothes_011","p_clothes_012","p_clothes_013"],"relevance_grades":{"p_clothes_011":3,"p_clothes_012":3,"p_clothes_013":3},"key_info_points":["实战篮球","室外水泥地","Nike LeBron XXI ¥1599","安踏KT9 ¥999","李宁全城12 ¥1199"]},
+  {"query_id":"T005","user_query":"后卫打法穿什么篮球鞋好？","expected_category":"服饰运动","relevant_product_ids":["p_clothes_012","p_clothes_013"],"relevance_grades":{"p_clothes_012":3,"p_clothes_013":3},"key_info_points":["后卫打法","安踏KT9 ¥999","李宁全城12 ¥1199","缓震支撑"]},
+
+  {"query_id":"T006","user_query":"登山徒步鞋推荐，要防水的","expected_category":"服饰运动","relevant_product_ids":["p_clothes_014","p_clothes_015"],"relevance_grades":{"p_clothes_014":3,"p_clothes_015":3},"key_info_points":["登山徒步","防水GORE-TEX","SALOMON X ULTRA 4 ¥1198","Merrell MOAB 3 GTX ¥1099"]},
+  {"query_id":"T007","user_query":"轻量徒步鞋，日常也能穿的","expected_category":"服饰运动","relevant_product_ids":["p_clothes_014","p_clothes_015"],"relevance_grades":{"p_clothes_014":3,"p_clothes_015":2},"key_info_points":["轻量","日常可穿","SALOMON ¥1198","Merrell ¥1099","抓地力好"]},
+
+  {"query_id":"T008","user_query":"瑜伽裤推荐，要裸感柔软的那种","expected_category":"服饰运动","relevant_product_ids":["p_clothes_016"],"relevance_grades":{"p_clothes_016":3},"key_info_points":["瑜伽","裸感柔软","Lululemon Align ¥880","高腰紧身","25英寸"]},
+
+  {"query_id":"T009","user_query":"户外徒步穿的长裤推荐，要耐磨","expected_category":"服饰运动","relevant_product_ids":["p_clothes_017"],"relevance_grades":{"p_clothes_017":3},"key_info_points":["户外徒步","耐磨","始祖鸟Gamma Pant ¥1290","软壳","弹力"]},
+
+  {"query_id":"T010","user_query":"日常通勤背的双肩包推荐，能装电脑","expected_category":"服饰运动","relevant_product_ids":["p_clothes_018","p_clothes_025"],"relevance_grades":{"p_clothes_018":3,"p_clothes_025":3},"key_info_points":["日常通勤","装电脑","TNF Borealis 28L ¥1098","Osprey DAYLITE 20L ¥699"]},
+  {"query_id":"T011","user_query":"轻量户外背包推荐，一日徒步用的","expected_category":"服饰运动","relevant_product_ids":["p_clothes_025"],"relevance_grades":{"p_clothes_025":3},"key_info_points":["轻量","一日徒步","Osprey DAYLITE PLUS 20L ¥699","多功能"]},
+
+  {"query_id":"T012","user_query":"夏天戴的棒球帽推荐，要透气的","expected_category":"服饰运动","relevant_product_ids":["p_clothes_019","p_clothes_024"],"relevance_grades":{"p_clothes_019":2,"p_clothes_024":3},"key_info_points":["夏天","透气","TNF速干鸭舌帽¥199防晒","Nike棒球帽¥169"]},
+  {"query_id":"T013","user_query":"户外防晒帽推荐","expected_category":"服饰运动","relevant_product_ids":["p_clothes_024"],"relevance_grades":{"p_clothes_024":3},"key_info_points":["户外","防晒","TNF Horizon速干鸭舌帽¥199","UPF防晒"]},
+
+  {"query_id":"T014","user_query":"夏天跑步穿的速干T恤推荐","expected_category":"服饰运动","relevant_product_ids":["p_clothes_020","p_clothes_021"],"relevance_grades":{"p_clothes_020":3,"p_clothes_021":3},"key_info_points":["跑步","速干透气","迪卡侬KALENJI ¥79","Nike Dri-FIT Miler ¥249"]},
+  {"query_id":"T015","user_query":"迪卡侬和Nike的跑步T恤选哪个？","expected_category":"服饰运动","relevant_product_ids":["p_clothes_020","p_clothes_021"],"relevance_grades":{"p_clothes_020":3,"p_clothes_021":3},"key_info_points":["对比","迪卡侬¥79性价比高","Nike¥249 Dri-FIT技术","跑步速干"]},
+
+  {"query_id":"T016","user_query":"100元以内的T恤推荐","expected_category":"服饰运动","relevant_product_ids":["p_clothes_001","p_clothes_020"],"relevance_grades":{"p_clothes_001":3,"p_clothes_020":3},"key_info_points":["100元以内","优衣库AIRism ¥99","迪卡侬KALENJI ¥79","基础款"]},
+
+  {"query_id":"T017","user_query":"夏天穿的运动短裤推荐","expected_category":"服饰运动","relevant_product_ids":["p_clothes_023"],"relevance_grades":{"p_clothes_023":3},"key_info_points":["夏天","运动短裤","优衣库DRY速干¥149","轻薄透气"]},
+
+  {"query_id":"F001","user_query":"推荐一款好喝的咖啡，不要三合一的","expected_category":"食品饮料","relevant_product_ids":["p_food_001","p_food_022","p_food_023"],"relevance_grades":{"p_food_001":3,"p_food_022":3,"p_food_023":3},"key_info_points":["非三合一","精品咖啡","三顿半数字星球¥138 18颗","三顿半冷萃¥58 6颗","雀巢金牌冻干¥42"]},
+  {"query_id":"F002","user_query":"办公室喝的速溶咖啡推荐","expected_category":"食品饮料","relevant_product_ids":["p_food_001","p_food_002","p_food_022","p_food_023"],"relevance_grades":{"p_food_001":2,"p_food_002":3,"p_food_022":2,"p_food_023":2},"key_info_points":["办公室","速溶","雀巢1+2原味100条¥60","三顿半数字星球¥138","即冲即饮"]},
+  {"query_id":"F003","user_query":"冷泡咖啡推荐，夏天喝","expected_category":"食品饮料","relevant_product_ids":["p_food_022","p_food_001"],"relevance_grades":{"p_food_022":3,"p_food_001":2},"key_info_points":["冷泡","夏天","三顿半冷萃¥58 6颗","三顿半数字星球¥138"]},
+
+  {"query_id":"F004","user_query":"无糖茶饮料推荐，不喜欢甜的","expected_category":"食品饮料","relevant_product_ids":["p_food_003","p_food_014"],"relevance_grades":{"p_food_003":3,"p_food_014":3},"key_info_points":["无糖","东方树叶乌龙茶¥4","东方树叶茉莉花茶整箱¥75","0糖0卡"]},
+  {"query_id":"F005","user_query":"茉莉花茶饮料整箱买哪个划算？","expected_category":"食品饮料","relevant_product_ids":["p_food_014","p_food_003"],"relevance_grades":{"p_food_014":3,"p_food_003":2},"key_info_points":["茉莉花茶","整箱","东方树叶茉莉花茶500ml×15 ¥75","乌龙茶单瓶¥4"]},
+
+  {"query_id":"F006","user_query":"0糖0卡的饮料推荐，减肥喝","expected_category":"食品饮料","relevant_product_ids":["p_food_003","p_food_004","p_food_014","p_food_015","p_food_024"],"relevance_grades":{"p_food_003":3,"p_food_004":3,"p_food_014":3,"p_food_015":2,"p_food_024":3},"key_info_points":["0糖0卡","减肥","东方树叶无糖茶","元气森林气泡水","可口可乐零度"]},
+  {"query_id":"F007","user_query":"无糖气泡水推荐，白桃味的好喝吗？","expected_category":"食品饮料","relevant_product_ids":["p_food_004","p_food_024"],"relevance_grades":{"p_food_004":3,"p_food_024":3},"key_info_points":["无糖气泡水","白桃味","元气森林白桃¥4","元气森林白葡萄整箱¥52"]},
+
+  {"query_id":"F008","user_query":"开车提神喝什么功能饮料好？","expected_category":"食品饮料","relevant_product_ids":["p_food_005","p_food_006"],"relevance_grades":{"p_food_005":3,"p_food_006":3},"key_info_points":["提神","开车","东鹏特饮¥5 500ml","红牛¥120 24罐","牛磺酸咖啡因"]},
+  {"query_id":"F009","user_query":"熬夜加班喝的功能饮料推荐","expected_category":"食品饮料","relevant_product_ids":["p_food_005","p_food_006"],"relevance_grades":{"p_food_005":2,"p_food_006":3},"key_info_points":["熬夜加班","提神","红牛24罐整箱¥120","东鹏特饮¥5"]},
+
+  {"query_id":"F010","user_query":"给小孩喝的纯牛奶推荐，要有机的","expected_category":"食品饮料","relevant_product_ids":["p_food_007","p_food_016"],"relevance_grades":{"p_food_007":3,"p_food_016":2},"key_info_points":["小孩","有机","金典有机纯牛奶¥72 12盒","特仑苏¥85 16盒","常温奶"]},
+  {"query_id":"F011","user_query":"早餐喝的牛奶，性价比高的","expected_category":"食品饮料","relevant_product_ids":["p_food_007","p_food_016"],"relevance_grades":{"p_food_007":3,"p_food_016":3},"key_info_points":["早餐","性价比","金典有机¥72/12盒","特仑苏¥85/16盒","常温纯牛奶"]},
+
+  {"query_id":"F012","user_query":"好喝的酸奶推荐，原味的","expected_category":"食品饮料","relevant_product_ids":["p_food_008","p_food_017"],"relevance_grades":{"p_food_008":3,"p_food_017":3},"key_info_points":["原味酸奶","纯甄¥55 10盒","安慕希¥68 10盒","常温"]},
+
+  {"query_id":"F013","user_query":"好吃的坚果零食推荐，独立包装的","expected_category":"食品饮料","relevant_product_ids":["p_food_009","p_food_019"],"relevance_grades":{"p_food_009":3,"p_food_019":3},"key_info_points":["坚果","独立包装","三只松鼠每日坚果¥99 30袋","百草味每日坚果¥118 30袋"]},
+  {"query_id":"F014","user_query":"办公室下午茶零食推荐","expected_category":"食品饮料","relevant_product_ids":["p_food_009","p_food_010","p_food_019"],"relevance_grades":{"p_food_009":3,"p_food_010":3,"p_food_019":3},"key_info_points":["办公室","下午茶","三只松鼠坚果¥99","良品铺子肉松饼¥59","百草味坚果¥118"]},
+
+  {"query_id":"F015","user_query":"方便面推荐，宿舍晚上饿了吃","expected_category":"食品饮料","relevant_product_ids":["p_food_011","p_food_012","p_food_020"],"relevance_grades":{"p_food_011":3,"p_food_012":2,"p_food_020":3},"key_info_points":["方便面","宿舍","康师傅红烧牛肉面¥45/12桶","日清合味道海鲜¥69/12杯"]},
+  {"query_id":"F016","user_query":"杯面推荐，开水泡就能吃的那种","expected_category":"食品饮料","relevant_product_ids":["p_food_011","p_food_020"],"relevance_grades":{"p_food_011":3,"p_food_020":3},"key_info_points":["杯面","即泡","康师傅红烧牛肉桶装¥45","日清合味道海鲜¥69"]},
+
+  {"query_id":"F017","user_query":"家用生抽酱油推荐，炒菜用的","expected_category":"食品饮料","relevant_product_ids":["p_food_013","p_food_018"],"relevance_grades":{"p_food_013":3,"p_food_018":1},"key_info_points":["生抽","炒菜","海天金标生抽¥22 1.9L","李锦记草菇老抽¥29(老抽非生抽)"]},
+  {"query_id":"F018","user_query":"老抽和生抽有什么区别？推荐一款生抽","expected_category":"食品饮料","relevant_product_ids":["p_food_013","p_food_018"],"relevance_grades":{"p_food_013":3,"p_food_018":3},"key_info_points":["生抽vs老抽区别","海天生抽¥22","李锦记老抽¥29","生抽调味老抽上色"]},
+
+  {"query_id":"M001","user_query":"预算1000以内，推荐一款性价比高的手机","expected_category":"数码电子","relevant_product_ids":[],"relevance_grades":{},"key_info_points":["1000以内预算","手机","诚实告知无匹配","建议提高预算或推荐其他品类"]},
+  {"query_id":"M002","user_query":"Apple全生态用户，想买耳机和平板，有推荐吗？","expected_category":"数码电子","relevant_product_ids":["p_digital_018","p_digital_024","p_digital_025"],"relevance_grades":{"p_digital_018":3,"p_digital_024":3,"p_digital_025":3},"key_info_points":["Apple生态","AirPods Pro 3 ¥1899","iPad Pro M4 ¥8999","iPad Air M4 ¥4799"]},
+  {"query_id":"M003","user_query":"想买一套护肤品送妈妈，预算1000左右","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_001","p_beauty_004","p_beauty_008"],"relevance_grades":{"p_beauty_001":3,"p_beauty_004":2,"p_beauty_008":2},"key_info_points":["送礼","妈妈","雅诗兰黛小棕瓶¥720","资生堂红腰子¥590","玉兰油大红瓶¥239"]},
+  {"query_id":"M004","user_query":"户外露营装备推荐，背包和徒步鞋都要","expected_category":"服饰运动","relevant_product_ids":["p_clothes_014","p_clothes_015","p_clothes_025"],"relevance_grades":{"p_clothes_014":3,"p_clothes_015":3,"p_clothes_025":3},"key_info_points":["户外露营","徒步鞋SALOMON¥1198","Merrell¥1099","背包Osprey¥699 20L"]},
+  {"query_id":"M005","user_query":"健身减肥期间吃什么零食比较好？","expected_category":"食品饮料","relevant_product_ids":["p_food_009","p_food_019","p_food_003","p_food_024"],"relevance_grades":{"p_food_009":3,"p_food_019":3,"p_food_003":2,"p_food_024":2},"key_info_points":["健身","减肥","坚果健康脂肪","无糖茶饮","0卡气泡水","适量"]},
+  {"query_id":"M006","user_query":"学生党预算有限，手机和电脑加起来不超过5000怎么选？","expected_category":"数码电子","relevant_product_ids":[],"relevance_grades":{},"key_info_points":["预算极紧","5000元手机+电脑","如实告知难匹配","建议二手或提高预算"]},
+  {"query_id":"M007","user_query":"夏天出门运动的全套装备推荐","expected_category":"服饰运动","relevant_product_ids":["p_clothes_020","p_clothes_021","p_clothes_023","p_clothes_007","p_clothes_024"],"relevance_grades":{"p_clothes_020":3,"p_clothes_021":3,"p_clothes_023":3,"p_clothes_007":3,"p_clothes_024":3},"key_info_points":["夏天运动","速干T恤","运动短裤","跑步鞋","防晒帽","全套搭配"]},
+  {"query_id":"M008","user_query":"支持40dB以上主动降噪的蓝牙耳机推荐","expected_category":"数码电子","relevant_product_ids":["p_digital_007","p_digital_018","p_digital_026"],"relevance_grades":{"p_digital_007":3,"p_digital_018":3,"p_digital_026":3},"key_info_points":["40dB降噪","主动降噪ANC","QCY MeloBuds ¥199","FreeBuds Pro 5 ¥1699","AirPods Pro 3 ¥1899"]},
+  {"query_id":"M009","user_query":"5000元左右能买什么好一点的平板？","expected_category":"数码电子","relevant_product_ids":["p_digital_005","p_digital_021","p_digital_025"],"relevance_grades":{"p_digital_005":3,"p_digital_021":3,"p_digital_025":3},"key_info_points":["5000元预算","华为MatePad Pro Max ¥4999","华为MatePad Pro 13.2 ¥5199","iPad Air 11 ¥4799"]},
+  {"query_id":"M010","user_query":"想要一款带心率监测功能的耳机","expected_category":"数码电子","relevant_product_ids":["p_digital_018"],"relevance_grades":{"p_digital_018":3},"key_info_points":["心率监测","AirPods Pro 3 ¥1899","主动降噪","运动健康"]},
+
+  {"query_id":"M011","user_query":"MacBook外接显示器做设计，需要65W以上充电头","expected_category":"数码电子","relevant_product_ids":["p_digital_029"],"relevance_grades":{"p_digital_029":3},"key_info_points":["65W以上","笔记本充电","倍思GaN ¥89","三口快充","设计师"]},
+  {"query_id":"M012","user_query":"预算300买一支眉笔和一支口红","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_015","p_beauty_025"],"relevance_grades":{"p_beauty_015":3,"p_beauty_025":3},"key_info_points":["300预算","眉笔花西子¥89","唇釉完美日记¥120","合计¥209"]},
+  {"query_id":"M013","user_query":"冬天皮肤干燥起皮，推荐一套保湿护肤品","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_019","p_beauty_007","p_beauty_001"],"relevance_grades":{"p_beauty_019":3,"p_beauty_007":3,"p_beauty_001":3},"key_info_points":["冬季","保湿","兰蔻大粉水¥582","薇诺娜特护霜¥268","雅诗兰黛小棕瓶¥720"]},
+  {"query_id":"M014","user_query":"经常熬夜脸色暗沉，推荐护肤方案","expected_category":"美妆护肤","relevant_product_ids":["p_beauty_002","p_beauty_009","p_beauty_022"],"relevance_grades":{"p_beauty_002":3,"p_beauty_009":3,"p_beauty_022":2},"key_info_points":["熬夜暗沉","提亮","兰蔻小黑瓶¥760","珀莱雅双抗¥280","薇诺娜面膜¥199"]},
+  {"query_id":"M015","user_query":"深冬户外爬山，从头到脚怎么穿？","expected_category":"服饰运动","relevant_product_ids":["p_clothes_017","p_clothes_014","p_clothes_015","p_clothes_024"],"relevance_grades":{"p_clothes_017":3,"p_clothes_014":3,"p_clothes_015":3,"p_clothes_024":3},"key_info_points":["冬季户外","始祖鸟软壳裤¥1290","防水徒步鞋","防晒帽","多层穿搭"]},
+  {"query_id":"M016","user_query":"想买篮球鞋但平时也能穿出门的","expected_category":"服饰运动","relevant_product_ids":["p_clothes_012","p_clothes_013"],"relevance_grades":{"p_clothes_012":2,"p_clothes_013":3},"key_info_points":["篮球鞋","日常穿搭","安踏KT9 ¥999","李宁全城12 ¥1199","颜值"]},
+  {"query_id":"M017","user_query":"健身完补充能量喝什么？要低糖的","expected_category":"食品饮料","relevant_product_ids":["p_food_005","p_food_006","p_food_007"],"relevance_grades":{"p_food_005":2,"p_food_006":1,"p_food_007":3},"key_info_points":["健身后","低糖","东鹏特饮¥5","金典纯牛奶¥72","蛋白质补充"]},
+  {"query_id":"M018","user_query":"想做红烧肉，生抽和老抽都要，推荐一下","expected_category":"食品饮料","relevant_product_ids":["p_food_013","p_food_018"],"relevance_grades":{"p_food_013":3,"p_food_018":3},"key_info_points":["红烧肉","生抽老抽搭配","海天生抽¥22","李锦记老抽¥29","合计¥51"]},
+  {"query_id":"M019","user_query":"碳酸饮料和功能饮料喝多了哪个危害大？顺便推荐替代品","expected_category":"食品饮料","relevant_product_ids":["p_food_003","p_food_004","p_food_014","p_food_024"],"relevance_grades":{"p_food_003":3,"p_food_014":3,"p_food_004":1,"p_food_024":1},"key_info_points":["健康对比","无糖替代","东方树叶无糖茶","元气森林0卡气泡水","适量"]},
+  {"query_id":"M020","user_query":"推荐一款性价比最高的数码产品当礼物","expected_category":"数码电子","relevant_product_ids":["p_digital_026","p_digital_027","p_digital_029","p_digital_028"],"relevance_grades":{"p_digital_026":3,"p_digital_027":2,"p_digital_029":3,"p_digital_028":3},"key_info_points":["送礼","性价比","QCY耳机¥199","倍思充电器¥89","Anker充电宝¥149"]}
+]
