@@ -32,7 +32,7 @@ capabilities:
 
   # ---- 向量化类 ----
   text_embedding:           # 商品文本、评论、FAQ 向量化
-    model: text-embedding-v3
+    model: text-embedding-v4
     dimensions: 1024
 
   vision_embedding:         # 商品图片向量化 (V1-Plus 启用)
