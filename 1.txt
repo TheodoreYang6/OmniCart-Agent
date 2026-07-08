@@ -1,0 +1,1029 @@
+                    {
+                        "product_id": "p_beauty_012",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_011",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u5fc3\u7387\u76d1\u6d4b",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "AirPods Pro 3 \u00a51899",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u4e3b\u52a8\u964d\u566a",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u8fd0\u52a8\u5065\u5eb7",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/4",
+                "latency_ms": 0
+            },
+            "latency_ms": 983
+        },
+        {
+            "query_id": "M011",
+            "user_query": "MacBook\u5916\u63a5\u663e\u793a\u5668\u505a\u8bbe\u8ba1\uff0c\u9700\u898165W\u4ee5\u4e0a\u5145\u7535\u5934",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350\u7406\u80a4\u6cc9\u7406\u80a4\u6cc9\u7279\u5b89\u8212\u7f13\u4fee\u590d\u971c\u6ecb\u6da6\u578b\u654f\u611f\u808c\u4fdd\u6e7f\u4fee\u62a4\u5c4f\u969c\u9762\u971c40ml\uff0c\u4ef7\u683c\u00a5260.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.0,
+            "context_precision_detail": {
+                "score": 0.0,
+                "verdicts": [
+                    {
+                        "product_id": "p_beauty_012",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_008",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_022",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_025",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_001",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_007",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_010",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_005",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_018",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "65W\u4ee5\u4e0a",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u7b14\u8bb0\u672c\u5145\u7535",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u500d\u601dGaN \u00a589",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u4e09\u53e3\u5feb\u5145",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u8bbe\u8ba1\u5e08",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 1294
+        },
+        {
+            "query_id": "M012",
+            "user_query": "\u9884\u7b97300\u4e70\u4e00\u652f\u7709\u7b14\u548c\u4e00\u652f\u53e3\u7ea2",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350\u5df4\u9ece\u6b27\u83b1\u96c5\u5df4\u9ece\u6b27\u83b1\u96c5\u65b0\u591a\u91cd\u9632\u62a4\u9694\u79bb\u9732\u6c34\u611f\u8f7b\u8584\u9ad8\u500d\u9632\u6652\u4fee\u62a4\u63d0\u4eae30ml\uff0c\u4ef7\u683c\u00a5170.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.5,
+            "recall_at_10": 0.5,
+            "mrr": 0.3333,
+            "ndcg_at_10": 0.3066,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.1667,
+            "context_precision_detail": {
+                "score": 0.1667,
+                "verdicts": [
+                    {
+                        "product_id": "p_beauty_006",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_019",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_025",
+                        "relevant": 1
+                    },
+                    {
+                        "product_id": "p_beauty_012",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_018",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_013",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_022",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_001",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_020",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "300\u9884\u7b97",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u7709\u7b14\u82b1\u897f\u5b50\u00a589",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u5507\u91c9\u5b8c\u7f8e\u65e5\u8bb0\u00a5120",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u5408\u8ba1\u00a5209",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/4",
+                "latency_ms": 0
+            },
+            "latency_ms": 1532
+        },
+        {
+            "query_id": "M013",
+            "user_query": "\u51ac\u5929\u76ae\u80a4\u5e72\u71e5\u8d77\u76ae\uff0c\u63a8\u8350\u4e00\u5957\u4fdd\u6e7f\u62a4\u80a4\u54c1",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350SK-IISK-II\u62a4\u80a4\u7cbe\u534e\u9732\u795e\u4ed9\u6c34\u6676\u900f\u4fdd\u6e7f\u8c03\u7406\u89d2\u8d28\u6536\u7f29\u6bdb\u5b54230ml\uff0c\u4ef7\u683c\u00a51690.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.0,
+            "context_precision_detail": {
+                "score": 0.0,
+                "verdicts": [
+                    {
+                        "product_id": "p_beauty_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_021",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_016",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_010",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_018",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_008",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_016",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_002",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_006",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_006",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u51ac\u5b63",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u4fdd\u6e7f",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u5170\u853b\u5927\u7c89\u6c34\u00a5582",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u8587\u8bfa\u5a1c\u7279\u62a4\u971c\u00a5268",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u96c5\u8bd7\u5170\u9edb\u5c0f\u68d5\u74f6\u00a5720",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 1404
+        },
+        {
+            "query_id": "M014",
+            "user_query": "\u7ecf\u5e38\u71ac\u591c\u8138\u8272\u6697\u6c89\uff0c\u63a8\u8350\u62a4\u80a4\u65b9\u6848",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350\u5b89\u70ed\u6c99\u5b89\u70ed\u6c99\u91d1\u707f\u500d\u62a4\u9632\u6652\u4e73\u9ad8\u500d\u9632\u6c34\u9632\u6c57\u6e05\u723d\u6237\u5916\u9762\u90e8\u8eab\u4f53\u9632\u665260ml\uff0c\u4ef7\u683c\u00a5298.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.3333,
+            "mrr": 0.1,
+            "ndcg_at_10": 0.0671,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.0333,
+            "context_precision_detail": {
+                "score": 0.0333,
+                "verdicts": [
+                    {
+                        "product_id": "p_beauty_010",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_007",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_014",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_006",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_006",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_021",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_017",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_030",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_022",
+                        "relevant": 1
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u71ac\u591c\u6697\u6c89",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u63d0\u4eae",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u5170\u853b\u5c0f\u9ed1\u74f6\u00a5760",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u73c0\u83b1\u96c5\u53cc\u6297\u00a5280",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u8587\u8bfa\u5a1c\u9762\u819c\u00a5199",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 1729
+        },
+        {
+            "query_id": "M015",
+            "user_query": "\u6df1\u51ac\u6237\u5916\u722c\u5c71\uff0c\u4ece\u5934\u5230\u811a\u600e\u4e48\u7a7f\uff1f",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350\u8587\u8bfa\u5a1c\u8587\u8bfa\u5a1c\u8212\u654f\u4fdd\u6e7f\u7279\u62a4\u971c\u654f\u611f\u808c\u4fee\u62a4\u5c4f\u969c\u8212\u7f13\u5e72\u75d2\u4fdd\u6e7f\u9762\u971c50g\uff0c\u4ef7\u683c\u00a5268.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.0,
+            "context_precision_detail": {
+                "score": 0.0,
+                "verdicts": [
+                    {
+                        "product_id": "p_beauty_007",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_012",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_022",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_021",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_025",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_010",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_024",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_030",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_002",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u51ac\u5b63\u6237\u5916",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u59cb\u7956\u9e1f\u8f6f\u58f3\u88e4\u00a51290",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u9632\u6c34\u5f92\u6b65\u978b",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u9632\u6652\u5e3d",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u591a\u5c42\u7a7f\u642d",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 1392
+        },
+        {
+            "query_id": "M016",
+            "user_query": "\u60f3\u4e70\u7bee\u7403\u978b\u4f46\u5e73\u65f6\u4e5f\u80fd\u7a7f\u51fa\u95e8\u7684",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350SK-IISK-II\u62a4\u80a4\u7cbe\u534e\u9732\u795e\u4ed9\u6c34\u6676\u900f\u4fdd\u6e7f\u8c03\u7406\u89d2\u8d28\u6536\u7f29\u6bdb\u5b54230ml\uff0c\u4ef7\u683c\u00a51690.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.0,
+            "context_precision_detail": {
+                "score": 0.0,
+                "verdicts": [
+                    {
+                        "product_id": "p_beauty_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_030",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_012",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_014",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_013",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_015",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_017",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_014",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_010",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_018",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u7bee\u7403\u978b",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u65e5\u5e38\u7a7f\u642d",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u5b89\u8e0fKT9 \u00a5999",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u674e\u5b81\u5168\u57ce12 \u00a51199",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u989c\u503c",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 1555
+        },
+        {
+            "query_id": "M017",
+            "user_query": "\u5065\u8eab\u5b8c\u8865\u5145\u80fd\u91cf\u559d\u4ec0\u4e48\uff1f\u8981\u4f4e\u7cd6\u7684",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350\u4f18\u8863\u5e93\u4f18\u8863\u5e93 DRY-EX \u8d85\u5feb\u5e72\u5706\u9886\u77ed\u8896T\u6064 \u7537\u88c5 \u8fd0\u52a8\u8bad\u7ec3\u4e0a\u8863\uff0c\u4ef7\u683c\u00a5129.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.0,
+            "context_precision_detail": {
+                "score": 0.0,
+                "verdicts": [
+                    {
+                        "product_id": "p_clothes_002",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_030",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_021",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_023",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_007",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_023",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_015",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_014",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_006",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u5065\u8eab\u540e",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u4f4e\u7cd6",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u4e1c\u9e4f\u7279\u996e\u00a55",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u91d1\u5178\u7eaf\u725b\u5976\u00a572",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u86cb\u767d\u8d28\u8865\u5145",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 1258
+        },
+        {
+            "query_id": "M018",
+            "user_query": "\u60f3\u505a\u7ea2\u70e7\u8089\uff0c\u751f\u62bd\u548c\u8001\u62bd\u90fd\u8981\uff0c\u63a8\u8350\u4e00\u4e0b",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350\u65e5\u6e05\u65e5\u6e05 \u5408\u5473\u9053 \u6d77\u9c9c\u98ce\u5473 \u676f\u88c5\u65b9\u4fbf\u9762 79g\u00d712 \u676f\u6574\u7bb1\uff0c\u4ef7\u683c\u00a569.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.5,
+            "recall_at_10": 0.5,
+            "mrr": 0.5,
+            "ndcg_at_10": 0.3869,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.25,
+            "context_precision_detail": {
+                "score": 0.25,
+                "verdicts": [
+                    {
+                        "product_id": "p_food_020",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_018",
+                        "relevant": 1
+                    },
+                    {
+                        "product_id": "p_food_017",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_019",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_012",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_016",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_food_001",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_018",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_019",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u7ea2\u70e7\u8089",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u751f\u62bd\u8001\u62bd\u642d\u914d",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u6d77\u5929\u751f\u62bd\u00a522",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u674e\u9526\u8bb0\u8001\u62bd\u00a529",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u5408\u8ba1\u00a551",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 989
+        },
+        {
+            "query_id": "M019",
+            "user_query": "\u78b3\u9178\u996e\u6599\u548c\u529f\u80fd\u996e\u6599\u559d\u591a\u4e86\u54ea\u4e2a\u5371\u5bb3\u5927\uff1f\u987a\u4fbf\u63a8\u8350\u66ff\u4ee3\u54c1",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350\u8010\u514bNike Dri-FIT \u7537\u5b50\u8bad\u7ec3\u77ed\u8896T\u6064 \u901f\u5e72\u900f\u6c14\u8fd0\u52a8\u4e0a\u8863\uff0c\u4ef7\u683c\u00a5199.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.0,
+            "context_precision_detail": {
+                "score": 0.0,
+                "verdicts": [
+                    {
+                        "product_id": "p_clothes_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_002",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_001",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_009",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_017",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_010",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_021",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_024",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_clothes_014",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u5065\u5eb7\u5bf9\u6bd4",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u65e0\u7cd6\u66ff\u4ee3",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u4e1c\u65b9\u6811\u53f6\u65e0\u7cd6\u8336",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u5143\u6c14\u68ee\u67970\u5361\u6c14\u6ce1\u6c34",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u9002\u91cf",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 1308
+        },
+        {
+            "query_id": "M020",
+            "user_query": "\u63a8\u8350\u4e00\u6b3e\u6027\u4ef7\u6bd4\u6700\u9ad8\u7684\u6570\u7801\u4ea7\u54c1\u5f53\u793c\u7269",
+            "answer_preview": "\u4e3a\u60a8\u63a8\u8350SK-IISK-II\u62a4\u80a4\u7cbe\u534e\u9732\u795e\u4ed9\u6c34\u6676\u900f\u4fdd\u6e7f\u8c03\u7406\u89d2\u8d28\u6536\u7f29\u6bdb\u5b54230ml\uff0c\u4ef7\u683c\u00a51690.0\u3002",
+            "retrieved_count": 10,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "faithfulness": 0.0,
+            "faithfulness_detail": {
+                "score": 0.0,
+                "statements": [],
+                "summary": "Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+                "latency_ms": 0
+            },
+            "context_precision": 0.0,
+            "context_precision_detail": {
+                "score": 0.0,
+                "verdicts": [
+                    {
+                        "product_id": "p_beauty_003",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_017",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_012",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_008",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_009",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_013",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_001",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_006",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_beauty_005",
+                        "relevant": 0
+                    },
+                    {
+                        "product_id": "p_digital_001",
+                        "relevant": 0
+                    }
+                ],
+                "is_llm_judged": false,
+                "latency_ms": 0
+            },
+            "context_recall": 0.0,
+            "context_recall_detail": {
+                "score": 0.0,
+                "checks": [
+                    {
+                        "info_point": "\u9001\u793c",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u6027\u4ef7\u6bd4",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "QCY\u8033\u673a\u00a5199",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "\u500d\u601d\u5145\u7535\u5668\u00a589",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    },
+                    {
+                        "info_point": "Anker\u5145\u7535\u5b9d\u00a5149",
+                        "covered": false,
+                        "evidence_fragment": "(\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d)"
+                    }
+                ],
+                "summary": "\u964d\u7ea7\u5173\u952e\u8bcd\u5339\u914d: 0/5",
+                "latency_ms": 0
+            },
+            "latency_ms": 1592
+        }
+    ]
+}

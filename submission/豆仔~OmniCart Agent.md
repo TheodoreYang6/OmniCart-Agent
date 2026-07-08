@@ -646,7 +646,9 @@ curl http://localhost:8006/api/health
 
 ## 七、演示视频
 
-（录制 5-10 分钟带讲解视频，上传后填写链接）
+`豆仔演示demo.mp4`
+
+
 
 ---
 
