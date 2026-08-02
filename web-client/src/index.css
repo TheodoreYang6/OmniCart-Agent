@@ -1,0 +1,696 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   主题变量体系（P0 地基）
+   语义变量一处定义、全站翻转；切主题只是换一组值。
+   商品图白瓷砖 --product-tile 两个主题下恒定浅色（避免深色下发白断）。
+   ============================================================ */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --brand: #256bff;
+  --brand-dark: #1a54e8;
+
+  --ink: #1a1c1e;
+  --ink-soft: #44474e;
+  --ink-muted: #6b7280;
+
+  --surface: #ffffff;
+  --surface-variant: #eaf1ff;
+  --surface-sunken: #f2f6ff;
+
+  /* 页面底色（body）：浅色极光漫射 */
+  --page-bg: #f2f6ff;
+  --page-glow-1: rgba(125, 211, 252, 0.18);
+  --page-glow-2: rgba(37, 107, 255, 0.1);
+
+  /* 玻璃拟态 */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-bg-strong: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-border-strong: rgba(255, 255, 255, 0.7);
+  --card-bg: rgba(255, 255, 255, 0.8);
+  --card-border: rgba(255, 255, 255, 0.6);
+
+  /* 极光光斑 */
+  --aurora-1: rgba(37, 107, 255, 0.16);
+  --aurora-2: rgba(125, 211, 252, 0.2);
+
+  /* 输入框 / 分割线 */
+  --field-bg: rgba(255, 255, 255, 0.8);
+  --field-border: #e2e8f0; /* slate-200 */
+  --line: rgba(255, 255, 255, 0.6);
+
+  /* 商品图底——两主题恒定浅色白瓷砖 */
+  --product-tile: #f2f6ff;
+
+  /* 首屏聚光锥（浅色下弱化） */
+  --spot-light: rgba(37, 107, 255, 0.1);
+  --spot-hover: rgba(37, 107, 255, 0.08);
+
+  /* 风险提示条 */
+  --risk-bg-v: #fff3e0;
+  --risk-text-v: #bf360c;
+
+  --scrollbar-thumb: rgba(100, 116, 139, 0.25);
+  --scrollbar-thumb-hover: rgba(100, 116, 139, 0.4);
+  --code-bg: #f1f5f9; /* slate-100 */
+
+  /* 弹层实底（Spotlight 等大面板） */
+  --panel-bg: rgba(255, 255, 255, 0.92);
+  --panel-border: rgba(255, 255, 255, 0.75);
+  --panel-sunken: rgba(242, 246, 255, 0.7);
+  --meter-track: #dce6f7;
+  --scrim: rgba(15, 23, 42, 0.3);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --brand: #4d8bff;
+  --brand-dark: #256bff;
+
+  --ink: #e8e8f0;
+  --ink-soft: #b4b8c8;
+  --ink-muted: #8b90a5;
+
+  --surface: #14141f;
+  --surface-variant: #1a1a2e;
+  --surface-sunken: #0d0d14;
+
+  /* 深色影院底（近黑 + 蓝调） */
+  --page-bg: #0d0d14;
+  --page-glow-1: rgba(77, 139, 255, 0.14);
+  --page-glow-2: rgba(125, 211, 252, 0.08);
+
+  /* Glassmorphism 2.0：深色半透磨砂层 */
+  --glass-bg: rgba(255, 255, 255, 0.06);
+  --glass-bg-strong: rgba(255, 255, 255, 0.09);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-border-strong: rgba(255, 255, 255, 0.16);
+  --card-bg: rgba(255, 255, 255, 0.05);
+  --card-border: rgba(255, 255, 255, 0.1);
+
+  --aurora-1: rgba(77, 139, 255, 0.22);
+  --aurora-2: rgba(125, 211, 252, 0.14);
+
+  --field-bg: rgba(255, 255, 255, 0.06);
+  --field-border: rgba(255, 255, 255, 0.14);
+  --line: rgba(255, 255, 255, 0.1);
+
+  /* 商品图底——仍为浅色白瓷砖（深色画廊里的展品，商品图免调色） */
+  --product-tile: #eef2f9;
+
+  /* 首屏聚光锥（深色影院下明显） */
+  --spot-light: rgba(125, 211, 252, 0.22);
+  --spot-hover: rgba(125, 211, 252, 0.1);
+
+  /* 风险提示条（深色：半透橙，不做亮底） */
+  --risk-bg-v: rgba(249, 115, 22, 0.15);
+  --risk-text-v: #fdba74;
+
+  --scrollbar-thumb: rgba(148, 163, 184, 0.3);
+  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.5);
+  --code-bg: rgba(255, 255, 255, 0.08);
+
+  /* 弹层实底：不再用半透白叠近黑（会起灰雾），改近实底 + 提亮描边 */
+  --panel-bg: #1b1b28;
+  --panel-border: rgba(255, 255, 255, 0.14);
+  --panel-sunken: rgba(0, 0, 0, 0.22);
+  --meter-track: rgba(0, 0, 0, 0.45);
+  /* 遮罩加深：深色页底本就近黑，30% 的 slate-900 几乎无效，面板浮不起来 */
+  --scrim: rgba(2, 4, 12, 0.66);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 500px at 85% -10%, var(--page-glow-1), transparent 60%),
+    radial-gradient(900px 480px at -10% 20%, var(--page-glow-2), transparent 55%),
+    var(--page-bg);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', Arial, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  transition:
+    background-color 0.4s ease,
+    color 0.3s ease;
+}
+
+/* 细腻的滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* 隐藏滚动条工具类 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@layer components {
+  /* 品牌渐变 */
+  .bg-brand-gradient {
+    background-image: linear-gradient(135deg, #256bff 0%, #1a54e8 100%);
+  }
+  .text-brand-gradient {
+    background-image: linear-gradient(135deg, #256bff 0%, #3e8cff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* —— AI 助手风地基（视觉重构 v2）—— */
+  /* 玻璃拟态：内容卡 / 导航与输入条（更实），色值走主题变量 */
+  .glass {
+    @apply rounded-2xl shadow-glass backdrop-blur-xl;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+  }
+  .glass-strong {
+    @apply shadow-glass backdrop-blur-xl;
+    background: var(--glass-bg-strong);
+    border: 1px solid var(--glass-border-strong);
+  }
+  /* 弹层实底（Spotlight 等大面板）：深色下改近实底 + 提亮描边。
+     半透玻璃叠在近黑页底上会让整块面板发灰起雾、文字对比度被拉低；
+     大面板需要“实体展台”感，小卡片才继续用 .glass。 */
+  .panel-solid {
+    @apply shadow-lift backdrop-blur-xl;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+  }
+  /* 面板内的下沉分区（右栏信息区），与 .panel-solid 形成一层轻微高差 */
+  .panel-sunken {
+    background: var(--panel-sunken);
+  }
+  /* 评分条轨道：面板内的凹槽，深色下要比面板更暗才看得出进度 */
+  .meter-track {
+    background: var(--meter-track);
+  }
+  /* 头像光环：取代原来的硬边 ring-brand-100（深色下发脏）。
+     底态为柔和渐变描边；thinking 时切成 conic 旋转光环。 */
+  .omi-ring::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    padding: 1.5px;
+    background: linear-gradient(135deg, var(--brand), #7dd3fc);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+  .omi-ring-spin::before {
+    background: conic-gradient(
+      transparent 0deg,
+      var(--brand) 90deg,
+      #7dd3fc 180deg,
+      transparent 300deg
+    );
+    /* 用伪元素自转而非动画 conic 角度变量：圆形 + inset:0，
+       旋转不改形状，也无需 @property 注册，兼容性更好 */
+    animation: omi-ring-spin 2.4s linear infinite;
+  }
+  /* 品牌渐变填充（蓝→天蓝，比旧深蓝渐变更“AI”） */
+  .gradient-brand {
+    background-image: linear-gradient(135deg, #256bff 0%, #4d8bff 55%, #7dd3fc 130%);
+  }
+  .gradient-text {
+    background-image: linear-gradient(120deg, #1a54e8 0%, #256bff 45%, #38bdf8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* 页面级极光背景：两团漫射光斑缓慢浮动；
+     overflow:clip 裁掉光斑负偏移溢出（390px 实测：不裁会撑出横向滚动挖掉底部 Tab） */
+  .aurora-bg {
+    position: relative;
+    isolation: isolate;
+    overflow: clip;
+  }
+  .aurora-bg::before,
+  .aurora-bg::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    border-radius: 9999px;
+    filter: blur(64px);
+    pointer-events: none;
+  }
+  .aurora-bg::before {
+    width: 420px;
+    height: 420px;
+    left: -120px;
+    top: -140px;
+    background: radial-gradient(circle, var(--aurora-1), transparent 65%);
+    animation: blob 14s ease-in-out infinite;
+  }
+  .aurora-bg::after {
+    width: 380px;
+    height: 380px;
+    right: -100px;
+    bottom: -120px;
+    background: radial-gradient(circle, var(--aurora-2), transparent 65%);
+    animation: blob 20s ease-in-out infinite reverse;
+  }
+
+  /* 卡片基础：升级为玻璃卡 + hover 抬升（存量 .card 全站自动生效） */
+  .card {
+    @apply rounded-2xl shadow-card backdrop-blur-md transition-all duration-300;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+  }
+  .card-hover {
+    @apply hover:-translate-y-0.5 hover:shadow-lift;
+  }
+
+  /* 主按钮：渐变 + 光晕 hover */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5
+      font-medium text-white transition-all duration-200 active:scale-[0.98]
+      disabled:cursor-not-allowed disabled:opacity-50;
+    background-image: linear-gradient(135deg, #256bff 0%, #4d8bff 60%, #38bdf8 140%);
+    box-shadow: 0 4px 14px rgba(37, 107, 255, 0.28);
+  }
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 6px 20px rgba(37, 107, 255, 0.4);
+    filter: brightness(1.05);
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-medium
+      text-ink-soft transition hover:bg-brand-500/10 active:scale-[0.98];
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-medium
+      text-ink-soft backdrop-blur transition hover:border-brand-300 hover:text-brand-600
+      hover:shadow-glow active:scale-[0.98];
+    background: var(--field-bg);
+    border: 1px solid var(--field-border);
+  }
+
+  /* 风险提示条（P5 深色适配）：浅色用暖米底，深色用半透橙（避免亮块） */
+  .risk-strip {
+    background: var(--risk-bg-v);
+    color: var(--risk-text-v);
+  }
+
+  .input-field {
+    @apply w-full rounded-xl px-4 py-2.5 text-ink backdrop-blur placeholder:text-ink-muted
+      outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10;
+    background: var(--field-bg);
+    border: 1px solid var(--field-border);
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm text-ink-soft
+      backdrop-blur transition hover:border-brand-300 hover:text-brand-600 hover:shadow-glow;
+    background: var(--field-bg);
+    border: 1px solid var(--field-border);
+  }
+  .chip-active {
+    @apply border-transparent text-white shadow-glow;
+    background-image: linear-gradient(135deg, #256bff 0%, #4d8bff 80%);
+  }
+
+  /* 状态胶囊（思考中/工具轨迹外显） */
+  .status-pill {
+    @apply inline-flex items-center gap-2 rounded-full border border-brand-100
+      px-3.5 py-1.5 text-[13px] text-brand-700 shadow-glass backdrop-blur-xl;
+    background: var(--glass-bg);
+  }
+
+  /* 三点跳动（思考中） */
+  .dot-bounce {
+    @apply inline-block h-1.5 w-1.5 rounded-full bg-brand-400;
+    animation: bounce-soft 1s ease-in-out infinite;
+  }
+  .dot-bounce:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .dot-bounce:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  /* 声浪柱（语音录制态） */
+  .wave-bar {
+    @apply w-[3px] rounded-full bg-brand-400;
+    animation: wave 1s ease-in-out infinite;
+  }
+
+  /* 首屏聚光锥（P1 影院化）：从顶部打向主视觉的柔光束，随主题变量强弱 */
+  .hero-spotlight {
+    position: relative;
+  }
+  .hero-spotlight::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -150px;
+    transform: translateX(-50%);
+    width: 360px;
+    height: 420px;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(to bottom, var(--spot-light), transparent 78%);
+    clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
+    filter: blur(20px);
+    animation: spot-breathe 4.5s ease-in-out infinite;
+  }
+
+  /* 商品卡聚光 hover（P4）：光斑跟随鼠标（--mx/--my 由组件 onMouseMove 写入） */
+  .spotlight-hover::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(
+      240px circle at var(--mx, 50%) var(--my, 50%),
+      var(--spot-hover),
+      transparent 65%
+    );
+    transition: opacity 0.25s ease;
+  }
+  .spotlight-hover:hover::after {
+    opacity: 1;
+  }
+}
+
+/* 打字机光标 */
+.typing-cursor::after {
+  content: '▍';
+  @apply ml-0.5 text-brand-500;
+  animation: blink 1s step-start infinite;
+}
+
+/* 欧米 吉祥物漂浮 */
+.xo-float {
+  animation: xo-float 3.2s ease-in-out infinite;
+}
+@keyframes xo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+/* Markdown 渲染样式 (聊天气泡内) */
+.markdown-body {
+  @apply text-[15px] leading-relaxed text-ink;
+  word-break: break-word;
+}
+.markdown-body p {
+  @apply my-1.5;
+}
+.markdown-body p:first-child {
+  @apply mt-0;
+}
+.markdown-body p:last-child {
+  @apply mb-0;
+}
+.markdown-body ul,
+.markdown-body ol {
+  @apply my-2 pl-5;
+}
+.markdown-body ul {
+  @apply list-disc;
+}
+.markdown-body ol {
+  @apply list-decimal;
+}
+.markdown-body li {
+  @apply my-1;
+}
+.markdown-body strong {
+  @apply font-semibold text-ink;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  @apply mb-1 mt-3 font-semibold;
+}
+.markdown-body code {
+  @apply rounded px-1.5 py-0.5 font-mono text-[13px] text-brand-700;
+  background: var(--code-bg);
+}
+.markdown-body table {
+  @apply my-2 w-full border-collapse text-sm;
+}
+.markdown-body th,
+.markdown-body td {
+  @apply px-2 py-1 text-left;
+  border: 1px solid var(--field-border);
+}
+.markdown-body th {
+  @apply font-medium;
+  background: var(--surface-sunken);
+}
+.markdown-body a {
+  @apply text-brand-600 underline;
+}
+
+/* 骨架屏微光 */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.5) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* ============================================================
+   动效护栏（P0）：尊重系统「减少动态效果」偏好。
+   开启后关闭所有装饰性循环动画（极光/漂浮/呼吸/光晕），
+   保留必要的即时过渡（主题切换、focus），保障可用性。
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .aurora-bg::before,
+  .aurora-bg::after {
+    animation: none !important;
+  }
+  .spotlight-hover::after {
+    display: none;
+  }
+}
+
+/* ============================================================
+   流光边框（P5）：聚焦时环形光束沿边框巡游一圈（Magic UI border-beam 思路）。
+   @property 注册角度变量使 conic-gradient 可动画；不支持的浏览器退化为静态描边。
+   ============================================================ */
+@property --bb-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+.border-beam {
+  position: relative;
+}
+.border-beam::before {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--bb-angle),
+    transparent 0 72%,
+    #256bff 84%,
+    #7dd3fc 93%,
+    transparent 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  animation: bb-spin 3.2s linear infinite;
+}
+.border-beam:focus-within::before {
+  opacity: 1;
+}
+@keyframes bb-spin {
+  to {
+    --bb-angle: 360deg;
+  }
+}
+
+/* 头像光环自转（thinking 相位）*/
+@keyframes omi-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 头像说话态：取代原来生硬的 bounce-soft 上下弹，改柔和呼吸缩放 + 极小位移 */
+@keyframes omi-talk {
+  0%,
+  100% {
+    transform: scale(1) translateY(0);
+  }
+  50% {
+    transform: scale(1.06) translateY(-1.5px);
+  }
+}
+.omi-talk {
+  animation: omi-talk 1.1s cubic-bezier(0.34, 1.3, 0.64, 1) infinite;
+}
+/* 表情交叉淡化：新表情画在底层，旧表情叠在上层淡出，避开条件渲染的硬跳变。
+   用 animation 而非 transition：旧层是新挂载的节点，transition 无初始值可过渡。 */
+@keyframes omi-face-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.omi-face-out {
+  animation: omi-face-out 250ms ease forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .omi-ring-spin::before,
+  .omi-talk {
+    animation: none;
+  }
+  .omi-face-out {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* ============================================================
+   OmiPerch —— 卧在标题上的欧米：hover 抬头 / 点击弹跳 / 爱心上浮
+   尾巴不在这里：素材里已经有一条盘在身前的尾巴，再加 CSS 摆尾层
+   会变成两条尾巴。
+   ============================================================ */
+/* hover：轻微抬起并歪头（像听到动静抬眼）*/
+.omi-perch-lift {
+  transform: translateY(-4px) rotate(-2deg);
+}
+/* idle 呼吸：卧着的猫不适合浮空，改极轻微的身体起伏（单独一层，不与 lift/pop 冲突）*/
+@keyframes omi-perch-breathe {
+  0%,
+  100% {
+    transform: scale(1) translateY(0);
+  }
+  50% {
+    transform: scale(1.014) translateY(-1px);
+  }
+}
+.omi-perch-breathe {
+  animation: omi-perch-breathe 4s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+/* 点击：一次弹跳 + 轻微挤压（Q 弹感缓动），起落位对齐 hover 的 -4px */
+@keyframes omi-perch-pop {
+  0% {
+    transform: translateY(-4px) scale(1, 1);
+  }
+  30% {
+    transform: translateY(-16px) scale(0.96, 1.06);
+  }
+  60% {
+    transform: translateY(0) scale(1.05, 0.95);
+  }
+  100% {
+    transform: translateY(-4px) scale(1, 1);
+  }
+}
+.omi-perch-pop {
+  animation: omi-perch-pop 620ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+/* 爱心：上浮 + 淡出 + 小幅横飘（--hx / --hr 由组件逐颗传入）*/
+@keyframes omi-heart-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.5) rotate(0deg);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--hx) * 0.4), -22px) scale(1.05) rotate(var(--hr));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--hx)), -76px) scale(0.7) rotate(var(--hr));
+  }
+}
+.omi-heart {
+  animation: omi-heart-float 1.2s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .omi-perch-lift,
+  .omi-perch-pop,
+  .omi-perch-breathe,
+  .omi-heart {
+    animation: none;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .border-beam::before {
+    animation: none;
+  }
+}

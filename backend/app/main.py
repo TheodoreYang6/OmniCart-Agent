@@ -77,6 +77,12 @@ app.include_router(user_profile_router)
 @app.on_event("startup")
 async def on_startup():
     """启动时初始化数据库连接（如果配置了）。"""
+    # Composition root 预装配：工具注册表单例 + 向 framework Planner 注入
+    # 工具 schema 来源（P0-2：消除懒装配的时序风险，LLMPlanner 首次使用前必就位）
+    from app.providers.tools import get_tool_registry
+
+    get_tool_registry()
+
     if USE_POSTGRES:
         try:
             from app.core.database import init_db
@@ -103,6 +109,23 @@ async def on_startup():
             await init_redis()
         except Exception as e:
             logger.warning(f"Redis init failed: {e} — cache disabled")
+
+    # 本地模型后台预热 — 首请求免受权重加载拖累（~11s）；不阻塞服务就绪
+    from app.core.config import USE_LOCAL_MODELS, MOCK_MODE
+    if USE_LOCAL_MODELS and not MOCK_MODE:
+        import asyncio
+
+        async def _warmup_local_models():
+            try:
+                from app.model_gateway import local_backend as lb
+                # 在线程中加载 + 各跑一次 dummy 推理（embed 与 rerank 两个模型都预热）
+                await asyncio.to_thread(lb.embed_texts, ["预热"])
+                await asyncio.to_thread(lb.rerank_logits, "预热", ["预热文档"])
+                logger.info("Local models warmed up (embedding + reranker)")
+            except Exception as e:
+                logger.warning(f"Local model warmup skipped: {e}")
+
+        asyncio.create_task(_warmup_local_models())
 
 
 @app.on_event("shutdown")

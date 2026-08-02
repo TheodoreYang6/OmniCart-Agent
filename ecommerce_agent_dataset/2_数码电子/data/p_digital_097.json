@@ -1,0 +1,79 @@
+{
+  "product_id": "p_digital_097",
+  "title": "三星S85UA系列27英寸4K HDR10显示器高色准99% DCI-P3广色域USB-C一线连165Hz刷新率",
+  "brand": "三星",
+  "category": "数码电子",
+  "sub_category": "显示器",
+  "base_price": 2499.0,
+  "image_path": "2_数码电子/images/p_digital_097.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_097_1",
+      "properties": {
+        "尺寸": "27英寸",
+        "刷新率": "165Hz"
+      },
+      "price": 2499.0
+    },
+    {
+      "sku_id": "s_p_digital_097_2",
+      "properties": {
+        "尺寸": "32英寸",
+        "刷新率": "144Hz"
+      },
+      "price": 3299.0
+    },
+    {
+      "sku_id": "s_p_digital_097_3",
+      "properties": {
+        "尺寸": "27英寸",
+        "刷新率": "240Hz"
+      },
+      "price": 3999.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "三星S85UA系列是品牌高端专业级显示器，主打影视创作与电竞双模精准显示。搭载量子点Mini-LED背光与HDR10+动态调光技术，峰值亮度达1000尼特，原生对比度1,000,000:1；色域覆盖99% DCI-P3，出厂ΔE＜1.5校色报告随箱附赠。配备USB-C 90W反向供电、KVM切换及智能OSD旋钮。适合设计师修图调色、视频剪辑师审片及高帧率FPS玩家。建议连接RTX 40系显卡开启G-Sync Compatible+FreeSync Premium Pro双认证同步，搭配暗室环境使用。首次开机需预热30分钟以稳定色准，HDMI接口仅支持最高120Hz@4K，满血240Hz需DP1.4线材。",
+    "official_faq": [
+      {
+        "question": "S85UA的99% DCI-P3色域是否经过出厂校色？能否直接用于商业修图输出？",
+        "answer": "是的，每台S85UA均搭载工厂级硬件校色，随箱附带独立校色报告（含RGB增益值、白点坐标、Gamma2.2实测曲线），ΔE平均值≤0.8（CIE2000标准）。实测在Photoshop中导出sRGB/Adobe RGB/DCI-P3三色域文件时色彩映射误差＜0.3%，满足ISO 12647-2印刷标准预检要求。建议搭配SpyderX Elite每两周校准一次，开启‘Design Mode’并关闭动态对比度以保障一致性。"
+      },
+      {
+        "question": "240Hz刷新率SKU是否兼容NVIDIA显卡？需哪些设置才能启用全功能同步？",
+        "answer": "240Hz SKU完全兼容RTX 30/40系显卡，但需同时满足三项条件：①使用认证DP1.4线（带DP20标识）；②显卡驱动更新至v535.98以上；③系统设置中开启‘G-Sync Compatible’并勾选‘启用低延迟模式’。此时可实现0.5ms GTG响应+VRR动态帧率补偿，实测《CS2》1% Low帧波动＜3.2ms。注意HDMI端口不支持240Hz，且需禁用Windows HDR开关以防冲突。"
+      },
+      {
+        "question": "USB-C一线连是否支持MacBook Pro 16英寸（M3 Max）的全功能供电与视频传输？",
+        "answer": "支持。S85UA USB-C接口符合USB PD3.1协议，实测为M3 Max MacBook Pro提供90W持续供电（笔记本电量从20%充至85%耗时42分钟），同时传输4K@60Hz视频+USB 3.2 Gen2数据（拷贝10GB视频素材耗时约58秒）。需使用雷电4认证线缆（如Belkin Boost Charge Pro），且Mac系统设置中需开启‘显示器’→‘高级’→‘在显示器上显示菜单栏’。注意勿接入第三方扩展坞，否则可能触发PD握手失败。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "李小米",
+        "rating": 5,
+        "content": "27英寸165Hz版2499元入手，用了5个月。每天用Lightroom修图+偶尔玩《永劫无间》，USB-C一线连MacBook Air M2，充电+显示+传图全搞定。色准太准了，客户验收样片一次过，以前用戴尔U2723DX总要反复调灰阶。支架旋转升降很顺滑，就是底座稍重占桌面。"
+      },
+      {
+        "nickname": "王梓涵",
+        "rating": 4,
+        "content": "32英寸144Hz版3299元购入，作为主力办公屏已用82天。双4K分屏跑Excel+Premiere Pro完全不卡，HDR10+看纪录片星空细节爆炸。唯一小遗憾是OSD菜单响应略慢（约0.8秒），调亮度要等半秒；另外包装里没送DP1.4线，自己另花了129元配的。"
+      },
+      {
+        "nickname": "张雅静",
+        "rating": 5,
+        "content": "27英寸240Hz版3999元下单，主要玩《Apex英雄》，配RTX 4070 Ti Super。开240Hz+ELMB Sync后拖影几乎消失，决赛圈转头跟枪稳得可怕，K/D从2.1升到3.7。内置KVM切PC/Mac超方便，就是支架仰角最大只有20°，我172cm身高得垫本子才舒服。"
+      },
+      {
+        "nickname": "陈哲远",
+        "rating": 2,
+        "content": "27英寸165Hz版2499元买来剪4K视频，结果发现开机后有轻微‘灰雾感’——尤其在纯黑背景上，文字边缘泛青灰。联系客服测了色度计，报告ΔE=1.3但确实存在背光均匀性问题（右下角亮度比中心低12%）。换货两次仍如此，最终退货。同批次其他用户也反馈类似现象。"
+      },
+      {
+        "nickname": "周婷婷",
+        "rating": 3,
+        "content": "27英寸165Hz版2499元，买了3个月。USB-C给iPad Pro充电没问题，但接Windows笔记本时经常识别不到音频输出，需反复拔插。最烦的是OSD旋钮偶尔失灵，调亮度要按10次才有反应。好在画质和做工真没得说，修图颜色准，就是售后响应慢，等了5天才寄来新旋钮配件。"
+      }
+    ]
+  }
+}

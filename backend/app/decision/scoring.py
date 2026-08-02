@@ -253,6 +253,7 @@ class DecisionScoring:
                     len(product.rag_knowledge.official_faq) if product.rag_knowledge else 0)]
             ),
             risk_factors=risks[:5],
+            positive_signal=self._positive_signal(product),
             recommendation_reason=reason,
             memory_contributions=[],
             llm_relevance=llm_relevance,
@@ -656,18 +657,36 @@ class DecisionScoring:
     # ============================================================
 
     def _gather_risk_factors(self, product: Product) -> list[str]:
+        """风险项收紧版（促单原则，用户拍板）。
+
+        旧规则"有 1 条 ≤2 星差评就警告"在本数据集下形同虚设——实盘 998/1000 商品
+        含差评，所有卡 100% 亮同一条黄警，零区分度纯噪音。收紧为：差评 ≥2 条
+        或均分 <3.5 才亮，且文案带事实（诚实底线）。好评信号见 _positive_signal。
+        """
         risks = []
         if product.rag_knowledge and product.rag_knowledge.user_reviews:
-            low_reviews = [r for r in product.rag_knowledge.user_reviews if r.rating <= 2]
+            reviews = product.rag_knowledge.user_reviews
+            low_reviews = [r for r in reviews if r.rating <= 2]
             if len(low_reviews) >= 2:
-                risks.append(f"有{len(low_reviews)}条差评")
-            elif len(low_reviews) == 1:
-                risks.append("有用户反馈不满意")
-
-            ratings = [r.rating for r in product.rag_knowledge.user_reviews]
+                risks.append(f"{len(reviews)} 条评价中 {len(low_reviews)} 条差评")
+            ratings = [r.rating for r in reviews]
             if len(ratings) >= 3 and sum(ratings) / len(ratings) < 3.5:
                 risks.append("综合评分偏低")
         return risks[:3]
+
+    @staticmethod
+    def _positive_signal(product: Product) -> str:
+        """好评率正向信号（促单）：评论 ≥3 条且好评率 ≥60% 时输出事实文案。"""
+        if not (product.rag_knowledge and product.rag_knowledge.user_reviews):
+            return ""
+        reviews = product.rag_knowledge.user_reviews
+        if len(reviews) < 3:
+            return ""
+        good = sum(1 for r in reviews if r.rating >= 4)
+        rate = good / len(reviews)
+        if rate < 0.6:
+            return ""
+        return f"{len(reviews)} 条评价 {round(rate * 100)}% 好评"
 
     def _build_reason(self, product: Product, score: float, user_sat: float) -> str:
         if score >= 0.80:

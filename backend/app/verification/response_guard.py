@@ -50,6 +50,8 @@ class ResponseGuard:
             "risk_warned": self._check_risk(answer, state.decision_results or []),
             "honest_on_empty": self._check_empty(answer, products),
             "hallucination": self._check_hallucination(answer, products, context, user_query),
+            "cited_in_list": self._check_cited_in_list(answer, products,
+                                                       state.answer_cited_pids or []),
             "warnings": [],
         }
 
@@ -86,6 +88,37 @@ class ResponseGuard:
         return report
 
     # ---- 各项检查 ----
+
+    def _check_cited_in_list(self, answer: str, products: list[dict],
+                             cited_pids: list[str]) -> bool:
+        """回答提到的商品必须在送给 LLM 的候选清单内（spec §3）。
+
+        实现：取清单内商品（answer_cited_pids 对应，缺失时退回前 5），校验回答至少
+        引用其中一款；并检查是否提到了清单外商品的品牌+商品名组合（跨清单引用）。
+        空候选/空回答不算违规（由 honest_on_empty 管）。
+        """
+        if not answer or not products:
+            return True
+        pid_set = set(cited_pids) if cited_pids else {
+            p.get("product_id", "") for p in products[:5]}
+        in_list, out_list = [], []
+        for p in products:
+            (in_list if p.get("product_id", "") in pid_set else out_list).append(p)
+        if not in_list:
+            return True
+
+        def _mentioned(prod: dict) -> bool:
+            title = (prod.get("title") or "")[:10]
+            brand = prod.get("brand") or ""
+            if title and len(title) >= 4 and title[:6] in answer:
+                return True
+            # 品牌+商品名片段同时命中才算引用（单品牌易误判）
+            return bool(brand and brand in answer and title[2:8] and title[2:8] in answer)
+
+        if not any(_mentioned(p) for p in in_list):
+            return False
+        # 清单外商品被引用 → 答文与列表错位
+        return not any(_mentioned(p) for p in out_list)
 
     def _check_evidence(self, answer: str, products: list[dict]) -> bool:
         """证据绑定：回答是否引用了具体商品信息（品牌名/标题关键词/证据内容）。"""

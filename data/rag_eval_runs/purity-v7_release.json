@@ -1,0 +1,434 @@
+{
+  "tag": "v7_release",
+  "collection": "product_chunks_v6_1024",
+  "cases": 30,
+  "purity_at_5": 0.907,
+  "purity_at_5_inventory_adjusted": 0.947,
+  "off_topic_cases": 1,
+  "variant_folded_results": 23,
+  "elapsed_s": 7.0,
+  "details": [
+    {
+      "query": "面膜",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 9,
+      "subs": [
+        "面膜",
+        "面膜",
+        "面膜",
+        "面膜",
+        "面膜"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "面膜类型的产品推荐",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 9,
+      "subs": [
+        "面膜",
+        "面膜",
+        "面膜",
+        "面膜",
+        "面膜"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "补水面膜哪个好",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 9,
+      "subs": [
+        "面膜",
+        "面膜",
+        "面膜",
+        "面膜",
+        "面膜"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "洗面奶推荐",
+      "purity": 0.2,
+      "purity_adj": 1.0,
+      "available": 1,
+      "subs": [
+        "洁面",
+        "面霜",
+        "套装",
+        "洗手液",
+        "面霜"
+      ],
+      "off_topic": [
+        "洗手液"
+      ]
+    },
+    {
+      "query": "适合敏感肌的补水产品",
+      "purity": 0.6,
+      "purity_adj": 0.6,
+      "available": 49,
+      "subs": [
+        "面霜",
+        "面霜",
+        "套装",
+        "粉底液",
+        "面霜"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "换季泛红用什么好",
+      "purity": 0.8,
+      "purity_adj": 0.8,
+      "available": 49,
+      "subs": [
+        "面霜",
+        "面霜",
+        "化妆水",
+        "套装",
+        "面膜"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "干皮急救好物",
+      "purity": 0.6,
+      "purity_adj": 0.6,
+      "available": 53,
+      "subs": [
+        "蜜粉",
+        "面霜",
+        "散粉/蜜粉",
+        "面霜",
+        "面霜"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "抗老精华",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 18,
+      "subs": [
+        "精华",
+        "精华",
+        "精华",
+        "精华",
+        "精华"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "洗发水",
+      "purity": 0.8,
+      "purity_adj": 1.0,
+      "available": 4,
+      "subs": [
+        "洗发水",
+        "洗发水",
+        "洗发水",
+        "洗发水",
+        "护发素"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "去屑洗发水推荐",
+      "purity": 0.8,
+      "purity_adj": 1.0,
+      "available": 4,
+      "subs": [
+        "洗发水",
+        "洗发水",
+        "洗发水",
+        "洗发水",
+        "护发素"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "洗手液",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 11,
+      "subs": [
+        "洗手液",
+        "洗手液",
+        "洗手液",
+        "洗手液",
+        "洗手液"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "降噪耳机",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 14,
+      "subs": [
+        "头戴式耳机",
+        "头戴式耳机",
+        "头戴式耳机",
+        "真无线耳机",
+        "真无线耳机"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "无线蓝牙耳机推荐",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 14,
+      "subs": [
+        "真无线耳机",
+        "真无线耳机",
+        "真无线耳机",
+        "真无线耳机",
+        "真无线耳机"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "充电宝",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 6,
+      "subs": [
+        "充电宝",
+        "充电宝",
+        "充电宝",
+        "移动电源",
+        "充电宝"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "保温杯",
+      "purity": 0.8,
+      "purity_adj": 0.8,
+      "available": 9,
+      "subs": [
+        "保温杯",
+        "保温杯",
+        "保温杯",
+        "保温杯",
+        "水杯"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "儿童保温水杯",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 9,
+      "subs": [
+        "儿童水杯",
+        "儿童水杯",
+        "儿童水杯",
+        "保温杯",
+        "保温杯"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "登山鞋",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 9,
+      "subs": [
+        "登山鞋",
+        "登山鞋",
+        "登山鞋",
+        "登山鞋",
+        "登山鞋"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "登山杖",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 5,
+      "subs": [
+        "登山杖",
+        "登山杖",
+        "登山杖",
+        "登山杖",
+        "登山杖"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "跑步鞋推荐",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 25,
+      "subs": [
+        "跑步鞋",
+        "跑步鞋",
+        "跑步鞋",
+        "跑步鞋",
+        "跑步鞋"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "咖啡豆",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 6,
+      "subs": [
+        "咖啡",
+        "咖啡",
+        "咖啡",
+        "咖啡",
+        "咖啡"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "茶叶推荐",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 10,
+      "subs": [
+        "茶叶",
+        "茶叶",
+        "茶叶",
+        "茶叶",
+        "茶叶"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "酸奶",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 17,
+      "subs": [
+        "酸奶",
+        "酸奶",
+        "酸奶",
+        "酸奶",
+        "酸奶"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "坚果零食",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 21,
+      "subs": [
+        "坚果",
+        "零食",
+        "零食",
+        "坚果",
+        "坚果/零食"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "平板电脑",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 12,
+      "subs": [
+        "平板电脑",
+        "平板电脑",
+        "平板电脑",
+        "平板电脑",
+        "平板电脑"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "笔记本电脑推荐",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 9,
+      "subs": [
+        "笔记本电脑",
+        "笔记本电脑",
+        "笔记本电脑",
+        "笔记本电脑",
+        "笔记本电脑"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "智能手表",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 10,
+      "subs": [
+        "智能手表",
+        "智能手表",
+        "智能手表",
+        "智能手表",
+        "智能手环"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "羽绒服",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 8,
+      "subs": [
+        "羽绒服",
+        "羽绒服",
+        "羽绒服",
+        "羽绒服",
+        "羽绒服"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "连衣裙",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 14,
+      "subs": [
+        "连衣裙",
+        "连衣裙",
+        "连衣裙",
+        "连衣裙",
+        "连衣裙"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "台灯",
+      "purity": 1.0,
+      "purity_adj": 1.0,
+      "available": 13,
+      "subs": [
+        "台灯",
+        "台灯",
+        "台灯",
+        "台灯",
+        "台灯"
+      ],
+      "off_topic": []
+    },
+    {
+      "query": "纸尿裤",
+      "purity": 0.6,
+      "purity_adj": 0.6,
+      "available": 11,
+      "subs": [
+        "纸尿裤",
+        "纸尿裤",
+        "纸尿裤",
+        "防溢乳垫",
+        "瑜伽裤"
+      ],
+      "off_topic": []
+    }
+  ]
+}

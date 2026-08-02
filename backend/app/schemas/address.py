@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class AddressCreate(BaseModel):
+    user_id: str = ""   # P1-1: body 优先；缺省回退 query 参数（向后兼容）
     name: str = Field(..., min_length=1, max_length=32)
     phone: str = Field(..., min_length=1, max_length=20)
     province: str = ""
@@ -14,6 +15,7 @@ class AddressCreate(BaseModel):
 
 
 class AddressUpdate(BaseModel):
+    user_id: str | None = None   # P1-1: body 优先；缺省回退 query 参数
     name: str | None = None
     phone: str | None = None
     province: str | None = None

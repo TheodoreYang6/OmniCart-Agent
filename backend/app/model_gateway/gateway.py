@@ -10,6 +10,7 @@ Model Gateway — 能力名驱动的模型访问层。
 每次 LLM 调用自动记录到 TraceCollector（可观测性）+ 终端审计日志。
 """
 
+import json
 import os
 import re
 import time
@@ -20,7 +21,8 @@ from typing import Any
 import yaml
 
 from app.core.config import MOCK_MODE
-from app.model_gateway.mock_model import MockChat, MockEmbedding
+from app.model_gateway.providers import get_provider
+from app.observability.request_context import get_trace_id
 from app.observability.collector import (
     get_collector, LLMSpan,
     _estimate_tokens_input, _estimate_tokens_output,
@@ -75,7 +77,7 @@ class ModelGateway:
     async def _trace(self, name: str, capability: str, model: str,
                      system: str, prompt: str, response: str,
                      t0: float, status: str, error: str = "",
-                     api_usage: dict | None = None) -> None:
+                     api_usage: dict | None = None, provider_label: str = "qwen") -> None:
         """异步记录一条 LLM 调用追踪"""
         try:
             inp_tokens, out_tokens = 0, 0
@@ -89,11 +91,11 @@ class ModelGateway:
 
             span = LLMSpan(
                 span_id=str(uuid.uuid4())[:12],
-                trace_id=str(uuid.uuid4())[:12],
+                trace_id=get_trace_id() or str(uuid.uuid4())[:12],
                 name=name,
                 capability=capability,
                 model=model,
-                provider="qwen",
+                provider=provider_label,
                 system_prompt=LLMSpan._truncate(system),
                 user_prompt=LLMSpan._truncate(prompt),
                 response=LLMSpan._truncate(response),
@@ -121,17 +123,16 @@ class ModelGateway:
         t0 = time.perf_counter()
         status, error, response = "success", "", ""
         try:
-            if MOCK_MODE:
-                response = MockChat().generate(prompt, system)
+            provider = get_provider(MOCK_MODE)
+            response = await provider.chat(
+                model=model,
+                prompt=prompt,
+                system=system,
+                temperature=cfg.get("temperature", 0.7),
+                max_tokens=cfg.get("max_tokens", 2048),
+            )
+            if provider.is_mock:
                 status = "mock"
-            else:
-                from app.model_gateway.qwen_chat import QwenChat
-                chat = QwenChat(
-                    model=model,
-                    temperature=cfg.get("temperature", 0.7),
-                    max_tokens=cfg.get("max_tokens", 2048),
-                )
-                response = await chat.generate(prompt, system)
         except Exception as e:
             status, error = "error", str(e)[:500]
         await self._trace("qwen.chat", capability, model, system, prompt, response,
@@ -141,6 +142,43 @@ class ModelGateway:
             raise RuntimeError(error)
         return response
 
+    async def chat_with_tools(self, capability: str, messages: list[dict],
+                              tools: list[dict], system: str = "") -> dict:
+        """OpenAI function-calling — 自动追踪。
+
+        provider 缺 chat_with_tools（如 local 后端）或异常时返空结果，
+        调用方（ToolDispatcher）按 no_match 降级，不阻断主链。
+        """
+        cfg = self._capabilities.get(capability, {})
+        model = cfg.get("model", "qwen3.7-flash-2026-07-15")
+        t0 = time.perf_counter()
+        status, error = "success", ""
+        result: dict = {"content": "", "tool_calls": []}
+        prompt_snippet = (messages[-1].get("content", "") if messages else "")[:500]
+        try:
+            provider = get_provider(MOCK_MODE)
+            fn = getattr(provider, "chat_with_tools", None)
+            if fn is None:
+                status = "skipped"  # local 后端未实现 → 降级空结果
+            else:
+                result = await fn(
+                    model=model, messages=messages, tools=tools, system=system,
+                    temperature=cfg.get("temperature", 0.1),
+                    max_tokens=cfg.get("max_tokens", 512),
+                )
+                if provider.is_mock:
+                    status = "mock"
+        except Exception as e:  # noqa: BLE001 — 工具选择失败不阻断主链
+            status, error = "error", str(e)[:500]
+        resp_summary = json.dumps(result.get("tool_calls", []), ensure_ascii=False)[:500]
+        await self._trace("qwen.chat_tools", capability, model, system, prompt_snippet,
+                          resp_summary, t0, status, error)
+        _audit_call(capability, model, system + " " + prompt_snippet, resp_summary,
+                    round((time.perf_counter() - t0) * 1000), status)
+        if status == "error":
+            raise RuntimeError(error)
+        return result
+
     async def chat_stream(self, capability: str, prompt: str, system: str = ""):
         """流式对话生成 — 每个 token yield"""
         cfg = self._capabilities.get(capability, {})
@@ -148,51 +186,53 @@ class ModelGateway:
         t0 = time.perf_counter()
         full_response = ""
         try:
-            if MOCK_MODE:
-                for ch in MockChat().generate(prompt, system):
-                    full_response += ch
-                    yield ch
-            else:
-                from app.model_gateway.qwen_chat import QwenChat
-                chat = QwenChat(
-                    model=model,
-                    temperature=cfg.get("temperature", 0.7),
-                    max_tokens=cfg.get("max_tokens", 2048),
-                )
-                async for token in chat.generate_stream(prompt, system):
-                    full_response += token
-                    yield token
-            status = "mock" if MOCK_MODE else "success"
+            provider = get_provider(MOCK_MODE)
+            async for token in provider.chat_stream(
+                model=model,
+                prompt=prompt,
+                system=system,
+                temperature=cfg.get("temperature", 0.7),
+                max_tokens=cfg.get("max_tokens", 2048),
+            ):
+                full_response += token
+                yield token
+            status = "mock" if provider.is_mock else "success"
         except Exception as e:
             status, error = "error", str(e)[:500]
             _audit_call(capability, model, system + " " + prompt, "", round((time.perf_counter() - t0) * 1000), status)
             raise RuntimeError(error) from e
         _audit_call(capability, model, system + " " + prompt, full_response, round((time.perf_counter() - t0) * 1000), status)
 
-    async def embed(self, texts: list[str], capability: str = "text_embedding") -> list[list[float]]:
-        """文本向量化 — 自动追踪"""
+    async def embed(self, texts: list[str], capability: str = "text_embedding",
+                    is_query: bool = False) -> list[list[float]]:
+        """文本向量化 — 自动追踪。
+
+        is_query=True 时启用非对称编码查询侧（Qwen3-Embedding 官方用法：
+        本地模型加 instruct 前缀 / API 传 text_type=query）；文档索引侧保持默认 False。
+        """
         cfg = self._capabilities.get(capability, {})
         model = cfg.get("model", "qwen3-embedding")
         t0 = time.perf_counter()
         status, error, result = "success", "", []
         prompt_snippet = texts[0][:200] if texts else ""
+        disp_model, plabel = model, "qwen"
         try:
-            if MOCK_MODE:
-                result = MockEmbedding().embed(texts)
+            provider = get_provider(MOCK_MODE)
+            plabel = "mock" if provider.is_mock else getattr(provider, "name", "qwen")
+            if plabel == "local":
+                disp_model = getattr(provider, "embed_model", model)
+            result = await provider.embed(
+                texts=texts, model=model, dimensions=cfg.get("dimensions", 1024),
+                is_query=is_query,
+            )
+            if provider.is_mock:
                 status = "mock"
-            else:
-                from app.model_gateway.qwen_embedding import QwenEmbedding
-                emb = QwenEmbedding(
-                    model=model,
-                    dimensions=cfg.get("dimensions", 1024),
-                )
-                result = await emb.embed(texts)
         except Exception as e:
             status, error = "error", str(e)[:500]
-        await self._trace("qwen.embed", capability, model, "", prompt_snippet,
+        await self._trace("qwen.embed", capability, disp_model, "", prompt_snippet,
                           f"{len(texts)} vectors, {len(result[0]) if result else 0}d",
-                          t0, status, error)
-        _audit_call(capability, model, prompt_snippet, f"{len(texts)}vecs/{len(result[0]) if result else 0}d", round((time.perf_counter() - t0) * 1000), status)
+                          t0, status, error, provider_label=plabel)
+        _audit_call(capability, disp_model, prompt_snippet, f"{len(texts)}vecs/{len(result[0]) if result else 0}d", round((time.perf_counter() - t0) * 1000), status)
         if status == "error":
             raise RuntimeError(error)
         return result
@@ -207,22 +247,20 @@ class ModelGateway:
         status, error, response = "success", "", ""
         image_info = image_path or f"bytes:{len(image_bytes) if image_bytes else 0}"
         try:
-            if MOCK_MODE:
-                response = MockChat().generate(
-                    f"[Mock Vision] image={image_info}. prompt: {prompt}", system
-                )
+            provider = get_provider(MOCK_MODE)
+            response = await provider.vision(
+                model=model,
+                temperature=cfg.get("temperature", 0.3),
+                max_tokens=cfg.get("max_tokens", 2048),
+                prompt=prompt,
+                system=system,
+                image_path=image_path,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                image_info=image_info,
+            )
+            if provider.is_mock:
                 status = "mock"
-            else:
-                from app.model_gateway.qwen_vision import QwenVision
-                vis = QwenVision(
-                    model=model,
-                    temperature=cfg.get("temperature", 0.3),
-                    max_tokens=cfg.get("max_tokens", 2048),
-                )
-                if image_bytes:
-                    response = await vis.analyze_bytes(image_bytes, content_type, prompt, system)
-                else:
-                    response = await vis.analyze(image_path or "", prompt, system)
         except Exception as e:
             status, error = "error", str(e)[:500]
         await self._trace("qwen.vision", capability, model, system, prompt, response,
@@ -240,20 +278,22 @@ class ModelGateway:
         t0 = time.perf_counter()
         status, error, result = "success", "", []
         prompt_snippet = f"query={query[:200]}, docs={len(documents)}"
+        disp_model, plabel = model, "qwen"
         try:
-            if MOCK_MODE:
-                result = [{"index": i, "document": d, "relevance_score": 1.0 - i * 0.05}
-                          for i, d in enumerate(documents[:top_n])]
+            provider = get_provider(MOCK_MODE)
+            plabel = "mock" if provider.is_mock else getattr(provider, "name", "qwen")
+            if plabel == "local":
+                disp_model = getattr(provider, "rerank_model", model)
+            result = await provider.rerank(
+                query=query, documents=documents, model=model, top_n=top_n
+            )
+            if provider.is_mock:
                 status = "mock"
-            else:
-                from app.model_gateway.qwen_reranker import QwenReranker
-                ranker = QwenReranker(model=model)
-                result = await ranker.rerank(query, documents, top_n or 10)
         except Exception as e:
             status, error = "error", str(e)[:500]
-        await self._trace("qwen.rerank", capability, model, "", prompt_snippet,
-                          f"{len(result)} results", t0, status, error)
-        _audit_call(capability, model, prompt_snippet, f"{len(result)} results, top={result[0]['relevance_score']:.3f}" if result else "0 results", round((time.perf_counter() - t0) * 1000), status)
+        await self._trace("qwen.rerank", capability, disp_model, "", prompt_snippet,
+                          f"{len(result)} results", t0, status, error, provider_label=plabel)
+        _audit_call(capability, disp_model, prompt_snippet, f"{len(result)} results, top={result[0]['relevance_score']:.3f}" if result else "0 results", round((time.perf_counter() - t0) * 1000), status)
         if status == "error":
             raise RuntimeError(error)
         return result

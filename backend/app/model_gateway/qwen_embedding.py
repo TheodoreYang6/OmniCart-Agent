@@ -1,4 +1,4 @@
-"""Qwen Embedding — 原生 API (text-embedding-v4)"""
+"""Qwen Embedding — 原生 API (qwen3.7-text-embedding)"""
 import httpx
 from app.core.config import QWEN_API_KEY, QWEN_BASE_URL
 
@@ -13,13 +13,13 @@ def _get_client() -> httpx.AsyncClient:
 
 
 class QwenEmbedding:
-    def __init__(self, model: str = "text-embedding-v4", dimensions: int = 1024):
+    def __init__(self, model: str = "qwen3.7-text-embedding", dimensions: int = 1024):
         self._api_key = QWEN_API_KEY
         self._base_url = QWEN_BASE_URL.rstrip("/")
         self._model = model
         self._dimensions = dimensions
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str], is_query: bool = False) -> list[list[float]]:
         client = _get_client()
         resp = await client.post(
             f"{self._base_url}/services/embeddings/text-embedding/text-embedding",
@@ -30,7 +30,9 @@ class QwenEmbedding:
             json={
                 "model": self._model,
                 "input": {"texts": texts},
-                "parameters": {"dimension": self._dimensions},
+                # 非对称编码（DashScope 协议）：查询侧 text_type=query，文档索引侧 document
+                "parameters": {"dimension": self._dimensions,
+                               "text_type": "query" if is_query else "document"},
             },
         )
         resp.raise_for_status()

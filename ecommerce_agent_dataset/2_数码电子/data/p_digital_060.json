@@ -1,0 +1,79 @@
+{
+  "product_id": "p_digital_060",
+  "title": "Anker 737 PowerBank 24K（PowerCore 24000mAh）25W双向快充大容量移动电源PD3.0兼容iPhone安卓笔记本24000mAh",
+  "brand": "Anker",
+  "category": "数码电子",
+  "sub_category": "充电宝",
+  "base_price": 299.0,
+  "image_path": "2_数码电子/images/p_digital_060.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_060_1",
+      "properties": {
+        "容量": "24000mAh",
+        "输出功率": "25W"
+      },
+      "price": 299.0
+    },
+    {
+      "sku_id": "s_p_digital_060_2",
+      "properties": {
+        "容量": "24000mAh",
+        "输出功率": "45W"
+      },
+      "price": 369.0
+    },
+    {
+      "sku_id": "s_p_digital_060_3",
+      "properties": {
+        "容量": "24000mAh",
+        "输出功率": "65W"
+      },
+      "price": 459.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "Anker 737 PowerBank 24K是Anker旗舰级大容量快充移动电源，采用双电芯并联架构与GaN+SiC混合快充芯片，支持最高65W双向PD3.1协议，实测iPhone 15 Pro 30分钟充至68%，MacBook Air（M2）可补电约45%。内置航空级阻燃PC+ABS复合壳体与12重智能安全防护，含过压/过流/温度异常实时断电。兼容iOS/Android/Windows全生态设备，支持边充边放不降速。适合商旅通勤、户外露营、多设备重度用户每日高频补电场景。使用时建议优先连接USB-C1口（65W输入/输出），搭配原装或Anker认证65W PD线效果最佳。首次使用前建议以65W适配器满充满放1次激活电芯，长期存放请保持电量在40%-60%。",
+    "official_faq": [
+      {
+        "question": "737的65W输出能否为MacBook Pro 16寸（M3 Pro）稳定充电？",
+        "answer": "可以，但需注意：实测在屏幕亮起+轻度办公（Safari+Notes）状态下，737 65W SKU可维持约42W持续输出，整机功耗可控；若开启Final Cut Pro等高负载应用，电源会自动降频至45W并触发温控提示。建议搭配Anker 100W GaN II适配器用于满血快充，本品更适合作为旅途应急续航（单次补电约35%-40%）。务必使用USB-IF认证的E-Mark芯片Type-C线，非认证线将限频至30W以下。"
+      },
+      {
+        "question": "24000mAh标称容量与实际可放电容量差异大吗？实测可用Wh是多少？",
+        "answer": "标称24000mAh基于3.7V电芯电压换算，实际额定能量为88.8Wh（24000×3.7÷1000），符合民航100Wh内登机标准；经Anker实验室及第三方（ChargerLAB）实测，在25℃恒温下以10W恒定负载放电，实际可用容量为21,380mAh（约79.1Wh），转化率约89.2%，优于行业均值82%-86%。低温环境（5℃）下容量暂降约12%，建议冬季避免长时间暴露于零下环境。"
+      },
+      {
+        "question": "45W和65W SKU在给iPhone 15充电时速度有区别吗？是否需要特定线材？",
+        "answer": "无本质区别——iPhone 15系列最高仅支持27W PD快充，737全系USB-C口均支持27W PPS协议，实测0→50%均为31分钟（Anker 65W GaN线+室温25℃）。但65W SKU额外提供USB-C2口（45W输出），可同时为iPhone+AirPods Pro（5W）双设备供电且互不干扰；而25W SKU第二口仅支持15W。必须使用带E-Mark芯片的USB-C to C线（如Anker A8132），普通线材将强制降为5V/3A（15W）模式。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "李小米",
+        "rating": 5,
+        "content": "299元买的25W版，出差带了3个月，每天给iPhone15和AirPods充电2次，现在电量衰减不到3%，上周高原露营用它给佳能R6 Mark II相机电池充了4次（通过USB-C转DC线），外壳一点没烫。比上个小米20000mAh轻了112g，塞进登机箱完全不占地。"
+      },
+      {
+        "nickname": "王梓涵",
+        "rating": 4,
+        "content": "369元入的45W版，主要给iPad Pro 12.9和Apple Watch续命。实测iPad从20%充到85%只用了57分钟，比原装18W快一倍。唯一小遗憾是收纳包没配，自己买了个Anker定制包才解决线材缠绕问题。已推荐给3个同事，他们选的都是65W版。"
+      },
+      {
+        "nickname": "张雅静",
+        "rating": 5,
+        "content": "459元拿下65W顶配，上周带娃飞三亚全程靠它：给iPhone14、华为MatePad、Switch掌机三台设备循环充电，落地还有62%余电。最惊喜是能直连MacBook Air当‘移动电池’用（系统显示‘已连接电源’），不用拔线切换。客服说支持2000次循环，打算当主力电源用三年。"
+      },
+      {
+        "nickname": "陈哲远",
+        "rating": 2,
+        "content": "299元买的25W版，用了2个月发现严重缺陷：安卓手机（三星S23）用USB-A口充，速度只有5V/1.5A（7.5W），比原装慢一半；查官网才发现USB-A口不支持QC3.0，宣传页却写‘全协议兼容’。联系客服后只补偿10元券，体验打折。"
+      },
+      {
+        "nickname": "周婷",
+        "rating": 3,
+        "content": "369元购入45W版，通勤党很依赖，但冬天零下5℃地铁站等车时，给iPhone充电突然跳停三次，显示‘温度过低’，回暖后才恢复。查说明书才知工作温度是0-40℃，这点没在页面重点提醒。夏天倒是稳，就是满电状态放包里一天后外壳微热（摸着约38℃），不算故障但有点担心。"
+      }
+    ]
+  }
+}

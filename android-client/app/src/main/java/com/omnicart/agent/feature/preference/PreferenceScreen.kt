@@ -55,7 +55,7 @@ fun PreferenceScreen(
             // ============ 输入区 ============
             Text("添加偏好", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Text(
-                "描述你的购物习惯，豆仔会智能解析",
+                "描述你的购物习惯，小O会智能解析",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

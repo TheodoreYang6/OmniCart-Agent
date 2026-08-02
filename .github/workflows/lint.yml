@@ -1,0 +1,57 @@
+name: lint
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "pyproject.toml"
+      - "importlinter.ini"
+      - ".github/workflows/lint.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "pyproject.toml"
+      - "importlinter.ini"
+      - ".github/workflows/lint.yml"
+
+jobs:
+  ruff:
+    name: Ruff (strict on framework/providers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      # 门禁：新增框架层 + 实现层 + 配置中心必须零违规（对齐 amap 对 libs/commons 的严格 lint）
+      - name: Ruff check (gate — new code)
+        run: |
+          ruff check backend/app/framework backend/app/providers backend/app/core/config.py
+          ruff format --check backend/app/framework backend/app/providers backend/app/core/config.py
+
+      # 存量代码：非阻塞统计报告，渐进收敛，不阻断 CI
+      - name: Ruff report (legacy — non-blocking)
+        run: ruff check backend/app --statistics || true
+
+  import-contracts:
+    name: Import contracts (架构防腐 — 对齐 amap L4 物理层)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 隔离安装治理工具，不进业务依赖树（对齐 amap uvx 零锁文件变更的动机）
+      - name: Lint imports (importlinter.ini 三契约)
+        run: |
+          pip install import-linter
+          PYTHONPATH=backend lint-imports --config importlinter.ini

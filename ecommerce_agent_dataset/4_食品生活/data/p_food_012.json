@@ -5,7 +5,7 @@
   "category": "食品饮料",
   "sub_category": "方便食品",
   "base_price": 50.0,
-  "image_path": "4_食品生活/images/p_food_012_live.jpg",
+  "image_path": "4_食品生活/images/p_food_012.jpg",
   "skus": [
     {
       "sku_id": "s_p_food_012_1",
@@ -23,7 +23,7 @@
         "包装数量": "6桶",
         "口味": "老坛酸菜牛肉味"
       },
-      "price": 28.0
+      "price": 55.0
     }
   ],
   "rag_knowledge": {

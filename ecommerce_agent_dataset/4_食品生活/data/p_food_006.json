@@ -4,7 +4,7 @@
   "brand": "红牛",
   "category": "食品饮料",
   "sub_category": "功能饮料",
-  "base_price": 120.0,
+  "base_price": 68.0,
   "image_path": "4_食品生活/images/p_food_006_live.jpg",
   "skus": [
     {
@@ -35,7 +35,7 @@
         "包装": "整箱装",
         "版本": "国产版"
       },
-      "price": 70.0
+      "price": 130.6
     },
     {
       "sku_id": "s_p_food_006_4",
@@ -45,7 +45,7 @@
         "包装": "小箱装",
         "版本": "国产版"
       },
-      "price": 128.0
+      "price": 142.05
     }
   ],
   "rag_knowledge": {

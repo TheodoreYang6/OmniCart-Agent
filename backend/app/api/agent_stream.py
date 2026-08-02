@@ -7,10 +7,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.workflow.graph import run_workflow
-from app.schemas.cart import DEMO_USER_ID
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recommend", tags=["stream"])
+
+# 后台持久化任务引用持有（防 GC 提前回收 create_task）
+_BG_TASKS: set = set()
 
 
 class StreamRequest(BaseModel):
@@ -22,7 +24,9 @@ class StreamRequest(BaseModel):
     mode: str = "normal_recommend"
     target_product_id: str | None = None
     allow_same_category_comparison: bool = False
-    fast_mode: bool = False  # 快速回答：跳过LLM，直接模板回复
+    fast_mode: bool = False  # 快速回答：跳过LLM，直接模板回复（等价 exec_mode="lite"）
+    exec_mode: str = ""  # P2-1 执行档位 lite/standard/max（max=动态编排按请求灰度）；与业务场景 mode 字段无关
+    deep_think: bool = False  # 深度思考：OmniAgent Loop 预算 3→8 轮（Phase 7）
 
 
 def _sse(event: str, data: str) -> str:
@@ -41,10 +45,10 @@ _LEVEL_CN = {
 # ============================================================
 
 def _extract_question(answer: str) -> str | None:
-    """从豆仔回复中提取问句，供下一轮 Router 做问答链匹配。
+    """从欧米回复中提取问句，供下一轮 Router 做问答链匹配。
 
     只匹配真正的问句 — 以？结尾，或以"吗/吧"结尾的疑问句。
-    排除"呢"结尾的句子（"豆仔帮你盯着呢"不是问句）。
+    排除"呢"结尾的句子（"欧米帮你盯着呢"不是问句）。
     """
     import re
     # 匹配: ?/？结尾 或 "吗/吧"结尾 → 真正的问题
@@ -66,11 +70,9 @@ async def _generate_title(cid: str, conv_svc, first_query: str, first_answer: st
         from app.core.config import MOCK_MODE
         if not MOCK_MODE:
             from app.model_gateway.gateway import get_model_gateway
+            from app.prompts.api_prompts import build_title_prompt
             gateway = get_model_gateway()
-            prompt = (
-                "用8字以内的中文给这段购物对话起个标题，只输出标题：\n"
-                f"用户：{first_query[:60]}\n豆仔：{first_answer[:80]}"
-            )
+            prompt = build_title_prompt(first_query, first_answer)
             title = (await gateway.chat("chat_generation", prompt)).strip()
             if title and len(title) > 15:
                 title = title[:15]  # 截断过长的标题
@@ -135,54 +137,16 @@ async def _build_recent_turns(cid, conv_svc, current_turn: dict) -> list[dict]:
 
 
 # ============================================================
-# 辅助: 写入/读取聚焦商品到 conversation context_snapshot
+# 辅助: 写入聚焦商品到 conversation context_snapshot（读取/地址解析已收敛到 ShopActionAgent）
 # ============================================================
 async def _write_focus_product(conv_svc, conversation_id: str, product):
-    """问豆仔点击时锁定商品 → context_snapshot"""
+    """问欧米点击时锁定商品 → context_snapshot"""
     if not conv_svc or not conversation_id:
         return
     try:
         await conv_svc.set_focus_product(conversation_id, product)
     except Exception as e:
         logger.warning(f"Failed to write focus_product: {e}")
-
-
-async def _read_focus_product(conv_svc, conversation_id: str) -> dict:
-    """读取聚焦商品, 返回 {id,title,price,brand} 或空dict"""
-    if not conv_svc or not conversation_id:
-        return {}
-    try:
-        snapshot = await conv_svc.get_context_snapshot(conversation_id)
-        fp = snapshot.get("focus_product", {})
-        if fp:
-            logger.info(f"Focus product read: {fp.get('product_id')} {fp.get('title','')[:50]}")
-        return fp
-    except Exception as e:
-        logger.warning(f"Failed to read focus_product: {e}")
-        return {}
-
-
-async def _get_address(user_id: str) -> dict | None:
-    """获取用户默认地址 — 兼容 PG (async) 和内存 (sync) 两种仓库"""
-    if not user_id:
-        user_id = DEMO_USER_ID
-    try:
-        from app.repositories.address_repo import get_address_repo
-        repo = get_address_repo()
-        if hasattr(repo, "_alist"):
-            addrs = await repo._alist(user_id)
-        else:
-            addrs = repo.list(user_id)
-        # 如果用给定 user_id 查不到，兜底查 DEMO_USER_ID（Android 端可能传空字符串）
-        if not addrs and user_id != DEMO_USER_ID:
-            if hasattr(repo, "_alist"):
-                addrs = await repo._alist(DEMO_USER_ID)
-            else:
-                addrs = repo.list(DEMO_USER_ID)
-        return next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
-    except Exception as e:
-        logger.warning(f"Failed to get address for {user_id}: {e}")
-        return None
 
 
 # ============================================================
@@ -198,7 +162,7 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
         cid = req.conversation_id or ""
         msg = req.message or ""
 
-        # ---- 判断意图: 购物操作关键词 ----
+        # ---- 判断意图: 购物操作关键词（仅门控进入 Tool 链，实际路由在 ShopActionAgent 内） ----
         order_words = ["下单", "结算", "结账", "买单", "付款"]
         confirm_words = ["确认下单", "确认订单", "确认付款"]
         addr_words = ["修改地址", "改地址", "换地址"]
@@ -207,38 +171,21 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
         cart_remove_words = ["删除第", "去掉第", "移除第"]
         cart_qty_words = ["数量改成", "数量改为", "数量改成第", "数量改为第"]
         cart_add_words = ["加入购物车", "加到购物车", "加进购物车", "加购", "全部加入"]
+        # Phase 2b: 订单闭环 & 库存（与 ShopActionAgent 关键词表保持一致，否则新工具不可达）
+        order_manage_words = ["我的订单", "订单列表", "查看订单", "看订单", "订单详情",
+                              "取消订单", "取消第", "物流", "查物流", "追踪",
+                              "支付订单", "去支付", "支付第", "付款第",
+                              "有货吗", "库存", "还有货", "缺货吗"]
+        # Phase 6-B3: 偏好 & 会话（同样与 ShopActionAgent 保持一致）
+        pref_conv_words = ["我的偏好", "偏好列表", "查看偏好", "记住了什么", "删除偏好", "删掉偏好",
+                           "记住我", "记一下我", "以后推荐", "以后都", "别再推", "不要推荐",
+                           "聊了什么", "刚才说了什么", "对话历史", "聊天记录",
+                           "重新开始", "清空上下文", "重置对话",
+                           "写个文案", "写文案", "种草文案", "帮我种草"]
         all_shop_words = (order_words + confirm_words + addr_words + clear_words
-                          + cart_show_words + cart_remove_words + cart_qty_words + cart_add_words)
+                          + cart_show_words + cart_remove_words + cart_qty_words + cart_add_words
+                          + order_manage_words + pref_conv_words)
         is_shop = any(kw in msg for kw in all_shop_words)
-
-        CHINESE_NUM = {"一":1,"二":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9,"十":10}
-
-        def _parse_ordinal(text: str, prefix: str) -> int | None:
-            """从 '删除第二个' 中提取序号 → 2 (1-indexed)。
-            支持: 第二个/第2个/二/2 等表达。
-            """
-            import re
-            # 先尝试 "第X" 格式
-            m = re.search(r"(?:" + prefix + r")\s*(\d+|[一二三四五六七八九十]+)", text)
-            if not m:
-                # 再尝试纯数字或中文数字（如 "2个" "二个"）
-                m = re.search(r"(\d+)\s*个", text)
-                if not m:
-                    m = re.search(r"([一二三四五六七八九十])\s*个", text)
-            if not m:
-                return None
-            num_str = m.group(1)
-            if num_str is None:
-                return None
-            if num_str.isdigit():
-                return int(num_str)
-            return CHINESE_NUM.get(num_str)
-
-        def _parse_qty(text: str) -> int | None:
-            """从 '数量改成3' 中提取数字"""
-            import re
-            m = re.search(r"(\d+)", text)
-            return int(m.group(1)) if m else None
 
         # ---- 初始化 conv_svc ----
         conv_svc = None
@@ -247,7 +194,27 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
             conv_svc = get_conversation_service()
         except Exception as e:
             logger.warning(f"conv_svc init failed: {e}")
-
+        
+        # P0-3: 会话创建/用户消息落库上移到购物块之前——
+        # shop 轮次同样入历史，且首条消息即购物动作时 pending 快照有真实 cid 可写
+        if conv_svc:
+            try:
+                conv_result = await conv_svc.aget_or_create(
+                    user_id=uid, session_id=sid, conversation_id=cid,
+                )
+                cid = conv_result["conversation_id"]
+            except Exception:
+                pass
+            if cid:
+                try:
+                    await conv_svc.aappend_user_message(
+                        conversation_id=cid, user_id=uid,
+                        session_id=sid, content=req.message,
+                        image_url=req.image_url or "",
+                    )
+                except Exception:
+                    pass
+        
         # 读取 pending SKU 选择（用户可能正在选规格）
         _pending_sku = {}
         try:
@@ -256,491 +223,165 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
                 _pending_sku = (snap or {}).get("pending_sku_product", {}) or {}
         except Exception:
             pass
+        
+        # P1-3: 复合指令（“看订单然后推荐类似的”）不进购物块——
+        # 交给推荐工作流（动态图/LLM Planner 可编排 tool 步 + 检索），避免关键词门控截胡后半句
+        _is_compound = False
+        if is_shop and not _pending_sku:
+            try:
+                from app.framework.orchestration.planner import _is_complex
+                _is_compound = _is_complex(msg)[0]
+            except Exception:
+                _is_compound = False
 
+        # ================================================================
+        # 深度思考模式（spec: docs/specs/omni-harness）：deep_think=true 时 OmniAgent
+        # ReAct Loop 全权接管（跳过购物关键词门控，LLM 自主决策调工具）；
+        # 默认链路仍走 pipeline。极速命令/规格选择/聚焦分析不进 Loop；
+        # LLM 异常时落回下方既有链路兜底。
+        # ================================================================
+        from app.core.config import ENABLE_AGENT_LOOP
+
+        _FAST_COMMANDS = {"看看购物车", "清空购物车", "我的订单", "我的偏好", "重新开始"}
+        if (ENABLE_AGENT_LOOP and req.deep_think and req.mode != "product_focused_analysis"
+                and not _pending_sku and msg.strip() not in _FAST_COMMANDS):
+            from app.agents.omni_agent import OmniAgent
+            from app.framework.blackboard import Blackboard, reset_current_board, set_current_board
+            from app.framework.tools import ToolContext as _TC
+            from app.schemas.workflow import WorkflowState as _WS
+
+            _loop_state = _WS(session_id=sid, user_id=uid, conversation_id=cid, user_query=msg)
+            _loop_ctx = _TC(user_id=uid, session_id=sid, conversation_id=cid,
+                            args_raw=msg, state=_loop_state)
+            _bb_token = set_current_board(Blackboard())
+            _loop_ok = False
+            _loop_actions: list = []  # 工具产出的交互动作（如 sku_option 规格选择按钮）
+            try:
+                async for _ev in OmniAgent().run_events(msg, _loop_ctx, req.deep_think):
+                    _et = _ev.get("type")
+                    if _et == "status":
+                        yield _sse("status", json.dumps({"text": _ev["text"]}, ensure_ascii=False))
+                    elif _et == "token":
+                        # 收口轮 chat_stream 真流式（spec D2）：逐 token 直转发
+                        if await raw_request.is_disconnected():
+                            break
+                        yield _sse("token", json.dumps({"text": _ev["text"]}, ensure_ascii=False))
+                    elif _et == "tool_result":
+                        # 收集工具产出的 actions（spec §4）——深度思考分支以前不透传，
+                        # 导致多规格商品加购时规格选择按钮消失，只能纯对话选
+                        for _a in (_ev.get("actions") or []):
+                            if isinstance(_a, dict) and _a not in _loop_actions:
+                                _loop_actions.append(_a)
+                    elif _et == "answer" and _ev.get("content"):
+                        # 自然结束轮的全文终稿：按块快速回放
+                        _txt = _ev["content"]
+                        for _i in range(0, len(_txt), 12):
+                            if await raw_request.is_disconnected():
+                                break
+                            yield _sse("token", json.dumps({"text": _txt[_i:_i + 12]}, ensure_ascii=False))
+                            await asyncio.sleep(0.005)
+                _loop_ok = True
+            except Exception as e:  # noqa: BLE001 — LLM 异常降级到既有 workflow
+                logger.warning(f"agent loop failed, falling back to workflow: {e}")
+            finally:
+                reset_current_board(_bb_token)
+
+            if _loop_ok:
+                # 终稿权在 Loop（spec D2）：state.answer 已由 conclude/收口轮写入；
+                # 仅在 Loop 零产出时降级 ResponseAgent 统稿（兼容兜底）
+                from app.workflow.graph import get_response_agent, get_response_guard
+                _answer = (_loop_state.answer or "").strip()
+                if not _answer:
+                    _full = ""
+                    try:
+                        async for _tok in get_response_agent().generate_stream(_loop_state):
+                            if await raw_request.is_disconnected():
+                                break
+                            _full += _tok
+                            yield _sse("token", json.dumps({"text": _tok}, ensure_ascii=False))
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"loop fallback generation failed: {e}")
+                    _answer = _full.strip() or "抱歉，暂时无法回答您的问题。"
+                    if not _full:
+                        yield _sse("token", json.dumps({"text": _answer}, ensure_ascii=False))
+                _loop_state.answer = _answer
+                try:
+                    get_response_guard().check(_loop_state)
+                except Exception:  # noqa: BLE001
+                    pass
+                _payload = {
+                    "session_id": sid, "conversation_id": cid, "answer": _answer,
+                    "products": _safe_dump(_slim_products(_order_by_cited(
+                        _loop_state.retrieved_products or [], _loop_state.answer_cited_pids or []))),
+                    "decision_results": _safe_dump(_loop_state.decision_results or []),
+                    "evidence_list": _safe_dump(_slim_evidence(
+                        _loop_state.evidence_list or [], _loop_state.answer_cited_pids or [],
+                        _loop_state.retrieved_products or [])),
+                    "trace_steps": _safe_dump(_loop_state.trace_steps or []),
+                    "skill_executions": _safe_dump(_loop_state.skill_executions or []),
+                    "harness_report": _safe_dump(_loop_state.harness_report or {}),
+                    "agent_loop": True, "deep_think": req.deep_think,
+                }
+                if _loop_actions:
+                    _payload["actions"] = _safe_dump(_loop_actions)
+                yield _sse("result", json.dumps(_payload, ensure_ascii=False, default=str))
+                yield _sse("done", json.dumps({"finish_reason": "stop"}))
+                # 持久化：助手消息 + last_products 快照（供下一轮指代）
+                if conv_svc and cid:
+                    try:
+                        await conv_svc.aappend_assistant_message(
+                            conversation_id=cid, user_id=uid, session_id=sid, content=_answer)
+                        _structured = [{"product_id": p.get("product_id", ""),
+                                        "title": p.get("title", "")[:60],
+                                        "brand": p.get("brand", ""),
+                                        "price": p.get("price", 0)}
+                                       for p in (_loop_state.retrieved_products or [])[:10]
+                                       if p.get("product_id")]
+                        _snap_upd = {"last_query": msg}
+                        if _structured:
+                            _snap_upd["last_products"] = _structured
+                        await conv_svc.aupdate_context_snapshot(cid, _snap_upd)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return
+            # Loop 失败 → 继续落入下方既有链路（购物门控 / workflow）
+        
         # ================================================================
         # 购物操作流程 (加购 / 购物车管理 / 下单)
         # ================================================================
-        if is_shop or _pending_sku:
-            # 读取可能的下单来源: focus_product → last_products → cart
-            fp = await _read_focus_product(conv_svc, cid)
-            fp_id = fp.get("product_id", "")
-            fp_title = fp.get("title", "")
-            fp_price = float(fp.get("price", 0))
-            fp_brand = fp.get("brand", "")
-
-            # 读取上一轮推荐的商品 (供 "第一个下单" 等指代)
-            last_products = []
-            try:
-                snapshot = await conv_svc.get_context_snapshot(cid) if conv_svc and cid else {}
-                last_products = snapshot.get("last_products", []) or []
-            except Exception:
-                pass
-
+        if (is_shop or _pending_sku) and not _is_compound:
             async def _yield_answer(text: str, actions: list | None = None):
-                """SSE流式: 先逐字token, 再result, 最后done"""
-                for ch in text:
-                    yield _sse("token", json.dumps({"text": ch}, ensure_ascii=False))
-                    await asyncio.sleep(0.03)
+                """SSE流式: 按块快速回放, 再 result, 最后 done"""
+                for _i in range(0, len(text), 12):
+                    yield _sse("token", json.dumps({"text": text[_i:_i + 12]}, ensure_ascii=False))
+                    await asyncio.sleep(0.005)
                 payload = {"answer": text, "products": [], "decision_results": [],
-                           "shop_action": True, "harness_report": {}}
+                           "shop_action": True, "harness_report": {},
+                           "conversation_id": cid}
                 if actions:
                     payload["actions"] = actions
                 yield _sse("result", json.dumps(payload, ensure_ascii=False))
                 yield _sse("done", "{}")
-
-            async def _persist_order(order_id: str, user_id: str, items: list, total: float):
-                """持久化订单到 PG"""
-                try:
-                    from app.core.database import get_session_sync
-                    from app.models.order import OrderModel
-                    from datetime import datetime, timezone
-                    factory = get_session_sync()
-                    async with factory() as session:
-                        order = OrderModel(
-                            order_id=order_id, user_id=user_id,
-                            items=items, total_price=total,
-                            status="pending",
-                            created_at=datetime.now(timezone.utc),
+        
+            # ---- Tool 链: 全部购物动作委派给 ShopActionAgent（legacy if/elif 已随灰度收尾删除） ----
+            from app.core.config import ENABLE_TOOL_ROUTER
+            if ENABLE_TOOL_ROUTER:
+                from app.agents.shop_action_agent import ShopActionAgent
+                from app.framework.tools import ToolContext
+                _ctx = ToolContext(user_id=uid, session_id=sid, conversation_id=cid, args_raw=msg)
+                _res = await ShopActionAgent().handle(msg, _ctx)
+                async for _e in _yield_answer(_res.message, _res.actions or None):
+                    yield _e
+                # P0-3: shop 回复同样写入会话历史（"聊了什么"可见）
+                if conv_svc and cid and _res.message:
+                    try:
+                        await conv_svc.aappend_assistant_message(
+                            conversation_id=cid, user_id=uid,
+                            session_id=sid, content=_res.message,
                         )
-                        session.add(order)
-                        await session.commit()
-                    logger.info(f"Order persisted: {order_id}")
-                except Exception as e:
-                    logger.warning(f"Order persist failed ({order_id}): {e}")
-
-            # ---- SKU 规格选择（用户点击规格按钮后触发） ----
-            if _pending_sku:
-                pid = _pending_sku.get("product_id", "")
-                if pid:
-                    from app.repositories.product_repo import get_product_repo
-                    product = get_product_repo().get_by_id(pid)
-                    if product and product.skus:
-                        # 尝试用消息文本匹配 SKU
-                        best_sku = None
-                        best_score = 0
-                        for s in product.skus:
-                            score = 0
-                            props = s.properties or {}
-                            for k, v in props.items():
-                                if k in msg and v in msg:
-                                    score += 2
-                                elif v in msg:
-                                    score += 1
-                            if score > best_score:
-                                best_score = score
-                                best_sku = s
-                        if best_sku and best_score > 0:
-                            try:
-                                from app.repositories.pg_cart_repo import get_cart_repo
-                                from app.schemas.cart import CartItemCreate
-                                sku_label = " · ".join(f"{k}:{v}" for k,v in (best_sku.properties or {}).items())
-                                price = best_sku.price if best_sku.price > 0 else product.base_price
-                                title = _pending_sku.get("title") or product.title
-                                brand = _pending_sku.get("brand") or product.brand
-                                await get_cart_repo().aadd_item(
-                                    CartItemCreate(product_id=pid, sku_id=best_sku.sku_id, quantity=1),
-                                    uid, title=title, brand=brand, price=price,
-                                    image_url=get_product_repo().resolve_image_url(pid),
-                                    sku_label=sku_label,
-                                )
-                                if conv_svc and cid:
-                                    try:
-                                        await conv_svc.aupdate_context_snapshot(cid, {"pending_sku_product": None})
-                                    except Exception:
-                                        pass
-                                t = (brand + " " + title)[:50]
-                                async for e in _yield_answer(f"✅ 已把「{t}」（{sku_label}）加入购物车～"):
-                                    yield e
-                            except Exception:
-                                async for e in _yield_answer("加购失败，请去商品页面手动操作～"):
-                                    yield e
-                            return
-
-            # ---- 确认下单 (must be before order_words: "确认下单" contains "下单") ----
-            if any(kw in msg for kw in confirm_words) or (msg.strip() == "确认" and len(msg.strip()) <= 3):
-                # 尝试三个来源: focus_product → cart selected → last_products top1
-                items_to_order = []
-                if fp_id:
-                    items_to_order = [{"product_id": fp_id, "title": fp_title,
-                                       "brand": fp_brand, "price": fp_price, "quantity": 1}]
-                if not items_to_order:
-                    try:
-                        from app.repositories.pg_cart_repo import get_cart_repo
-                        cart = (await get_cart_repo().aget_cart(uid))
-                        selected = [i for i in cart.items if i.selected]
-                        if selected:
-                            items_to_order = [{"product_id": i.product_id, "title": i.title,
-                                               "brand": i.brand, "price": i.price,
-                                               "quantity": i.quantity} for i in selected]
                     except Exception:
                         pass
-                if not items_to_order and last_products:
-                    p = last_products[0]
-                    items_to_order = [{"product_id": p.get("product_id",""), "title": p.get("title",""),
-                                       "brand": p.get("brand",""), "price": p.get("price",0), "quantity": 1}]
-
-                if not items_to_order:
-                    async for e in _yield_answer("没有找到要下单的商品～"):
-                        yield e
-                    return
-                addr = await _get_address(uid)
-                if not addr:
-                    async for e in _yield_answer("还没有收货地址～点下方按钮填写后再说「下单」就行！",
-                                                 [{"type": "address_form", "label": "填写收货地址"}]):
-                        yield e
-                    return
-
-                total = sum(it.get("price",0) * it.get("quantity",1) for it in items_to_order)
-                oid = f"ORD-{_uuid.uuid4().hex[:8].upper()}"
-                await _persist_order(oid, uid, items_to_order, total)
-
-                # 构建商品列表文本
-                item_lines = []
-                for it in items_to_order:
-                    b = it.get("brand","")
-                    t = it.get("title","")[:50]
-                    q = it.get("quantity", 1)
-                    p = it.get("price", 0)
-                    item_lines.append(f"  {b} {t} x{q}  ¥{p*q:.0f}")
-                items_text = "\n".join(item_lines)
-                item_count = len(items_to_order)
-
-                text = (
-                    f"🎉 下单成功！\n\n"
-                    f"📋 订单号：{oid}\n"
-                    f"🛒 共{item_count}件：\n{items_text}\n"
-                    f"💰 实付：¥{total:.0f}\n"
-                    f"📍 {addr.get('name','')} {addr.get('phone','')}\n"
-                    f"   {addr.get('province','')}{addr.get('city','')}"
-                    f"{addr.get('district','')} {addr.get('detail','')}\n"
-                    f"⏱️ 预计2-3天送达\n\n"
-                    f"感谢购买！还有什么需要帮忙的吗？"
-                )
-                # 结算后清空购物车 (非 focus_product 来源)
-                if not fp_id:
-                    try:
-                        from app.repositories.pg_cart_repo import get_cart_repo
-                        await get_cart_repo().aclear_cart(uid)
-                    except Exception:
-                        pass
-                async for e in _yield_answer(text):
-                    yield e
                 return
-
-            # ---- 购物车: 查看 ----
-            if any(kw in msg for kw in cart_show_words):
-                try:
-                    from app.repositories.pg_cart_repo import get_cart_repo
-                    cart = (await get_cart_repo().aget_cart(uid))
-                    if not cart.items:
-                        async for e in _yield_answer("🛒 购物车还是空的～去逛逛商品吧！"):
-                            yield e
-                    else:
-                        lines = ["🛒 你的购物车："]
-                        for idx, it in enumerate(cart.items, 1):
-                            b = it.brand or ""
-                            t = it.title[:50] if it.title else ""
-                            q = it.quantity
-                            p = it.price
-                            lines.append(f"  {idx}. {b} {t} x{q}  ¥{p*q:.0f}")
-                        lines.append(f"\n💰 合计 ¥{cart.total_price:.0f}（{cart.total_count}件）")
-                        lines.append("可以对我说「删除第N个」「数量改成N」来管理购物车，说「下单」来结算～")
-                        async for e in _yield_answer("\n".join(lines)):
-                            yield e
-                except Exception:
-                    async for e in _yield_answer("暂时无法查看购物车，请去购物车页面查看～"):
-                        yield e
-                return
-
-            # ---- 购物车: 删除第N个 ----
-            if any(kw in msg for kw in cart_remove_words):
-                n = _parse_ordinal(msg, r"删除第|去掉第|移除第")
-                if n is None:
-                    async for e in _yield_answer("请说「删除第几个」哦～比如「删除第二个」"):
-                        yield e
-                    return
-                try:
-                    from app.repositories.pg_cart_repo import get_cart_repo
-                    cart = (await get_cart_repo().aget_cart(uid))
-                    if n < 1 or n > len(cart.items):
-                        async for e in _yield_answer(f"购物车只有{len(cart.items)}件商品哦～"):
-                            yield e
-                        return
-                    item = cart.items[n - 1]
-                    title = (item.brand + " " + item.title)[:60] if item.title else "商品"
-                    cart_repo = get_cart_repo()
-                    await cart_repo.aremove_item(item.cart_item_id, uid)
-                    async for e in _yield_answer(f"🗑 已删除「{title}」"):
-                        yield e
-                except Exception as e:
-                    logger.warning(f"Cart remove error: {type(e).__name__}: {e}", exc_info=True)
-                    async for e in _yield_answer("删除失败，请去购物车页面手动操作～"):
-                        yield e
-                return
-
-            # ---- 购物车: 修改数量 ----
-            if any(kw in msg for kw in cart_qty_words):
-                qty = _parse_qty(msg)
-                if qty is None or qty < 1:
-                    async for e in _yield_answer("请说「数量改成N」哦～比如「数量改成2」"):
-                        yield e
-                    return
-                # 先看有没有指定第N个
-                n = _parse_ordinal(msg, r"第")
-                try:
-                    from app.repositories.pg_cart_repo import get_cart_repo
-                    cart = (await get_cart_repo().aget_cart(uid))
-                    if not cart.items:
-                        async for e in _yield_answer("购物车还是空的～"):
-                            yield e
-                        return
-                    if n is not None:
-                        if n < 1 or n > len(cart.items):
-                            async for e in _yield_answer(f"购物车只有{len(cart.items)}件商品哦～"):
-                                yield e
-                            return
-                        item = cart.items[n - 1]
-                    else:
-                        # 没指定序号 → 操作购物车中第一个
-                        item = cart.items[0]
-                    title = (item.brand + " " + item.title)[:60] if item.title else "商品"
-                    cart_repo = get_cart_repo()
-                    from app.schemas.cart import CartItemUpdate
-                    await cart_repo.aupdate_item(item.cart_item_id, CartItemUpdate(quantity=qty), uid)
-                    async for e in _yield_answer(f"🔢 「{title}」数量已改为 {qty}"):
-                        yield e
-                except Exception:
-                    async for e in _yield_answer("修改失败，请去购物车页面手动操作～"):
-                        yield e
-                return
-
-            # ---- 下单 (触发确认卡片) ----
-            if any(kw in msg for kw in order_words):
-                items_to_confirm = []
-                source_label = ""
-                # 来源1: focus_product (问豆仔直接下单)
-                if fp_id:
-                    items_to_confirm = [{"product_id": fp_id, "title": fp_title,
-                                         "brand": fp_brand, "price": fp_price, "quantity": 1}]
-                    source_label = "focus"
-                # 来源2: 指代上一轮推荐结果 ("第一个下单")
-                if not items_to_confirm:
-                    n = _parse_ordinal(msg, r"第")
-                    if n and last_products and 1 <= n <= len(last_products):
-                        p = last_products[n - 1]
-                        items_to_confirm = [{"product_id": p.get("product_id",""), "title": p.get("title",""),
-                                             "brand": p.get("brand",""), "price": p.get("price",0), "quantity": 1}]
-                        source_label = "last"
-                # 来源3: 购物车选中商品
-                if not items_to_confirm:
-                    try:
-                        from app.repositories.pg_cart_repo import get_cart_repo
-                        cart = (await get_cart_repo().aget_cart(uid))
-                        selected = [i for i in cart.items if i.selected]
-                        if selected:
-                            items_to_confirm = [{"product_id": i.product_id, "title": i.title,
-                                                 "brand": i.brand, "price": i.price,
-                                                 "quantity": i.quantity} for i in selected]
-                            source_label = "cart"
-                    except Exception:
-                        pass
-
-                if not items_to_confirm:
-                    async for e in _yield_answer("请先去浏览商品、加入购物车，或者点「问豆仔」分析后再说「下单」哦～"):
-                        yield e
-                    return
-
-                total = sum(it.get("price",0) * it.get("quantity",1) for it in items_to_confirm)
-                addr = await _get_address(uid)
-
-                # 构建确认卡片
-                item_lines = []
-                for idx, it in enumerate(items_to_confirm, 1):
-                    b = it.get("brand","")
-                    t = it.get("title","")[:50]
-                    q = it.get("quantity", 1)
-                    p = it.get("price", 0)
-                    item_lines.append(f"  {idx}. {b} {t}  x{q}  ¥{p*q:.0f}")
-                items_text = "\n".join(item_lines)
-
-                addr_str = (
-                    f"📍 {addr.get('name','')}  {addr.get('phone','')}\n"
-                    f"   {addr.get('province','')}{addr.get('city','')}"
-                    f"{addr.get('district','')} {addr.get('detail','')}"
-                ) if addr else "📍 未设置收货地址"
-
-                text = (
-                    f"📦 订单确认\n\n"
-                    f"{items_text}\n\n"
-                    f"💰 合计：¥{total:.0f}\n"
-                    f"{addr_str}\n\n"
-                    + ("确认下单吗？" if addr else "⚠️ 请先设置收货地址～")
-                )
-                act = (
-                    [{"type": "quick_reply", "label": "确认下单"},
-                     {"type": "address_form", "label": "修改地址"}]
-                    if addr else
-                    [{"type": "address_form", "label": "填写收货地址"}]
-                )
-                # 保存 pending order 到 snapshot，供 "确认" 短回复识别
-                if conv_svc and cid and source_label:
-                    try:
-                        await conv_svc.aupdate_context_snapshot(cid, {
-                            "pending_order_items": items_to_confirm,
-                        })
-                    except Exception:
-                        pass
-                async for e in _yield_answer(text, act):
-                    yield e
-                return
-
-            # ---- 修改地址 ----
-            if any(kw in msg for kw in addr_words):
-                async for e in _yield_answer("好的～在下方填写新地址，填好后告诉我「下单」就行！",
-                                             [{"type": "address_form", "label": "填写新地址"}]):
-                    yield e
-                return
-
-            # ---- 清空购物车 ----
-            if any(kw in msg for kw in clear_words):
-                try:
-                    from app.repositories.pg_cart_repo import get_cart_repo
-                    await get_cart_repo().aclear_cart(uid)
-                    async for e in _yield_answer("✅ 购物车已清空～"):
-                        yield e
-                except Exception:
-                    async for e in _yield_answer("清空失败，请去购物车页面手动操作～"):
-                        yield e
-                return
-
-            # ---- 加购 (对话式) ----
-            if any(kw in msg for kw in cart_add_words):
-                target = None
-                # 来源1: focus_product (问豆仔)
-                if fp_id:
-                    target = {"product_id": fp_id, "title": fp_title, "brand": fp_brand, "price": fp_price}
-                # 来源2: 序号指代 ("把第二个加入购物车")
-                if not target and last_products:
-                    n = _parse_ordinal(msg, r"第")
-                    if n and 1 <= n <= len(last_products):
-                        p = last_products[n - 1]
-                        target = {"product_id": p.get("product_id",""), "title": p.get("title",""),
-                                  "brand": p.get("brand",""), "price": p.get("price",0)}
-                    elif not n:
-                        # 无序号 → "全部加入" 或默认 Top1
-                        if "全部" in msg:
-                            # 批量加购
-                            added = 0
-                            for p in last_products[:5]:
-                                try:
-                                    from app.repositories.pg_cart_repo import get_cart_repo
-                                    from app.repositories.product_repo import get_product_repo
-                                    from app.schemas.cart import CartItemCreate
-                                    cart_repo2 = get_cart_repo()
-                                    prod_repo2 = get_product_repo()
-                                    prod = prod_repo2.get_by_id(p.get("product_id",""))
-                                    await cart_repo2.aadd_item(
-                                        CartItemCreate(product_id=p.get("product_id",""), quantity=1),
-                                        uid,
-                                        title=p.get("title",""), brand=p.get("brand",""),
-                                        price=p.get("price",0),
-                                        image_url=prod_repo2.resolve_image_url(p.get("product_id","")) if prod else "",
-                                        sku_label="",
-                                    )
-                                    added += 1
-                                except Exception:
-                                    pass
-                            async for e in _yield_answer(f"✅ 已把 {added} 件商品加入购物车～"):
-                                yield e
-                            return
-                        else:
-                            p = last_products[0]
-                            target = {"product_id": p.get("product_id",""), "title": p.get("title",""),
-                                      "brand": p.get("brand",""), "price": p.get("price",0)}
-                if not target:
-                    async for e in _yield_answer("请先说你想买什么，我再帮你加购哦～"):
-                        yield e
-                    return
-                try:
-                    from app.repositories.pg_cart_repo import get_cart_repo
-                    from app.repositories.product_repo import get_product_repo
-                    from app.schemas.cart import CartItemCreate
-                    prod_repo = get_product_repo()
-                    product = prod_repo.get_by_id(target["product_id"])
-                    if not product:
-                        async for e in _yield_answer("找不到这件商品了～"):
-                            yield e
-                        return
-
-                    # 多规格 → 展示选项让用户选
-                    skus = getattr(product, "skus", None) or []
-                    if len(skus) > 1:
-                        sku_actions = []
-                        base = product.base_price or 0
-                        for s in skus:
-                            props = s.properties or {}
-                            # 显示 "容量:30ml 经典装" 格式
-                            label_parts = [f"{k}:{v}" for k, v in props.items()]
-                            label = " · ".join(label_parts)
-                            price = s.price if s.price and s.price > 0 else base
-                            label += f" ¥{price:.0f}"
-                            sku_actions.append({
-                                "type": "sku_option",
-                                "label": label,
-                                "sku_id": s.sku_id,
-                            })
-                        # 也加一个"不用选"选项
-                        sku_actions.append({
-                            "type": "sku_option",
-                            "label": "默认规格",
-                            "sku_id": "",
-                        })
-                        # 记住 pending 商品，等用户选规格
-                        if conv_svc and cid:
-                            try:
-                                await conv_svc.aupdate_context_snapshot(cid, {
-                                    "pending_sku_product": {
-                                        "product_id": target["product_id"],
-                                        "title": target.get("title",""),
-                                        "brand": target.get("brand",""),
-                                        "base_price": target.get("price",0),
-                                    }
-                                })
-                            except Exception:
-                                pass
-                        t = (target.get("brand","") + " " + target.get("title",""))[:50]
-                        async for e in _yield_answer(f"「{t}」有 {len(skus)} 个规格，选哪个？", sku_actions):
-                            yield e
-                        return
-
-                    # 单规格或无规格 → 直接加购
-                    sel_sku = skus[0] if skus else None
-                    sku_id = sel_sku.sku_id if sel_sku else ""
-                    sku_label = " · ".join(f"{k}:{v}" for k,v in (sel_sku.properties or {}).items()) if sel_sku else ""
-                    price = sel_sku.price if sel_sku and sel_sku.price > 0 else target.get("price",0)
-                    cart_repo = get_cart_repo()
-                    await cart_repo.aadd_item(
-                        CartItemCreate(product_id=target["product_id"], sku_id=sku_id, quantity=1),
-                        uid,
-                        title=target.get("title",""),
-                        brand=target.get("brand",""),
-                        price=price,
-                        image_url=prod_repo.resolve_image_url(target["product_id"]),
-                        sku_label=sku_label,
-                    )
-                    t = (target.get("brand","") + " " + target.get("title",""))[:60]
-                    extra = f"（{sku_label}）" if sku_label else ""
-                    async for e in _yield_answer(f"✅ 已把「{t}」{extra}加入购物车～"):
-                        yield e
-                except Exception:
-                    async for e in _yield_answer("加购失败，请去商品页面手动操作～"):
-                        yield e
-                return
-
-            # 兜底
-            async for e in _yield_answer("好的～你可以对商品点「问豆仔」后说「下单」来直接结算哦！"):
-                yield e
-            return
 
         # ================================================================
         # 以下是原有的推荐/聚焦分析流程 (保持不变)
@@ -754,24 +395,10 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
             and req.target_product_id.strip()
         )
 
-        # P0: conversation
-        try:
-            conv_result = await conv_svc.aget_or_create(
-                user_id=uid, session_id=sid, conversation_id=cid,
-            )
-            cid = conv_result["conversation_id"]
-        except Exception:
-            pass
+        # P2-2: 检索/生成前发中间态（前端未订阅的事件类型会静默忽略）
+        yield _sse("status", json.dumps({"text": "欧米正在挑选好物…"}, ensure_ascii=False))
 
-        if cid:
-            try:
-                await conv_svc.aappend_user_message(
-                    conversation_id=cid, user_id=uid,
-                    session_id=sid, content=req.message,
-                    image_url=req.image_url or "",
-                )
-            except Exception:
-                pass
+        # P0: conversation —— 已上移至购物块之前（P0-3），此处不再重复创建/落库
 
         # P2 + P4: FollowUpEngine + Profile 并行加载
         _t0 = _time.perf_counter()
@@ -784,7 +411,15 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
             try:
                 from app.services.followup_engine import get_followup_engine
                 engine = get_followup_engine()
-                fu = engine.detect(conversation_id=cid, session_id=sid, current_query=req.message)
+                # 预取 snapshot（async + 内存缓存），避免 detect 内部同步 PG 读阻塞事件循环
+                _snap = None
+                try:
+                    if cid:
+                        _snap = await conv_svc.get_context_snapshot(cid)
+                except Exception:
+                    _snap = None
+                fu = engine.detect(conversation_id=cid, session_id=sid,
+                                   current_query=req.message, snapshot=_snap)
                 if fu.get("is_follow_up") and fu.get("context_prompt"):
                     enriched_query = f"{req.message}\n\n{fu['context_prompt']}"
                 if fu.get("updated_constraints"):
@@ -832,11 +467,11 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
                             sku_label="",
                         )
                         title_short = (product.brand + " " + product.title)[:60]
-                        # SSE 流式输出加购确认
+                        # SSE 流式输出加购确认（按块快速回放）
                         answer = f"✅ 已把「{title_short}」加入购物车～"
-                        for ch in answer:
-                            yield _sse("token", json.dumps({"text": ch}, ensure_ascii=False))
-                            await asyncio.sleep(0.03)
+                        for _i in range(0, len(answer), 12):
+                            yield _sse("token", json.dumps({"text": answer[_i:_i + 12]}, ensure_ascii=False))
+                            await asyncio.sleep(0.005)
                         yield _sse("result", json.dumps({
                             "session_id": sid, "conversation_id": cid,
                             "answer": answer, "products": [], "decision_results": [],
@@ -896,28 +531,17 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
                         prices = [s.price for s in target.skus]
                         sku_summary = f"共{len(target.skus)}个规格，价格区间 ¥{min(prices):.0f}-¥{max(prices):.0f}"
 
-                    cat_angles = {
-                        "数码电子": "参数配置、兼容性、使用场景",
-                        "美妆护肤": "成分功效、适用肤质、性价比",
-                        "服饰运动": "材质舒适度、尺码适配、穿搭场景",
-                        "食品饮料": "口味特点、健康程度、规格划算度",
-                    }
-                    angle = cat_angles.get(cat, "优缺点、性价比、是否值得买")
-
+                    from app.prompts.api_prompts import build_focused_analysis_prompt, get_analysis_angle
+                    angle = get_analysis_angle(cat)
+                    
                     search_query = f"{target.title} {target.brand} {cat} {sub}"
-                    analysis_prompt = (
-                        f"顾客在咨询这款商品，请优先重点介绍它：\n"
-                        f"「{target.title}」— {target.brand}，¥{target.base_price}，{cat}/{sub}\n"
-                        f"参考信息：{review_summary}。{faq_summary}。{sku_summary}。\n"
-                        f"描述：{rk.marketing_description[:300] if rk else ''}\n"
-                        f"用户问：{req.message}\n\n"
-                        f"回复要求：\n"
-                        f"1. 先用1-2句热情推荐这款商品，突出它最大的卖点\n"
-                        f"2. 列出2-3个核心优点（结合数据）\n"
-                        f"3. 一句话说适用人群\n"
-                        f"4. 如果数据中有差评/风险项，必须提醒用户注意\n"
-                        f"5. 最后如果检索结果里有同类商品，用一句话提一下作为备选\n"
-                        f"重点始终放在顾客问的这款商品上，备选只是捎带提及。控制在200字以内。"
+                    analysis_prompt = build_focused_analysis_prompt(
+                        title=target.title, brand=target.brand,
+                        price=target.base_price, cat=cat, sub=sub,
+                        review_summary=review_summary, faq_summary=faq_summary,
+                        sku_summary=sku_summary,
+                        description=rk.marketing_description[:300] if rk else "",
+                        message=req.message,
                     )
                     if context_prompt:
                         analysis_prompt = analysis_prompt + "\n\n" + context_prompt
@@ -943,6 +567,7 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
                         prefill_state=prefill,
                         context_prompt=analysis_prompt,
                         fast_mode=req.fast_mode,
+                        mode=req.exec_mode,
                     )
 
                     # 确保目标商品在检索结果中
@@ -1070,18 +695,21 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
                 _t_wf = _time.perf_counter()
                 profile_avoid = hints_result.get("avoid_tags") or []
                 prefill = _build_constraint_prefill(followup_constraints, profile_avoid)
+                # 真流式：no_response 图只跑到 decision，回答由下方 generate_stream 边生成边推
                 state = await run_workflow(
                     user_query=enriched_query, image_url=req.image_url,
                     session_id=sid, user_id=uid, conversation_id=cid,
                     enable_checkpoint=False, prefill_state=prefill,
                     context_prompt=context_prompt,
+                    no_response=True,
                     fast_mode=req.fast_mode,
+                    mode=req.exec_mode,
                 )
                 logger.info(f"⏱ workflow: {(_time.perf_counter() - _t_wf)*1000:.0f}ms (total: {(_time.perf_counter() - _t_total_start)*1000:.0f}ms)")
                 if hasattr(state, 'timing') and state.timing:
                     logger.info(f"⏱ breakdown: {json.dumps(state.timing, ensure_ascii=False, default=str)}")
 
-            answer = state.answer or "抱歉，暂时无法回答您的问题。"
+            answer = state.answer or ""
 
             # P3: 购买意向检测
             if is_focused and target:
@@ -1094,20 +722,48 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
                 if purchase_signals >= 2:
                     answer += f"\n\n看起来你对「{target.title[:20]}」挺满意的～要不要我帮你直接下单？回复「下单」就行！"
 
-            # SSE流式输出
-            for i, ch in enumerate(answer):
-                if await raw_request.is_disconnected():
-                    break
-                yield _sse("token", json.dumps({"text": ch}, ensure_ascii=False))
-                await asyncio.sleep(0.03)
+            # SSE 输出：普通推荐走真流式（LLM token 产出即转发）；
+            # 聚焦分析等已持有全文的场景按块快速回放（不再逐字 sleep 30ms）
+            if not is_focused and not answer:
+                _t_resp = _time.perf_counter()
+                from app.workflow.graph import get_response_agent, get_response_guard
+                _full = ""
+                try:
+                    async for _tok in get_response_agent().generate_stream(state):
+                        if await raw_request.is_disconnected():
+                            break
+                        _full += _tok
+                        yield _sse("token", json.dumps({"text": _tok}, ensure_ascii=False))
+                except Exception as e:
+                    logger.warning(f"stream generation failed: {e}")
+                answer = _full.strip() or "抱歉，暂时无法回答您的问题。"
+                if not _full:
+                    yield _sse("token", json.dumps({"text": answer}, ensure_ascii=False))
+                state.answer = answer
+                state.timing["response_ms"] = round((_time.perf_counter() - _t_resp) * 1000)
+                try:
+                    get_response_guard().check(state)
+                except Exception:
+                    pass
+            else:
+                answer = answer or "抱歉，暂时无法回答您的问题。"
+                _CHUNK = 12
+                for _i in range(0, len(answer), _CHUNK):
+                    if await raw_request.is_disconnected():
+                        break
+                    yield _sse("token", json.dumps({"text": answer[_i:_i + _CHUNK]}, ensure_ascii=False))
+                    await asyncio.sleep(0.005)
 
             result = {
                 "session_id": sid,
                 "conversation_id": cid,
                 "answer": answer,
-                "products": _safe_dump(state.retrieved_products or []),
+                "products": _safe_dump(_slim_products(_order_by_cited(
+                    state.retrieved_products or [], state.answer_cited_pids or []))),
                 "decision_results": _safe_dump(state.decision_results or []),
-                "evidence_list": _safe_dump(state.evidence_list or []),
+                "evidence_list": _safe_dump(_slim_evidence(
+                    state.evidence_list or [], state.answer_cited_pids or [],
+                    state.retrieved_products or [])),
                 "trace_steps": _safe_dump(state.trace_steps or []),
                 "harness_report": _safe_dump(state.harness_report or {}),
                 "used_memories": _safe_dump(state.used_memories or []),
@@ -1126,83 +782,78 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
             yield _sse("done", json.dumps({"finish_reason": "stop"}))
 
             if cid:
-                try:
-                    # 结构化商品列表 (供 FollowUpEngine 做指代解析)
-                    product_ids = []
-                    structured_products = []
-                    for p in (state.retrieved_products or [])[:10]:
-                        pid = p.get("product_id", "")
-                        if pid:
-                            product_ids.append(pid)
-                            structured_products.append({
-                                "product_id": pid,
-                                "title": p.get("title", "")[:60],
-                                "brand": p.get("brand", ""),
-                                "price": p.get("price", 0),
-                            })
+                # 收尾持久化整体后台化 — done 已发，不再占用 SSE 连接时间
+                _persist_state, _persist_answer = state, answer
 
-                    await conv_svc.aappend_assistant_message(
-                        conversation_id=cid, user_id=uid,
-                        session_id=sid, content=answer,
-                        product_refs=product_ids,
-                    )
-
-                    # 提取豆仔回复中的问题 (供下一轮 Router 做问答链匹配)
-                    pending_question = _extract_question(answer)
-
-                    # 保留最近 N 轮对话摘要
-                    recent_turns = await _build_recent_turns(cid, conv_svc, {
-                        "user_query": req.message,
-                        "assistant_answer": answer[:300],
-                        "product_ids": product_ids,
-                    })
-
-                    # 持久化 Router 检测到的品类，供下一轮 FollowUpEngine 继承
-                    snapshot_update = {
-                        "last_query": req.message,
-                        "last_answer": answer[-500:] if len(answer) > 500 else answer,
-                        "last_products": structured_products,
-                        "pending_question": pending_question,
-                        "recent_turns": recent_turns,
-                    }
-                    if hasattr(state, 'constraints') and state.constraints:
-                        c = state.constraints
-                        cur_turn = {}
-                        if c.category:
-                            cur_turn["category"] = c.category
-                        if c.sub_category:
-                            cur_turn["sub_category"] = c.sub_category
-                        if c.budget_max:
-                            cur_turn["budget_max"] = c.budget_max
-                        if c.scenario:
-                            cur_turn["scenario"] = c.scenario
-                        if cur_turn:
-                            snapshot_update["current_turn"] = cur_turn
-                    await conv_svc.aupdate_context_snapshot(cid, snapshot_update)
-
-                    # P4: 异步上下文压缩 — 不阻塞 SSE，后台增量更新 conversation_summary
+                async def _persist_turn():
                     try:
-                        prev_summary = (conv_svc.get_context_snapshot_sync(cid) or {}).get(
-                            "conversation_summary", ""
-                        ) or ""
-                        asyncio.create_task(
-                            _compress_and_save(cid, conv_svc, prev_summary,
-                                               req.message, answer, pending_question)
+                        # 结构化商品列表 (供 FollowUpEngine 做指代解析)
+                        product_ids = []
+                        structured_products = []
+                        for p in (_persist_state.retrieved_products or [])[:10]:
+                            pid = p.get("product_id", "")
+                            if pid:
+                                product_ids.append(pid)
+                                structured_products.append({
+                                    "product_id": pid,
+                                    "title": p.get("title", "")[:60],
+                                    "brand": p.get("brand", ""),
+                                    "price": p.get("price", 0),
+                                })
+
+                        await conv_svc.aappend_assistant_message(
+                            conversation_id=cid, user_id=uid,
+                            session_id=sid, content=_persist_answer,
+                            product_refs=product_ids,
                         )
+
+                        # 提取欧米回复中的问题 (供下一轮 Router 做问答链匹配)
+                        pending_question = _extract_question(_persist_answer)
+
+                        # 保留最近 N 轮对话摘要
+                        recent_turns = await _build_recent_turns(cid, conv_svc, {
+                            "user_query": req.message,
+                            "assistant_answer": _persist_answer[:300],
+                            "product_ids": product_ids,
+                        })
+
+                        # 持久化 Router 检测到的品类，供下一轮 FollowUpEngine 继承
+                        snapshot_update = {
+                            "last_query": req.message,
+                            "last_answer": _persist_answer[-500:] if len(_persist_answer) > 500 else _persist_answer,
+                            "last_products": structured_products,
+                            "pending_question": pending_question,
+                            "recent_turns": recent_turns,
+                        }
+                        if hasattr(_persist_state, 'constraints') and _persist_state.constraints:
+                            c = _persist_state.constraints
+                            cur_turn = {}
+                            if c.category:
+                                cur_turn["category"] = c.category
+                            if c.sub_category:
+                                cur_turn["sub_category"] = c.sub_category
+                            if c.budget_max:
+                                cur_turn["budget_max"] = c.budget_max
+                            if c.scenario:
+                                cur_turn["scenario"] = c.scenario
+                            if cur_turn:
+                                snapshot_update["current_turn"] = cur_turn
+                        await conv_svc.aupdate_context_snapshot(cid, snapshot_update)
+
+                        # P4: 异步上下文压缩 — 后台增量更新 conversation_summary
+                        snap = await conv_svc.get_context_snapshot(cid) or {}
+                        prev_summary = snap.get("conversation_summary", "") or ""
+                        await _compress_and_save(cid, conv_svc, prev_summary,
+                                                 req.message, _persist_answer, pending_question)
                         # 首次对话生成标题
-                        try:
-                            snap = conv_svc.get_context_snapshot_sync(cid) or {}
-                            existing_title = snap.get("title", "")
-                            if not existing_title:
-                                asyncio.create_task(
-                                    _generate_title(cid, conv_svc, req.message, answer[:200])
-                                )
-                        except Exception:
-                            pass
+                        if not snap.get("title", ""):
+                            await _generate_title(cid, conv_svc, req.message, _persist_answer[:200])
                     except Exception:
                         pass
-                except Exception:
-                    pass
+
+                _task = asyncio.create_task(_persist_turn())
+                _BG_TASKS.add(_task)
+                _task.add_done_callback(_BG_TASKS.discard)
 
         except asyncio.CancelledError:
             logger.info(f"SSE cancelled: {sid}")
@@ -1216,6 +867,97 @@ async def recommend_stream(req: StreamRequest, raw_request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+def _order_by_cited(products: list, cited_pids: list) -> list:
+    """按回答引用集置顶商品（spec §3）。
+
+    自然语言回答只基于前 N 个候选生成，而列表可能回传 5-20 个——
+    不置顶就会出现"回答讲 A/B、卡片列 C/D/E"。引用零时原序返回。
+    未被引用的商品标 beyond_answer=True（前端可弱化展示）。
+    """
+    if not products or not cited_pids:
+        return products
+    by_pid = {}
+    for p in products:
+        if isinstance(p, dict) and p.get("product_id"):
+            by_pid[p["product_id"]] = p
+    head = [by_pid[pid] for pid in cited_pids if pid in by_pid]
+    head_ids = {p.get("product_id") for p in head}
+    tail = []
+    for p in products:
+        if not isinstance(p, dict) or p.get("product_id") in head_ids:
+            continue
+        q = dict(p)
+        q["beyond_answer"] = True
+        tail.append(q)
+    return head + tail
+
+
+# 商品卡下发白名单：前端商品卡 + 推理面板实际读取的字段（rag_knowledge 前端零消费，
+# 详情页走 api.getProduct 独立拉取，故不下发；实测每卡省 ~4.3KB）
+_CARD_KEEP = frozenset({
+    "product_id", "title", "brand", "category", "sub_category", "price",
+    "image_urls", "skus", "description", "score", "evidence_ids",
+    "variant_count", "variant_product_ids", "beyond_answer",
+    "reranker_score", "relevance_score", "avg_rating", "review_count",
+})
+_DESC_MAX = 120
+_EVIDENCE_CONTENT_MAX = 140
+_EVIDENCE_MAX = 20
+
+
+def _slim_products(products: list) -> list:
+    """SSE 出口商品卡瘦身（spec §1）：白名单裁字段 + description 截断。
+
+    只在序列化出口做减法，不改 state 内对象（返回新 dict）。rag_knowledge 前端
+    从不读取，是 result 帧最大冗余（~4.3KB/卡）。
+    """
+    slimmed = []
+    for p in products or []:
+        if not isinstance(p, dict):
+            slimmed.append(p)
+            continue
+        q = {k: v for k, v in p.items() if k in _CARD_KEEP}
+        desc = q.get("description")
+        if isinstance(desc, str) and len(desc) > _DESC_MAX:
+            q["description"] = desc[:_DESC_MAX]
+        slimmed.append(q)
+    return slimmed
+
+
+def _slim_evidence(evidence_list: list, cited_pids: list, products: list) -> list:
+    """SSE 出口证据裁剪（spec §2）：按展示商品过滤 + content 截断 + 条数上限。
+
+    保留 answer_cited_pids 与实际下发商品对应的证据；content 截断至前端展示长度；
+    上限对齐前端 EvidenceView 的 slice(0,20)。不改 state 内对象。
+    """
+    ev = evidence_list or []
+    keep_pids = set(cited_pids or [])
+    for p in products or []:
+        if isinstance(p, dict) and p.get("product_id"):
+            keep_pids.add(p["product_id"])
+    out = []
+    for e in ev:
+        if not isinstance(e, dict):
+            continue
+        # 有归属商品的证据按展示集过滤；无 product_id 的通用证据保留
+        pid = e.get("product_id")
+        if keep_pids and pid and pid not in keep_pids:
+            continue
+        content = e.get("content")
+        item = {
+            "evidence_id": e.get("evidence_id"),
+            "source_type": e.get("source_type"),
+            "source_id": e.get("source_id"),
+            "product_id": pid,
+            "confidence": e.get("confidence"),  # 前端展示可信度，漏保留会出 NaN%
+            "content": content[:_EVIDENCE_CONTENT_MAX] if isinstance(content, str) else content,
+        }
+        out.append(item)
+        if len(out) >= _EVIDENCE_MAX:
+            break
+    return out
 
 
 def _safe_dump(obj):

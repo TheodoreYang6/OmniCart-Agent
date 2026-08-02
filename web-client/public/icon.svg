@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 欧米 favicon —— 为 16px 可辨识度做减法：
+       只保留「圆角品牌底 + 白猫头 + 蓝内耳 + 两只大眼」四个元素。
+       刻意不画鼻子/嘴/胡须/虎斑纹：小尺寸下这些只会糊成噪点。
+       3D 主视觉 (brand/omi-perch.png) 缩到 16px 会失去辨识度，故不复用。 -->
+  <defs>
+    <linearGradient id="omiBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#256BFF"/>
+      <stop offset="0.55" stop-color="#4D8BFF"/>
+      <stop offset="1" stop-color="#7DD3FC"/>
+    </linearGradient>
+    <linearGradient id="omiEarIn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#256BFF"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="32" height="32" rx="8" fill="url(#omiBg)"/>
+
+  <!-- 耳朵（先画，头部覆盖根部） -->
+  <path d="M6.5 13.5 L10 4.5 L15 11 Z" fill="#FFFFFF"/>
+  <path d="M25.5 13.5 L22 4.5 L17 11 Z" fill="#FFFFFF"/>
+  <path d="M9.2 12 L10.6 7.6 L13 11.2 Z" fill="url(#omiEarIn)"/>
+  <path d="M22.8 12 L21.4 7.6 L19 11.2 Z" fill="url(#omiEarIn)"/>
+
+  <!-- 头（扁圆 —— 圆度是萌感来源） -->
+  <ellipse cx="16" cy="19" rx="11.5" ry="9.5" fill="#FFFFFF"/>
+
+  <!-- 眼睛：16px 下唯一还能读出的表情信息，故给足体积与对比 -->
+  <circle cx="11.6" cy="18.4" r="2.5" fill="#1A54E8"/>
+  <circle cx="20.4" cy="18.4" r="2.5" fill="#1A54E8"/>
+  <circle cx="12.5" cy="17.4" r="0.85" fill="#FFFFFF"/>
+  <circle cx="21.3" cy="17.4" r="0.85" fill="#FFFFFF"/>
+</svg>

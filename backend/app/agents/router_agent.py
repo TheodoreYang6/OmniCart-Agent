@@ -8,44 +8,72 @@ import logging
 
 from app.agents.base import BaseAgent
 from app.model_gateway.gateway import get_model_gateway
+from app.prompts.agent_prompts import build_router_prompt
 from app.schemas.a2a import AgentCard
-from app.schemas.workflow import Constraints, RetrievalPlan, WorkflowState
+from app.schemas.workflow import Constraints, RetrievalPlan, SubQuery, WorkflowState
 
 logger = logging.getLogger(__name__)
 
-_ROUTER_PROMPT = """你是一个购物决策路由Agent。分析用户的购物需求，提取结构化信息。
+VALID_CATEGORIES = {"数码电子", "美妆护肤", "服饰运动", "食品饮料",
+                    "家居用品", "母婴用品", "运动户外", "个护清洁"}
 
-{context}
 
-## 用户输入
-{query}
+def _parse_qu_json(raw: str) -> dict:
+    """解析 QU LLM 的 JSON 输出（兼容 markdown 围栏）。"""
+    raw = (raw or "").strip()
+    if "```" in raw:
+        block = raw.split("```")[1]
+        if block.startswith("json"):
+            block = block[4:]
+        raw = block.strip()
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, IndexError):
+        return {}
 
-## 品类
-仅限：数码电子 / 美妆护肤 / 服饰运动 / 食品饮料
 
-## 规则
-- 追问（便宜点/好一点/有没有别的）→ 继承上轮品类和场景，不换品类
-- 上文豆仔问了问题 → 用户的简短回复（要/好/行/对/嗯/换一个）是在回答它，从问题推断意图
-- 购物无关的闲聊或乱输入 → intent="chitchat"，其他字段可为空
+async def aunderstand_query(query: str, context: str = "") -> dict:
+    """QU V2 结构化理解（意图+约束+sub_queries 拆分）—— Router 与 OmniAgent 共用。
 
-## 任务
-提取以下信息，只输出JSON：
+    缓存 key 维持 query 粒度（双链路同 query 零成本共享）；失败返回 {} 由调用方降级。
+    """
+    from app.core.cache import cached, make_key
+    from app.core.config import REDIS_CACHE_TTL_REWRITE
 
-{
-  "intent": "chitchat|recommend|compare|risk_check|compatibility_check|alternative|shop_action",
-  "category": "数码电子|美妆护肤|服饰运动|食品饮料|null",
-  "sub_category": "如 真无线耳机、精华、跑步鞋、咖啡 等，不确定则为null",
-  "budget_max": 最高预算金额(数字)或null,
-  "budget_min": 最低预算金额(数字)或null,
-  "scenario": "commute|business_trip|flight|sport|outdoor|desk|travel|null",
-  "scenario_keywords": [场景特征词，如爬山场景可填"防滑""透气""轻量"等；无场景则为空数组],
-  "spec_keywords": [3-5个品质关键词。优先用户提到的，没提则给品类通用词。如耳机→"降噪""音质""续航"；跑鞋→"缓震""透气""轻量"；精华→"保湿""抗老""修护"。必须填充，不能为空],
-  "must_have": [用户明确要求必须有的关键词。没有则留空],
-  "avoid": [用户明确说不要/不喜欢的词。没有则留空],
-  "retrieval_channels": ["text","review","policy"] 中至少包含"text"和"review"
-}
+    cache_key = make_key("router_intent", query)
 
-请输出JSON："""
+    async def _do():
+        gateway = get_model_gateway()
+        prompt = build_router_prompt(context, query)
+        raw = await gateway.chat("intent_understanding", prompt)
+        parsed = _parse_qu_json(raw)
+        if not parsed:
+            logger.warning(f"QU LLM returned unparseable response: {raw[:200]}")
+        return parsed or {}
+
+    return await cached(cache_key, REDIS_CACHE_TTL_REWRITE, _do)
+
+
+def validate_sub_queries(raw_sq) -> list[SubQuery]:
+    """sub_queries 合并校验：非 list 丢弃；query 空跳过；坏 category 置 None；
+    最多 5 条；仅 1 条视为不拆（清空）。校验失败降级 = 现状单查询行为。"""
+    if not isinstance(raw_sq, list):
+        return []
+    out: list[SubQuery] = []
+    for item in raw_sq[:5]:
+        if not isinstance(item, dict) or not str(item.get("query") or "").strip():
+            continue
+        cat = item.get("category")
+        if cat not in VALID_CATEGORIES:
+            cat = None
+        try:
+            bh = float(item["budget_hint"]) if item.get("budget_hint") is not None else None
+        except (TypeError, ValueError):
+            bh = None
+        out.append(SubQuery(role=str(item.get("role") or "")[:20],
+                            query=str(item["query"]).strip()[:40],
+                            category=cat, budget_hint=bh))
+    return out if len(out) >= 2 else []
 
 
 class RouterAgent(BaseAgent):
@@ -74,9 +102,9 @@ class RouterAgent(BaseAgent):
         # 构建会话上下文（供 LLM 理解追问）
         context = self._build_session_context(state)
 
-        # 豆仔问了问题，用户回复简短肯定词 → 从 pending_question 推断搜索意图
+        # 欧米问了问题，用户回复简短肯定词 → 从 pending_question 推断搜索意图
         _AFFIRMATIVE = {"要", "好", "行", "可以", "对", "是的", "嗯", "买", "要的", "好的", "行的", "对啊", "是", "要买", "想看", "想买", "想看下", "看看吧", "试试", "来一个", "整一个", "搞一个"}
-        if "豆仔上一轮问了用户一个问题" in (context or "") and state.user_query.strip() in _AFFIRMATIVE:
+        if "欧米上一轮问了用户一个问题" in (context or "") and state.user_query.strip() in _AFFIRMATIVE:
             # 从 pending_question 提取品类关键词，替换 query
             import re
             pq_match = re.search(r"「(.+?)」", context)
@@ -86,25 +114,12 @@ class RouterAgent(BaseAgent):
                 state.user_query = pending_q
                 rule_result = _rule_based_parse(pending_q)
 
-        # 快速模式或预填约束：跳过 LLM，只用规则
-        fast_mode = state.context_prompt and "[FAST_MODE]" in (state.context_prompt or "")
+        # lite 档或预填约束：跳过 LLM，只用规则（P2-1：state.mode 替代 [FAST_MODE] 字符串）
+        fast_mode = state.mode == "lite"
         llm_result = {}
         if not has_prefilled and not fast_mode:
             try:
-                from app.core.cache import cached, make_key
-                from app.core.config import REDIS_CACHE_TTL_REWRITE
-                cache_key = make_key("router_intent", state.user_query)
-
-                async def _do_router_llm():
-                    gateway = get_model_gateway()
-                    prompt = _ROUTER_PROMPT.replace("{context}", context).replace("{query}", state.user_query)
-                    raw = await gateway.chat("intent_understanding", prompt)
-                    parsed = self._parse_llm(raw)
-                    if not parsed:
-                        logger.warning(f"Router LLM returned unparseable response: {raw[:200]}")
-                    return parsed or {}
-
-                llm_result = await cached(cache_key, REDIS_CACHE_TTL_REWRITE, _do_router_llm)
+                llm_result = await aunderstand_query(state.user_query, context)
             except Exception as e:
                 logger.warning(f"Router LLM failed, falling back to rules: {e}")
 
@@ -113,7 +128,6 @@ class RouterAgent(BaseAgent):
         merged = {**rule_result, **llm_filtered}
 
         # 品类安全校验: LLM 返回的 category 必须在已知品类中, 否则回退到规则结果
-        VALID_CATEGORIES = {"数码电子", "美妆护肤", "服饰运动", "食品饮料"}
         # 过滤 LLM 返回的字符串 "null" / "none" / "" 等无效值
         llm_filtered = {k: v for k, v in llm_filtered.items()
                         if v and str(v).lower() not in ("null", "none", "")}
@@ -123,7 +137,11 @@ class RouterAgent(BaseAgent):
             merged["category"] = rule_result.get("category")  # None is fine — no category filter
 
         # 规则强检测的意图不被 LLM 覆盖 (词库匹配比 LLM 语义判断更可靠)
-        HIGH_CONFIDENCE_INTENTS = {"chitchat", "risk_check", "shop_action"}
+        # compare 同属词库强检测（"对比/比较/vs"）：不保护会被 LLM 降级为 recommend，
+        # 导致动态编排的 compare_retrieval 多目标检索永远不触发（灰度手测实锤）
+        # QU V2: bundle/replenish 同为强词表（"搭一套/再来一"）；gift/knowledge 词易误判，允许 LLM 纠正
+        HIGH_CONFIDENCE_INTENTS = {"chitchat", "risk_check", "shop_action", "compare",
+                                   "bundle", "replenish"}
         # 规则强检测的意图不被 LLM 覆盖
         if rule_result.get("intent") in HIGH_CONFIDENCE_INTENTS:
             merged["intent"] = rule_result["intent"]
@@ -160,6 +178,10 @@ class RouterAgent(BaseAgent):
             merged["avoid"] = list(set((merged.get("avoid") or []) + prefill_avoid))
 
         state.intent = merged.get("intent", "recommend")
+        # QU V2: gift_profile 仅 gift 意图透传（dict 且非空）
+        gift_profile = merged.get("gift_profile")
+        if state.intent != "gift" or not isinstance(gift_profile, dict) or not gift_profile:
+            gift_profile = None
         state.constraints = Constraints(
             category=merged.get("category"),
             sub_category=merged.get("sub_category"),
@@ -170,7 +192,13 @@ class RouterAgent(BaseAgent):
             spec_keywords=merged.get("spec_keywords") or [],
             must_tags=merged.get("must_have") or [],
             exclude_tags=merged.get("avoid") or [],
+            gift_profile=gift_profile,
         )
+        if gift_profile:
+            # 送礼视角注入 Response（prompt 规则：上下文含[送礼场景]时以送礼视角组织）
+            state.context_prompt = (state.context_prompt or "") + (
+                f"\n[送礼场景] 对象:{gift_profile.get('recipient', '未知')} "
+                f"场合:{gift_profile.get('occasion', '未知')}")
 
         channels = merged.get("retrieval_channels", ["text", "review"])
         if state.intent == "chitchat":
@@ -190,6 +218,7 @@ class RouterAgent(BaseAgent):
             sub_category=merged.get("sub_category"),
             top_k=10 if merged.get("intent") == "compare" else (8 if merged.get("avoid") else 5),
             priority="coverage" if merged.get("intent") == "compare" else "balanced",
+            sub_queries=validate_sub_queries(merged.get("sub_queries")),
         )
 
         llm_used = "rule+llm" if llm_result else "rule_only"
@@ -212,7 +241,7 @@ class RouterAgent(BaseAgent):
     def _build_session_context(self, state: WorkflowState) -> str:
         """从 context_snapshot 构建上下文段落，注入 Router prompt。
 
-        包含: 约束、豆仔待答问题、上一轮对话、最近3轮摘要。
+        包含: 约束、欧米待答问题、上一轮对话、最近3轮摘要。
         """
         if not state.conversation_id:
             return ""
@@ -230,16 +259,16 @@ class RouterAgent(BaseAgent):
             pending_q = snapshot.get("pending_question", "")
             products = snapshot.get("last_products", [])
 
-            # 豆仔待答问题 (最高优先级 — 帮助 LLM 理解用户可能在回答什么)
+            # 欧米待答问题 (最高优先级 — 帮助 LLM 理解用户可能在回答什么)
             if pending_q and pending_q != last_q:
-                parts.append(f"⚠️ 豆仔上一轮问了用户一个问题: 「{pending_q}」")
+                parts.append(f"⚠️ 欧米上一轮问了用户一个问题: 「{pending_q}」")
                 parts.append("→ 用户当前回复很可能是在回答这个问题。请从问题内容推断意图和品类，忽略下方旧话题约束。")
 
             if last_q and last_q != state.user_query:
                 parts.append(f"上一轮用户说了: 「{last_q}」")
             if last_answer:
                 answer_short = last_answer[-200:] if len(last_answer) > 200 else last_answer
-                parts.append(f"上一轮豆仔回复: 「{answer_short}」")
+                parts.append(f"上一轮欧米回复: 「{answer_short}」")
             if last_intent:
                 parts.append(f"上一轮意图: {last_intent}")
             if acc.get("category"):
@@ -275,7 +304,7 @@ class RouterAgent(BaseAgent):
                     for i, t in enumerate(prev_turns[-2:]):
                         uq = t.get("user_query", "")[:80]
                         aa = t.get("assistant_answer", "")[:80]
-                        parts.append(f"  第{i+1}轮 — 用户: 「{uq}」→ 豆仔: 「{aa}」")
+                        parts.append(f"  第{i+1}轮 — 用户: 「{uq}」→ 欧米: 「{aa}」")
 
             if parts:
                 return "## 对话上下文\n" + "\n".join(f"- {p}" for p in parts) + "\n"
@@ -310,7 +339,7 @@ def _rule_based_parse(query: str) -> dict:
         "retrieval_channels": ["text", "review"],
     }
 
-    # 豆仔问了用户一个问题，用户回答"要/好/行" → 从问题中提取搜索意图
+    # 欧米问了用户一个问题，用户回答"要/好/行" → 从问题中提取搜索意图
     # 在 _build_session_context 中已传递 pending_question，此处做规则兜底
     # (实际替换逻辑在 execute() 中根据上下文完成)
 
@@ -324,7 +353,7 @@ def _rule_based_parse(query: str) -> dict:
         "你能做什么", "你会什么", "你有什么功能", "你能干嘛", "你能干什么",
         "你是AI", "你是机器人", "你是人工",
         # AI/助手相关闲聊
-        "豆包", "豆仔", "豆包和", "你和豆包", "豆包是谁", "claude", "gpt", "chatgpt",
+        "豆包", "欧米", "豆包和", "你和豆包", "豆包是谁", "claude", "gpt", "chatgpt",
         "你是哪个模型", "模型", "大模型", "基于什么",
         # 日常情感
         "想你", "爱你", "喜欢你", "摸摸", "抱抱", "贴贴",
@@ -358,6 +387,10 @@ def _rule_based_parse(query: str) -> dict:
                               "地址用默认", "默认地址"]):
         result["intent"] = "shop_action"
         result["retrieval_channels"] = []
+    elif any(w in q for w in ["搭一套", "搭配一套", "成套", "一整套", "配齐", "搭配一身"]):
+        result["intent"] = "bundle"
+    elif any(w in q for w in ["再来一", "回购", "补货"]) or ("上次买" in q and "再" in q):
+        result["intent"] = "replenish"
     elif any(w in q for w in ["对比", "比较", "vs", "哪个好", "选哪个"]):
         result["intent"] = "compare"
     elif any(w in q for w in ["风险", "副作用", "安全", "过敏", "发热", "爆炸"]):
@@ -368,6 +401,13 @@ def _rule_based_parse(query: str) -> dict:
         result["need_compatibility_check"] = True
     elif any(w in q for w in ["替代", "代替", "换一个", "其他", "别的", "类似"]):
         result["intent"] = "alternative"
+    elif ("送" in q and any(w in q for w in ["礼物", "生日礼", "情人节", "母亲节", "父亲节"])) \
+            or any(w in q for w in ["送女朋友", "送男朋友", "送爸妈", "送妈妈", "送爸爸"]):
+        # gift 词易误判（"送货"等），仅作规则默认，不进高置信，允许 LLM 纠正
+        result["intent"] = "gift"
+    elif any(w in q for w in ["什么区别", "有啥区别", "怎么选", "什么是", "科普一下"]):
+        # knowledge 同理仅规则默认
+        result["intent"] = "knowledge"
 
     # Category / Budget / Scenario — 统一使用共享规则模块
     from app.decision.rules import detect_category, detect_budget, detect_scenario, detect_sub_category

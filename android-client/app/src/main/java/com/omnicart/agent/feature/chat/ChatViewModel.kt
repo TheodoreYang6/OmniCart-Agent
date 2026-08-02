@@ -275,7 +275,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             streamingText = "",
             errorMessage = null,
             lastResponse = null,
-            loadingMessage = "豆仔正在帮你找商品…",
+            loadingMessage = "小O正在帮你找商品…",
         ) }
 
         viewModelScope.launch {
@@ -377,7 +377,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 问问豆仔：发送 product_focused_analysis */
+    /** 问问小O：发送 product_focused_analysis */
     fun sendAskDouzai(productId: String, title: String) {
         val query = "帮我分析一下「${title}」"
         val userMessage = ChatMessage(role = MessageRole.User, text = query)
@@ -385,7 +385,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             messages = it.messages + userMessage,
             isStreamingText = true, streamingText = "", errorMessage = null,
             isLoading = true,
-            loadingMessage = "豆仔正在分析「${title.take(15)}」…",
+            loadingMessage = "小O正在分析「${title.take(15)}」…",
         ) }
         viewModelScope.launch {
             try {
@@ -707,7 +707,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Step 3: SSE 流式推荐（跟文字输入一致）
-                _uiState.update { it.copy(isLoading = false, isStreamingText = true, streamingText = "", lastResponse = null, loadingMessage = "豆仔正在分析…") }
+                _uiState.update { it.copy(isLoading = false, isStreamingText = true, streamingText = "", lastResponse = null, loadingMessage = "小O正在分析…") }
                 val streamJson = JsonObject().apply {
                     addProperty("session_id", _uiState.value.sessionId)
                     addProperty("user_id", AuthManager.effectiveUserId)

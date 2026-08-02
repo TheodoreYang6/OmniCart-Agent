@@ -51,6 +51,15 @@ class ConversationService:
             existing = await self._repo.aget(conversation_id)
             if existing:
                 return {"conversation_id": existing.conversation_id, "is_new": False}
+        # P0-1 会话连续性：cid 缺失时按 session_id 复用最近会话
+        # （不回传 cid 的客户端否则每轮新建会话，上下文/追问全部丢失）
+        if session_id:
+            try:
+                recent = await self._repo.aget_latest_by_session(user_id, session_id)
+            except Exception:  # noqa: BLE001 — 复用失败不阻断，降级新建
+                recent = None
+            if recent:
+                return {"conversation_id": recent.conversation_id, "is_new": False}
         conv = await self._repo.acreate(user_id=user_id, session_id=session_id, title=title)
         return {"conversation_id": conv.conversation_id, "is_new": True}
 
@@ -60,6 +69,13 @@ class ConversationService:
             existing = self._repo.get(conversation_id)
             if existing:
                 return {"conversation_id": existing.conversation_id, "is_new": False}
+        if session_id:
+            try:
+                recent = self._repo.get_latest_by_session(user_id, session_id)
+            except Exception:  # noqa: BLE001
+                recent = None
+            if recent:
+                return {"conversation_id": recent.conversation_id, "is_new": False}
         conv = self._repo.create(user_id=user_id, session_id=session_id, title=title)
         return {"conversation_id": conv.conversation_id, "is_new": True}
 
@@ -232,7 +248,7 @@ class ConversationService:
         await self._persist_snapshot(conversation_id, snapshot)
 
     async def set_focus_product(self, conversation_id: str, product):
-        """锁定聚焦商品 (问豆仔功能)。"""
+        """锁定聚焦商品 (问欧米功能)。"""
         snapshot = await self.get_context_snapshot(conversation_id)
         snapshot["focus_product"] = {
             "product_id": product.product_id,

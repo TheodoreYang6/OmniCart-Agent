@@ -7,8 +7,9 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
 
-# 数据校验
+# 数据校验 + 配置治理
 pydantic>=2.0.0
+pydantic-settings>=2.0.0
 
 # HTTP 客户端
 httpx>=0.28.0
@@ -22,8 +23,17 @@ python-multipart>=0.0.18
 # Qwen API (OpenAI-compatible SDK)
 openai>=1.0.0
 
-# 向量数据库
-qdrant-client>=1.12.0
+# 本地模型 (embedding / reranker，OMNICART_USE_LOCAL_MODELS=true 时启用)
+# 注：体积较大；纯 API / MOCK 部署可不装，Provider 懒加载不会在导入期触发 torch。
+torch>=2.2.0
+transformers>=4.51.0
+sentence-transformers>=3.0.0
+
+# 中文分词（BM25 稀疏向量编码，混合检索词面召回侧）
+jieba>=0.42.1
+
+# 向量数据库（需 >=1.14 以支持 sparse 向量 + Prefetch/FusionQuery 服务端 RRF）
+qdrant-client>=1.14.0
 
 # Agent 编排 (LangGraph)
 langgraph>=0.2.0

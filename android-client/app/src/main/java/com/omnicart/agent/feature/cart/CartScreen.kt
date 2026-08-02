@@ -58,7 +58,7 @@ fun CartScreen(
                     Spacer(Modifier.height(12.dp))
                     Text("购物车是空的", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(4.dp))
-                    Text("去逛逛商品，或让豆仔帮你推荐好物", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("去逛逛商品，或让小O帮你推荐好物", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             else -> {

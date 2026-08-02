@@ -5,7 +5,7 @@
   "category": "美妆护肤",
   "sub_category": "化妆水",
   "base_price": 582.0,
-  "image_path": "1_美妆护肤/images/p_beauty_019_live.jpg",
+  "image_path": "1_美妆护肤/images/p_beauty_019.jpg",
   "skus": [
     {
       "sku_id": "s_p_beauty_019_1",
@@ -19,7 +19,7 @@
       "properties": {
         "容量": "200ml 旅行装"
       },
-      "price": 360.0
+      "price": 629.56
     }
   ],
   "rag_knowledge": {

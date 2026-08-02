@@ -4,8 +4,8 @@
   "brand": "珀莱雅",
   "category": "美妆护肤",
   "sub_category": "精华",
-  "base_price": 280.0,
-  "image_path": "1_美妆护肤/images/p_beauty_009_live.jpg",
+  "base_price": 210.0,
+  "image_path": "1_美妆护肤/images/p_beauty_009.jpg",
   "skus": [
     {
       "sku_id": "s_p_beauty_009_1",

@@ -1,0 +1,31 @@
+{
+  "tag": "v7_hybrid",
+  "collection": "product_chunks_v7_hybrid",
+  "cases": 128,
+  "elapsed_s": 16.8,
+  "faq": {
+    "n": 64,
+    "hit@1": 0.953,
+    "hit@5": 0.969,
+    "mrr@10": 0.963
+  },
+  "title": {
+    "n": 64,
+    "hit@1": 0.656,
+    "hit@5": 0.906,
+    "mrr@10": 0.787
+  },
+  "misses_sample": [
+    {
+      "type": "title",
+      "query": "李宁篮球鞋",
+      "expect": "p_clothes_037",
+      "got": [
+        "p_clothes_117",
+        "p_clothes_013",
+        "p_clothes_098"
+      ]
+    }
+  ],
+  "miss_count": 1
+}

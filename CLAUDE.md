@@ -69,7 +69,7 @@ V0~V2 全部里程碑已完成，当前处于文档优化与运维完善阶段�
 | 对话引擎 | FollowUpEngine 7 种追问检测 + ContextCompressor 增量摘要 + 对话标题自动生成 + pending_question 问答链 |
 | 购物闭环 | 对话加购(SKU规格选择) + 购物车CRUD + 自然语言管理 + 模拟下单 + 订单持久化 |
 | 语音 | ASR 录音转文字(静音检测+AI回复清洗) + TTS 文字转语音(MediaPlayer播放) |
-| Android | 四Tab(商品/豆仔/购物车/我的) + SSE流式打字机 + 拍照识图 + 语音输入 + 历史对话 + 偏好管理 + 登录注册 + 地址管理 + 快速模式 + Demo演示 |
+| Android | 四Tab(商品/小O/购物车/我的) + SSE流式打字机 + 拍照识图 + 语音输入 + 历史对话 + 偏好管理 + 登录注册 + 地址管理 + 快速模式 + Demo演示 |
 | 评测 | 10 Golden Queries + Recall@K/MRR/NDCG@K + Chart.js 可视化仪表盘 + LLM 全链路追踪 |
 | 部署 | Docker Compose 四服务(postgres+qdrant+redis+backend) + 阿里云轻量服务器 + Release APK(签名混淆2.4MB) + 运维手册 |
 
@@ -87,6 +87,18 @@ Android SSE输入 → /api/recommend/stream → FollowUpEngine检测 → Router(
 - 每次改动不得破坏主链路（SSE 流式推荐 + Android 对话）。
 - 新增功能必须考虑 Mock 模式兼容（`OMNICART_MOCK_MODE=true` 时仍可运行）。
 - 文档与代码同步：架构/API/配置变更必须同步更新对应的 docs/ 文档。
+
+## 架构分层约定（V3 框架化）
+
+后端采用**框架-实现分离**（对齐 amap `libs/*` + `commons/*_providers`）：
+
+- `app/framework/*`：框架层。Protocol/ABC + 编排（RAG/Memory/Context/AgentManager + ModelProvider），
+  只依赖标准库与本项目基础设施，**不 import 具体业务实现**。
+- `app/providers/*`：实现层。各 RecallSource/MemoryProvider/ContextProvider/Agent 的具体实现，
+  通过各包 `builtin()` 清单显式装配；用 `@component(kind=..., name=...)` 打标。
+- 依赖方向单向：`providers → framework`，禁止反向。
+- 新增/替换组件只改对应 `builtin()`，不动框架与编排；改完跑 `make governance` 校验。
+- 详见 `docs/ARCHITECTURE.md` 与 `docs/adr/`。
 
 ## 每次开发前
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">豆仔</string>
+    <string name="app_name">小O</string>
 
     <!-- Tab Labels -->
     <string name="tab_home">首页</string>
@@ -8,7 +8,7 @@
     <string name="tab_profile">我的</string>
 
     <!-- Chat -->
-    <string name="chat_welcome">豆仔——您身边的购物小助手</string>
+    <string name="chat_welcome">小O——您身边的购物小助手</string>
     <string name="chat_analyzing">正在分析您的需求...</string>
     <string name="chat_network_error">网络请求失败，请检查后端是否运行</string>
     <string name="chat_image_upload_failed">图片上传失败，请检查网络连接</string>

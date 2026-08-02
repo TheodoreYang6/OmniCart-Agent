@@ -50,7 +50,7 @@ data class BottomTab(val route: String, val label: String, val icon: ImageVector
 
 val tabs = listOf(
     BottomTab("shop", "商品", Icons.Filled.Storefront),
-    BottomTab("chat", "豆仔", Icons.AutoMirrored.Filled.Chat),
+    BottomTab("chat", "小O", Icons.AutoMirrored.Filled.Chat),
     BottomTab("cart", "购物车", Icons.Filled.ShoppingCart),
     BottomTab("profile", "我的", Icons.Filled.Person),
 )
@@ -80,7 +80,7 @@ fun MainScreen() {
     val keyboardOpen by remember(imeBottom) { derivedStateOf { imeBottom > 100 } }
     val hideBottomBar = keyboardOpen || currentDestination?.route in listOf("login", "address", "address_select", "preference", "product_detail/{productId}")
 
-    // 问问豆仔状态
+    // 问问小O状态
     var askDouzaiProductId by remember { mutableStateOf("") }
     var askDouzaiTitle by remember { mutableStateOf("") }
 

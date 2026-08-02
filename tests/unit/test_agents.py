@@ -35,6 +35,26 @@ class TestRouterAgent:
         assert result["budget_max"] == 500.0
         assert result["category"] == "数码电子"
 
+    def test_rule_based_parse_compare(self):
+        assert _rule_based_parse("对比airpods和huawei freebuds pro5")["intent"] == "compare"
+
+    @pytest.mark.asyncio
+    async def test_compare_not_overridden_by_llm(self, monkeypatch):
+        """规则强检测的 compare 不被 LLM 的 recommend 覆盖（灰度手测实锤的假阴性根因）。"""
+        agent = RouterAgent()
+
+        async def fake_chat(*a, **kw):
+            return ('{"intent": "recommend", "category": "数码电子", '
+                    '"sub_category": "真无线耳机", "retrieval_channels": ["text"]}')
+
+        from app.model_gateway.gateway import get_model_gateway
+
+        monkeypatch.setattr(get_model_gateway(), "chat", fake_chat)
+        state = WorkflowState(session_id="t3", user_query="对比airpods和huawei freebuds pro5")
+        result = await agent.execute(state)
+        assert result.intent == "compare"          # 词库强检测保护
+        assert result.constraints.category == "数码电子"  # LLM 的品类增强仍生效
+
 
 class TestRetrievalAgent:
     def test_card(self):

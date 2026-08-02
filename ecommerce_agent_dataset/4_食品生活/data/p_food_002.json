@@ -5,7 +5,7 @@
   "category": "食品饮料",
   "sub_category": "咖啡",
   "base_price": 60.0,
-  "image_path": "4_食品生活/images/p_food_002_live.jpg",
+  "image_path": "4_食品生活/images/p_food_002.jpg",
   "skus": [
     {
       "sku_id": "s_p_food_002_1",
@@ -23,7 +23,7 @@
         "内含条数": "50条",
         "包装类型": "小包装"
       },
-      "price": 35.0
+      "price": 65.8
     },
     {
       "sku_id": "s_p_food_002_3",
@@ -32,7 +32,7 @@
         "内含条数": "50条",
         "包装类型": "家庭装"
       },
-      "price": 30.0
+      "price": 72.06
     },
     {
       "sku_id": "s_p_food_002_4",
@@ -41,7 +41,7 @@
         "内含条数": "100条",
         "包装类型": "小包装"
       },
-      "price": 68.0
+      "price": 78.82
     }
   ],
   "rag_knowledge": {

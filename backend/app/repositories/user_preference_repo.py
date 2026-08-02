@@ -54,7 +54,8 @@ class UserPreferenceRepository:
                 UserPreferenceEntry.enabled == True,
             )
             if category:
-                q = q.where(UserPreferenceEntry.category == category)
+                # P1-2: “通用”偏好（全局预算/避雷等）全品类召回
+                q = q.where(UserPreferenceEntry.category.in_([category, "通用"]))
             q = q.order_by(UserPreferenceEntry.created_at.desc())
             result = await session.execute(q)
             return list(result.scalars().all())

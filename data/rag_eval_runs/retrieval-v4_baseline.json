@@ -1,0 +1,20 @@
+{
+  "tag": "v4_baseline",
+  "collection": "product_chunks_v4_1024",
+  "cases": 128,
+  "elapsed_s": 13.1,
+  "faq": {
+    "n": 64,
+    "hit@1": 0.938,
+    "hit@5": 1.0,
+    "mrr@10": 0.962
+  },
+  "title": {
+    "n": 64,
+    "hit@1": 0.578,
+    "hit@5": 0.984,
+    "mrr@10": 0.756
+  },
+  "misses_sample": [],
+  "miss_count": 0
+}

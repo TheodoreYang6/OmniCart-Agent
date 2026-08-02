@@ -1,0 +1,79 @@
+{
+  "product_id": "p_digital_105",
+  "title": "Apple 苹果 MacBook Air 13英寸 M2芯片笔记本电脑 轻薄长续航办公学习本 8GB内存+256GB固态硬盘",
+  "brand": "Apple 苹果",
+  "category": "数码电子",
+  "sub_category": "笔记本电脑",
+  "base_price": 8999.0,
+  "image_path": "2_数码电子/images/p_digital_105.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_105_1",
+      "properties": {
+        "处理器配置": "Apple M2芯片",
+        "内存/硬盘": "8GB统一内存 + 256GB SSD"
+      },
+      "price": 8999.0
+    },
+    {
+      "sku_id": "s_p_digital_105_2",
+      "properties": {
+        "处理器配置": "Apple M2芯片",
+        "内存/硬盘": "8GB统一内存 + 512GB SSD"
+      },
+      "price": 10499.0
+    },
+    {
+      "sku_id": "s_p_digital_105_3",
+      "properties": {
+        "处理器配置": "Apple M2芯片",
+        "内存/硬盘": "16GB统一内存 + 512GB SSD"
+      },
+      "price": 12499.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "Apple 苹果 MacBook Air 13英寸（M2芯片）是苹果首款无风扇设计的超轻薄笔记本，搭载第二代自研M2芯片，8核CPU+10核GPU，性能较M1提升达18%，能效比行业领先。采用Liquid Retina 13.6英寸LED背光显示屏，支持P3广色域与原彩显示技术，亮度达500尼特；全金属一体式机身仅重1.24kg、厚11.3mm，配备18小时本地视频播放续航及MagSafe 3磁吸充电接口。适合大学生、自由职业者及移动办公人群日常文档处理、网课直播与轻度剪辑。建议搭配macOS Ventura系统更新以启用Stage Manager多任务管理。注意：无HDMI接口，需另购USB-C转接器连接外接显示器。",
+    "official_faq": [
+      {
+        "question": "M2芯片的8核CPU和10核GPU具体能应对哪些实际使用场景？",
+        "answer": "M2芯片的8核CPU可流畅运行Office套件、Zoom会议、Chrome多标签（50+）、Final Cut Pro剪辑1080p素材；10核GPU在Lightroom批量调色或Premiere导出4K H.264时比M1快约20%。实测Geekbench 6单核2720/多核9280，但不建议用于3D建模或8K视频渲染——此类负载下M2芯片无风扇散热易触发降频，建议选配M3 Pro以上机型。"
+      },
+      {
+        "question": "8GB统一内存+256GB SSD基础版是否够用？不同配置如何选择？",
+        "answer": "8GB+256GB适合纯文字办公、网页浏览、在线课程及轻量Photo Booth修图；若常开虚拟机、运行Docker或存储超2000张RAW照片，建议升级至16GB内存+512GB SSD。注意：MacBook Air内存与SSD均为板载不可更换，256GB实际可用空间约210GB（系统占约40GB），安装Xcode或Blender后剩余空间可能不足30GB，务必提前规划存储需求。"
+      },
+      {
+        "question": "MacBook Air M2的无风扇设计在长时间高负载下是否影响稳定性？",
+        "answer": "在持续编译代码（Xcode构建）、导出10分钟4K视频或运行Stable Diffusion本地模型时，机身底部温度可达48℃，CPU会从3.48GHz动态降至2.8GHz维持10分钟以上，导致渲染时间延长约15%。苹果官方测试标准为‘典型办公负载’，非专业级持续满载场景。建议高负载任务单次不超过20分钟，并置于硬质桌面保障底部进风，避免盖上毛毯或软垫遮挡散热孔。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "李小米",
+        "rating": 5,
+        "content": "8999元入手M2版Air，已用5个月，每天上课记笔记+剪1080p短视频，电池从不焦虑——充一次电撑足14小时（含2小时Zoom+微信+网易云）。键盘手感比旧款MacBook Pro还稳，1.24kg放书包里完全没负担，连室友都借去赶论文。唯一小遗憾是插U盘得带扩展坞。"
+      },
+      {
+        "nickname": "王梓涵",
+        "rating": 4,
+        "content": "10499元买了8GB+512GB版本，用了3个月。512GB真香，存了200G课程录屏+PS素材库还不卡。但发现用Final Cut剪4K片段时偶尔卡顿，查了才知是内存瓶颈——升级到16GB会更好。屏幕色彩确实惊艳，做设计作业交稿被老师夸‘色调通透’。"
+      },
+      {
+        "nickname": "张雅静",
+        "rating": 5,
+        "content": "12499元一步到位选了16GB+512GB，作为插画师已用7个月。Procreate+Affinity Designer双开不掉帧，外接27寸显示器跑得稳，MagSafe充电再也不怕线被踢掉。最惊喜的是扬声器——听ASMR比AirPods还沉浸。就是Touch ID偶尔识别慢半秒。"
+      },
+      {
+        "nickname": "陈哲远",
+        "rating": 2,
+        "content": "8999元买的入门版，结果装完Python环境+VS Code+Docker后只剩12GB空间，删了所有缓存还是报警。试过导出一段3分钟4K视频，风扇虽没声但机身发烫明显，导出耗时比同学的Windows本多2分半。说好的‘全能’？至少得加钱上16GB才不至于捉襟见肘。"
+      },
+      {
+        "nickname": "赵琳娜",
+        "rating": 3,
+        "content": "9800元（含教育优惠）拿下，用了4个月。轻和续航是真的好，但遇到个坑：用学校Wi-Fi总断连，重置网络设置后好了。另外买来才发现没有耳机孔，得用Type-C转接头，开会临时找线很尴尬。屏幕亮但看PDF久了有点泛白，开了夜览才舒服些。"
+      }
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-"""Agent Actions API — 豆仔受控操作（加入购物车等）"""
+"""Agent Actions API — 欧米受控操作（加入购物车等）"""
 
 import uuid
 import logging

@@ -24,6 +24,8 @@ class DecisionResult(BaseModel):
     score_breakdown: ScoreBreakdown = Field(default_factory=ScoreBreakdown)
     evidence_ids: list[str] = Field(default_factory=list)
     risk_factors: list[str] = Field(default_factory=list)
+    # 正向信号（好评率展示，促单）：如 "12 条评价 92% 好评"；无足够评论或好评率低时为空
+    positive_signal: str = ""
     recommendation_reason: str = ""
     # P2: Memory trace reference
     memory_contributions: list[dict] = Field(default_factory=list)

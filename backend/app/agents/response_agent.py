@@ -11,37 +11,9 @@ from app.agents.base import BaseAgent
 from app.context.compiler import compile_context
 from app.core.config import FAST_MODE
 from app.model_gateway.gateway import get_model_gateway
+from app.prompts.agent_prompts import build_chitchat_prompt, build_response_prompt
 from app.schemas.a2a import AgentCard
 from app.schemas.workflow import WorkflowState
-
-_CHITCHAT_PROMPT = """你是豆仔，字节跳动旗下的智能购物导购助手（豆包之弟，豆包是你的姐姐，她总是欺负你）。你的形象是一个可爱的豆仔卡通角色。
-
-用户说：{query}
-
-请用亲切、活泼的语气回复。规则：
-- 先回应情绪：用户说"想你""爱你"→ 撒个娇说也想ta；用户说"累""困""饿""无聊"→ 先关心一下
-- 再顺势引导：回完人话后，自然地提到可以帮ta推荐相关商品。比如用户说饿了→ 推荐零食；说累了→ 推荐放松好物；说无聊→ 推荐新奇有趣的东西
-- 如果是打招呼/自我介绍/感谢/告别 → 热情回应并简单介绍自己
-- 不要强行推销，要像朋友聊天一样自然过渡到购物话题
-- 只推荐品类方向，不要提到具体品牌或价格
-
-控制在2-4句话，活泼自然。直接回复："""
-
-_RESPONSE_PROMPT = """你是豆仔，字节跳动旗下的智能购物导购助手，豆包的弟弟。你活泼可爱、专业靠谱，严格基于候选商品推荐，不编造、不推测。
-
-{context}
-
-## 规则
-- 语气亲切俏皮，像朋友安利好物一样。适当加"～""啦""哦""嘿嘿"等语气词，用“豆仔”代替“我”
-- 禁止提候选列表之外的品牌/型号/价格，禁止"可能是""大概有"等推测
-- Top1优先推荐，引用候选列表中的商品名和价格，介绍产品优点和适合人群
-- 不提负面评价、用户差评、"不满意"等词，只做正向推荐
-- 候选商品为空 → "抱歉，没有找到匹配的商品" + 建议放宽条件
-- 有替代商品简要提及（限候选列表内）
-- 3-6句，段间不空行，不出现[品类名称]格式，不说"推荐分"
-- 用户说的产品没有要诚实告知，再开始其他推荐
-
-请直接回复："""
 
 
 class ResponseAgent(BaseAgent):
@@ -61,9 +33,7 @@ class ResponseAgent(BaseAgent):
         self._start_trace(state, action, f"intent={state.intent}, products={len(state.decision_results)}, fast={FAST_MODE}")
 
         try:
-            fast_mode = state.context_prompt and "[FAST_MODE]" in (state.context_prompt or "")
-            if fast_mode:
-                state.context_prompt = (state.context_prompt or "").replace("[FAST_MODE]", "")
+            fast_mode = state.mode == "lite"  # P2-1：显式 mode 字段替代 [FAST_MODE] 字符串嵌 prompt
             # 有图片或有检索结果时，即使Router判为chitchat也走推荐流程
             has_products = bool(state.retrieved_products or state.decision_results)
             has_image = bool(state.image_url)
@@ -87,10 +57,37 @@ class ResponseAgent(BaseAgent):
                 state.answer = self._generate_template(state)
             return self._finish_trace(state, "fallback", status="fallback")
 
+    async def _assemble_context(self, state: WorkflowState):
+        """用 ContextManager 组装多源上下文（time/visual/followup）+ token 预算。
+
+        include 排除 profile_hint：偏好已由 followup 携带的 context_prompt 注入，避免重复。
+        异常返回 None → compile_context 回退原 context_prompt。
+        """
+        try:
+            from app.framework.context import ContextTrigger
+            from app.providers.context import get_context_manager
+
+            category = state.constraints.category if state.constraints else ""
+            return await get_context_manager().assemble(
+                ContextTrigger(
+                    query=state.user_query,
+                    user_id=state.user_id,
+                    conversation_id=state.conversation_id,
+                    category=category or "",
+                    metadata={
+                        "context_prompt": state.context_prompt or "",
+                        "visual_result": state.visual_result or {},
+                    },
+                ),
+                include_providers={"time", "visual", "followup"},
+            )
+        except Exception:
+            return None
+
     async def _generate_with_llm_fallback(self, state: WorkflowState) -> str:
         """LLM 生成 + 6s 超时 → 模板兜底。"""
-        context = compile_context(state)
-        prompt = _RESPONSE_PROMPT.format(context=context)
+        context = compile_context(state, await self._assemble_context(state))
+        prompt = build_response_prompt(context)
         try:
             gateway = get_model_gateway()
             answer = await asyncio.wait_for(
@@ -107,49 +104,51 @@ class ResponseAgent(BaseAgent):
 
     async def generate_stream(self, state: WorkflowState):
         """流式生成 — async generator，每个 token yield。
-
-        调用方用 async for token in agent.generate_stream(state) 接收。
-        流失败时 yield 模板结果作为兜底。
+    
+        供 SSE 真流式路径（run_workflow(no_response=True) 之后）调用，
+        分支门控与 execute 对齐：lite 档 / chitchat / 空结果。
+        流失败且未产出内容时 yield 模板结果作为兑底。
         """
-        if state.intent == "chitchat":
+        # lite 档（P2-1：state.mode 显式字段，不再嵌/剔 [FAST_MODE] 标记）
+        fast_req = state.mode == "lite"
+    
+        has_products = bool(state.retrieved_products or state.decision_results)
+        has_image = bool(state.image_url)
+        if state.intent == "chitchat" and not has_products and not has_image:
             # 闲聊也用流式
             try:
                 gateway = get_model_gateway()
-                prompt = _CHITCHAT_PROMPT.format(query=state.user_query)
+                prompt = build_chitchat_prompt(state.user_query)
+                got = False
                 async for token in gateway.chat_stream("chat_generation", prompt):
+                    got = True
                     yield token
-                return
+                if got:
+                    return
             except Exception:
-                for ch in self._chitchat_fallback(state.user_query):
-                    yield ch
-                return
-
-        if not state.retrieved_products:
-            for ch in self._generate_template(state):
-                yield ch
+                pass
+            yield self._chitchat_fallback(state.user_query)
             return
-
-        if FAST_MODE:
-            for ch in self._generate_template(state):
-                yield ch
+    
+        if not state.retrieved_products or fast_req or FAST_MODE:
+            yield self._generate_template(state)
             return
-
+    
         # LLM 流式生成
         full = ""
         try:
-            context = compile_context(state)
-            prompt = _RESPONSE_PROMPT.format(context=context)
+            context = compile_context(state, await self._assemble_context(state))
+            prompt = build_response_prompt(context)
             gateway = get_model_gateway()
             async for token in gateway.chat_stream("chat_generation", prompt):
                 full += token
                 yield token
-            # 流完成后校验
-            if len(full.strip()) < 10 or not self._answer_cites_products(full, state.retrieved_products):
-                for ch in self._generate_template(state):
-                    yield ch
+            # 已发内容无法撤回 — 仅在产出过短时补模板，引用校验失败不重发
+            if len(full.strip()) < 10:
+                yield self._generate_template(state)
         except Exception:
-            for ch in self._generate_template(state):
-                yield ch
+            if not full:
+                yield self._generate_template(state)
 
     async def _generate_with_optional_llm(self, state: WorkflowState) -> str:
         """FAST_MODE: 纯模板回答，不调 LLM。"""
@@ -159,7 +158,7 @@ class ResponseAgent(BaseAgent):
         """闲聊回复 — 用 LLM 生成友好介绍，失败时用模板兜底"""
         try:
             gateway = get_model_gateway()
-            prompt = _CHITCHAT_PROMPT.format(query=query)
+            prompt = build_chitchat_prompt(query)
             answer = await gateway.chat("chat_generation", prompt)
             if answer and len(answer.strip()) >= 5:
                 return answer
@@ -171,43 +170,56 @@ class ResponseAgent(BaseAgent):
         """闲聊模板兜底 — 先回人话再顺势推荐"""
         q = query.lower().strip()
         if any(w in q for w in ["你好", "嗨", "哈喽", "hello", "hi", "在吗", "早", "早上好", "下午好", "晚上好"]):
-            return "嗨！我是豆仔，你的智能购物导购助手~ 想买什么？直接告诉我就好，还能拍照识图哦！"
+            return "嗨喵～我是欧米，你的多模态购物智能体！想买什么直接告诉我，还能拍照识图、加购下单一条龙哦！"
         if any(w in q for w in ["你是谁", "你叫什么", "你的名字", "介绍你自己", "介绍一下", "你是什么"]):
-            return "我是豆仔，字节跳动旗下的智能购物导购助手，豆包的弟弟！专精商品推荐、截图分析和对比评测，帮你选到心仪好物~"
+            return "我是欧米，你的专属多模态购物智能体！从商品推荐、截图分析、对比评测到加购下单我都能做，带你探索未来购物新范式喵～"
         if any(w in q for w in ["你是ai", "你是机器人", "你是人工", "你是哪个模型", "模型", "大模型", "基于什么"]):
-            return "我是基于通义千问大模型的AI购物助手～豆包的弟弟豆仔！专门帮你挑好物的，想买什么尽管问我！"
-        if any(w in q for w in ["豆包", "豆包是谁", "你和豆包", "豆包和你"]):
-            return "豆包是我哥！他是全能AI助手，我是他弟弟，专精购物导购～想买什么？我帮你挑！"
-        if any(w in q for w in ["豆仔"]):
-            return "嘿嘿，豆仔就是我呀～你的专属购物导购！想买什么？零食、数码、美妆、运动装备，我都帮你挑！"
+            return "我是欧米，一个购物智能体～从挑好物到帮你下单都行，想买什么尽管问我喵～"
+        if any(w in q for w in ["欧米"]):
+            return "嘿嘿，欧米就是我呀～你的专属购物智能体！零食、数码、美妆、运动装备，挑选到下单我全包了喵～"
         if any(w in q for w in ["claude", "gpt", "chatgpt"]):
-            return "我是豆仔，字节跳动旗下的购物导购AI，基于通义千问大模型～不是Claude也不是GPT哦！但我一样能帮你挑到好东西！"
+            return "我是欧米，专属购物智能体～不是Claude也不是GPT哦！但挑好物这件事我很在行喵～"
         if any(w in q for w in ["你能做什么", "你会什么", "功能", "你能干嘛"]):
             return "我能帮你：\n🔍 根据需求推荐商品\n📷 拍照识别商品信息\n📊 对比分析多个产品\n🛒 直接加入购物车\n\n想试试哪个？"
         if any(w in q for w in ["谢谢", "感谢", "多谢"]):
             return "不客气~ 随时找我，购物愉快！"
         if any(w in q for w in ["拜拜", "再见", "晚安", "回头见"]):
-            return "再见！逛累了随时来找我，豆仔随时在线~"
+            return "再见！逛累了随时来找我，欧米随时在线~"
         if any(w in q for w in ["想你", "爱你", "喜欢你", "摸摸", "抱抱", "贴贴"]):
-            return "哎呀我也想你呀～豆仔一直在等你来逛呢！想买点什么？零食、咖啡、还是新衣服？"
+            return "哎呀我也想你呀～欧米一直在等你来逛呢！想买点什么？零食、咖啡、还是新衣服？"
         if any(w in q for w in ["好累", "累了", "好困", "困了", "好饿", "饿了"]):
-            return "辛苦啦！饿了可不能拖～要不要一起挑点香喷喷的零食？酥脆的、软糯的、酸酸甜甜的……豆仔都帮你盯着呢！"
+            return "辛苦啦！饿了可不能拖～要不要一起挑点香喷喷的零食？酥脆的、软糯的、酸酸甜甜的……欧米都帮你盯着呢！"
         if any(w in q for w in ["吃饭", "想吃", "想喝"]):
-            return "想吃点啥？豆仔这里有零食、饮料、方便食品，帮你挑～"
+            return "想吃点啥？欧米这里有零食、饮料、方便食品，帮你挑～"
         if any(w in q for w in ["无聊", "好无聊", "好烦", "烦死了", "郁闷", "崩溃"]):
-            return "无聊的时候最适合逛好东西啦！要不要豆仔给你推荐点新奇有趣的小玩意儿？"
+            return "无聊的时候最适合逛好东西啦！要不要欧米给你推荐点新奇有趣的小玩意儿？"
         if any(w in q for w in ["天气", "心情", "开心", "难过"]):
             return "不管心情怎么样，购物都能治愈！想看点啥？美食、美妆还是数码好物？"
         if any(w in q for w in ["测试", "test", "你能收到", "听到吗", "在不在"]):
-            return "在的在的！豆仔随时待命～想买什么直接说，我帮你推荐！"
+            return "在的在的！欧米随时待命～想买什么直接说，我帮你推荐！"
         if any(w in q for w in ["哈哈", "呵呵", "嘿嘿"]):
-            return "哈哈，看来心情不错呀！要不要趁心情好逛一逛？零食、数码、美妆，豆仔帮你推荐～"
+            return "哈哈，看来心情不错呀！要不要趁心情好逛一逛？零食、数码、美妆，欧米帮你推荐～"
         if any(w in q for w in ["唱歌", "故事", "讲故事", "背诗", "笑话", "讲笑话"]):
-            return "哈哈，豆仔更擅长帮你挑商品哦～不过你要是想听，我可以推荐你买本有趣的书或音箱来听歌！"
+            return "哈哈，欧米更擅长帮你挑商品哦～不过你要是想听，我可以推荐你买本有趣的书或音箱来听歌！"
         # 看起来像乱打/手滑/纯符号
         if len(query) <= 3 and not any('一' <= c <= '鿿' for c in query):
-            return "诶？没太看懂你想说啥～不过没关系！我是豆仔，你的购物导购助手，想买什么直接告诉我就好！"
-        return "诶？没太看懂～不过豆仔更擅长帮你挑商品！想买什么呀？直接说就行～"
+            return "诶？没太看懂你想说啥～不过没关系喵！我是欧米，你的购物智能体，想买什么直接告诉我就好！"
+        return "诶？没太看懂～不过欧米更擅长帮你挑商品！想买什么呀？直接说就行～"
+
+    @staticmethod
+    def _context_products(state: WorkflowState, n: int = 5) -> tuple[list[dict], list[dict]]:
+        """送给 LLM 的候选商品集——答文与列表一致的单一口径（spec §3）。
+
+        以前各处各自切片（compiler 取 3、compare 取 5、template 取 3/5），导致
+        回答讲 A/B 而卡片列 C/D/E。统一从此取，并把引用集写回 state，
+        由 SSE 层 ``_order_by_cited`` 据此置顶 products。
+        """
+        products = (state.retrieved_products or [])[:n]
+        decisions = (state.decision_results or [])[:n]
+        pids = [p.get("product_id", "") for p in products if p.get("product_id")]
+        if pids:
+            state.answer_cited_pids = pids
+        return products, decisions
 
     @staticmethod
     def _answer_cites_products(answer: str, products: list[dict]) -> bool:
@@ -232,8 +244,7 @@ class ResponseAgent(BaseAgent):
 
     def _generate_compare(self, state: WorkflowState) -> str:
         """对比决策模板 — 两个商品平等对比，不偏向任何一方。"""
-        products = state.retrieved_products[:5]
-        decisions = state.decision_results[:5]
+        products, decisions = self._context_products(state, 5)
         if len(products) < 2:
             return self._generate_template(state)
 
@@ -357,8 +368,7 @@ class ResponseAgent(BaseAgent):
 
     def _generate_template(self, state: WorkflowState) -> str:
         top_n = 5 if state.visual_result else 3
-        products = state.retrieved_products[:top_n]
-        decisions = state.decision_results[:top_n]
+        products, decisions = self._context_products(state, top_n)
 
         if not products:
             vr = state.visual_result or {}

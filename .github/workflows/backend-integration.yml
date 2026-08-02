@@ -1,0 +1,47 @@
+name: backend-integration
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "tests/**"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".github/workflows/backend-integration.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "tests/**"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".github/workflows/backend-integration.yml"
+
+jobs:
+  integration:
+    name: Integration (MOCK gateway + 三级降级)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # 集成层验证 /api/recommend(/stream) 端到端（文字/图片/追问）。
+    # 不配置 DB/Qdrant/Redis → 走 PG/Qdrant/Redis 三级降级路径（JSON 仓库 / 本地余弦 / 无缓存）。
+    env:
+      OMNICART_MOCK_MODE: "true"
+      DATABASE_URL: ""
+      QDRANT_URL: ""
+      REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      # 端到端集成：recommend / SSE / upload / workflow（MOCK 网关，无外部服务）
+      - name: Run integration tests
+        run: pytest tests/integration -v -m "not smoke"

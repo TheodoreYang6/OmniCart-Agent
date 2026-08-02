@@ -12,14 +12,10 @@ _CATEGORY_DIRS = {
     "2_数码电子": "数码电子",
     "3_服饰运动": "服饰运动",
     "4_食品生活": "食品饮料",
-}
-
-# 中文路径 → 英文目录名（图片 URL 修正）
-_CN_TO_EN_DIR = {
-    "1_美妆护肤": "1_Beauty_and_Skincare",
-    "2_数码电子": "2_Digital_Electronics",
-    "3_服饰运动": "3_Clothing_and_Sports",
-    "4_食品生活": "4_Food_and_Life",
+    "5_家居用品": "家居用品",
+    "6_母婴用品": "母婴用品",
+    "7_运动户外": "运动户外",
+    "8_个护清洁": "个护清洁",
 }
 
 _DATASET_DIR = Path(__file__).parent.parent.parent.parent / "ecommerce_agent_dataset"
@@ -74,17 +70,3 @@ class BaseProductRepository(ABC):
         if not product or not product.image_path:
             return ""
         return f"/api/products/{product_id}/image"
-
-    def _resolve_image_url_legacy(self, product_id: str, base_url: str = "/images") -> str:
-        """旧版图片 URL 转换(已废弃)。"""
-        product = self.get_by_id(product_id)
-        if not product or not product.image_path:
-            return ""
-
-        path = product.image_path
-        for cn, en in _CN_TO_EN_DIR.items():
-            if cn in path:
-                path = path.replace(cn, en)
-                break
-
-        return f"{base_url}/{path}"

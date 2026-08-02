@@ -1,0 +1,79 @@
+{
+  "product_id": "p_digital_149",
+  "title": "微软Xbox Series S游戏主机10GB内存+512GB SSD轻量版主机支持1440p/120Hz游戏畅玩数字版",
+  "brand": "微软",
+  "category": "数码电子",
+  "sub_category": "游戏机",
+  "base_price": 2299.0,
+  "image_path": "2_数码电子/images/p_digital_149.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_149_1",
+      "properties": {
+        "版本": "标准版",
+        "套装": "单机"
+      },
+      "price": 2299.0
+    },
+    {
+      "sku_id": "s_p_digital_149_2",
+      "properties": {
+        "版本": "标准版",
+        "套装": "《极限竞速：地平线5》限定套装"
+      },
+      "price": 2699.0
+    },
+    {
+      "sku_id": "s_p_digital_149_3",
+      "properties": {
+        "版本": "标准版",
+        "套装": "《光环：无限》终极典藏版套装"
+      },
+      "price": 3299.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "微软Xbox Series S是全球首款全数字版次世代游戏主机，主打轻巧便携与高能效比。采用定制AMD Zen 2 CPU+RDNA 2 GPU架构，支持硬件级光线追踪、DirectStorage快速加载及Auto HDR技术；内置512GB NVMe SSD（实际可用约360GB），实测游戏加载速度较Xbox One X提升近2倍；整机功耗仅约100W，体积仅为Xbox Series X的40%。适合租房族、学生党及追求1440p高刷体验的数字玩家；开机即连Xbox Game Pass会员库，建议搭配高速Wi-Fi 6路由器使用。注意需自行准备HDMI 2.0以上线缆，不支持实体光盘播放。",
+    "official_faq": [
+      {
+        "question": "Xbox Series S的SSD实际可用空间只有360GB左右，如何扩展存储？",
+        "answer": "Xbox Series S内置512GB PCIe Gen4 NVMe SSD，但系统占用约160GB，实际可用约360GB。扩展必须使用官方认证的Seagate Storage Expansion Card（如1TB或2TB型号），插拔即用且支持Xbox Velocity Architecture直读，读写速度达PCIe Gen4标准；普通USB移动硬盘仅可存档/媒体文件，无法运行游戏。购买时请认准‘Designed for Xbox’标识，非认证设备会导致识别失败或性能异常。"
+      },
+      {
+        "question": "Xbox Series S是否支持4K游戏？它和Series X在画质上的核心差异是什么？",
+        "answer": "Xbox Series S原生输出最高为1440p（2560×1440），通过动态分辨率缩放与AI增强（FSR）可输出接近4K的UI界面，但所有游戏均不支持原生4K渲染。其GPU算力为4TFLOPS，约为Series X（12TFLOPS）的1/3，导致《赛博朋克2077》等重载游戏在S版中默认以1440p/60fps运行，开启光追后会降至1080p/30fps。若需原生4K/60fps+光追体验，应选择Series X。"
+      },
+      {
+        "question": "《光环：无限》终极典藏版套装包含哪些实体内容？是否需要额外付费才能游玩多人模式？",
+        "answer": "该套装含Xbox Series S主机、定制光环主题手柄、数字版《光环：无限》战役+多人模式完整内容、独家士官长盔甲皮肤、3个月Xbox Game Pass Ultimate会员（含EA Play）、实体艺术卡册及金属徽章。多人模式（包括竞技场、火力小组）完全免费开放，无需订阅即可游玩；但Game Pass Ultimate会员到期后，需续费才能访问库内其他游戏及云存档同步功能。战役模式永久拥有，不受会员状态影响。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "李小米",
+        "rating": 5,
+        "content": "2299元入手标准版单机，已用5个月。每天玩《极限竞速：地平线5》2小时，1440p/120Hz丝滑无掉帧，SSD加载快到几乎秒进赛道。散热安静，租房合租没被室友吐槽过噪音。手柄蓝牙配对一次就记住，比Switch续航强太多——充一次电能打18小时。唯一遗憾是不能装蓝光盘，不过现在基本都买数字版了。"
+      },
+      {
+        "nickname": "王梓涵",
+        "rating": 4,
+        "content": "2699元买了《地平线5》套装，开箱即玩。游戏预装好，手柄有专属涂装。实测《空洞骑士：丝之歌》加载比旧Xbox One快3倍，但玩《艾尔登法环》时偶尔卡顿——后来发现是Wi-Fi信号弱，换千兆网线后彻底解决。建议新手务必配网线，无线延迟明显。音效震撼，小机身居然有立体声分离感。"
+      },
+      {
+        "nickname": "张雅静",
+        "rating": 2,
+        "content": "3299元冲了《光环：无限》终极版，结果失望。实体徽章歪斜、艺术卡册印刷模糊，客服说‘非质量问题不退换’。更糟的是，多人模式匹配超慢，常卡在‘寻找对手’界面2分钟以上，朋友用Series X就秒进。查了论坛才知道S版网络堆栈优化不如X版，尤其高峰时段延迟高。白花一千块买溢价包装。"
+      },
+      {
+        "nickname": "陈哲远",
+        "rating": 5,
+        "content": "学生党预算有限，2299元咬牙下单。用学校宿舍Wi-Fi连上，下载《我的世界》基岩版只用了18分钟（室友用PS5要25分钟）。手柄震动反馈精准，玩《茶杯头》弹幕战特别带感。360GB空间够装8个大作，定期清理缓存就行。比笔记本外接显卡还稳，再也不用担心游戏崩溃蓝屏了。"
+      },
+      {
+        "nickname": "赵琳娜",
+        "rating": 3,
+        "content": "2699元入的地平线套装，画质确实比PS4 Pro强，但1440p在27寸4K显示器上边缘略糊，调了Sharpness也没改善。最烦的是没法外接USB-C硬盘当游戏盘——必须买Seagate那款1299元的扩展卡，等于多花一半钱。如果早知道这点，宁愿加钱上Series X。目前凑合用，但不会推荐给追求画质的玩家。"
+      }
+    ]
+  }
+}

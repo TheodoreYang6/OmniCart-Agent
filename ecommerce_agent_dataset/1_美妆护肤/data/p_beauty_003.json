@@ -4,8 +4,8 @@
   "brand": "SK-II",
   "category": "美妆护肤",
   "sub_category": "化妆水",
-  "base_price": 1690.0,
-  "image_path": "1_美妆护肤/images/p_beauty_003_live.jpg",
+  "base_price": 1240.0,
+  "image_path": "1_美妆护肤/images/p_beauty_003.jpg",
   "skus": [
     {
       "sku_id": "s_p_beauty_003_1",
@@ -26,7 +26,7 @@
       "properties": {
         "容量": "75ml 旅行装"
       },
-      "price": 620.0
+      "price": 1826.2
     }
   ],
   "rag_knowledge": {

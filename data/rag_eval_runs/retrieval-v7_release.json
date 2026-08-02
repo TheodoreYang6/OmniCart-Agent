@@ -1,0 +1,31 @@
+{
+  "tag": "v7_release",
+  "collection": "product_chunks_v6_1024",
+  "cases": 128,
+  "elapsed_s": 6.2,
+  "faq": {
+    "n": 64,
+    "hit@1": 0.969,
+    "hit@5": 0.984,
+    "mrr@10": 0.974
+  },
+  "title": {
+    "n": 64,
+    "hit@1": 0.734,
+    "hit@5": 0.953,
+    "mrr@10": 0.845
+  },
+  "misses_sample": [
+    {
+      "type": "faq",
+      "query": "不同承重规格的挂钩，胶体配方和粘性强度是否相同？",
+      "expect": "p_home_085",
+      "got": [
+        "p_home_040",
+        "p_home_006",
+        "p_home_002"
+      ]
+    }
+  ],
+  "miss_count": 1
+}

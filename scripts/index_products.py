@@ -1,5 +1,12 @@
 #!/usr/bin/env python
-"""产品级富文本 Embedding 索引 — 将所有产品写入 Qdrant + 本地缓存。
+"""DEPRECATED (V6) — 产品级单向量索引已退役，请使用 scripts/index_product_chunks.py。
+
+退役原因：
+- 主链检索已全部走块级单集合（summary 块 V6 已含规格信息，语义覆盖产品级索引）；
+- 本脚本存在已知错位 Bug：batch 失败时 continue 会导致 all_embeddings 与
+  embedding_texts 错位，后续 zip 把向量配错商品（仅作反面教材保留，勿运行）。
+
+原说明：产品级富文本 Embedding 索引 — 将所有产品写入 Qdrant + 本地缓存。
 
 与旧 seed_qdrant.py 的区别:
 - embedding 文本包含完整 FAQ + 评价摘要 + 关键卖点

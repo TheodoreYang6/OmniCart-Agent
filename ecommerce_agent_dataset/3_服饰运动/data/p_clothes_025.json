@@ -5,7 +5,7 @@
   "category": "服饰运动",
   "sub_category": "背包",
   "base_price": 699.0,
-  "image_path": "3_服饰运动/images/p_clothes_025_live.jpg",
+  "image_path": "3_服饰运动/images/p_clothes_025.jpg",
   "skus": [
     {
       "sku_id": "s_p_clothes_025_1",
@@ -23,7 +23,7 @@
         "版本": "通用款",
         "颜色": "都市蓝"
       },
-      "price": 699.0
+      "price": 824.82
     },
     {
       "sku_id": "s_p_clothes_025_3",
@@ -32,7 +32,7 @@
         "版本": "通用款",
         "颜色": "星尘灰"
       },
-      "price": 699.0
+      "price": 950.64
     },
     {
       "sku_id": "s_p_clothes_025_4",
@@ -41,7 +41,7 @@
         "版本": "通用款",
         "颜色": "户外绿"
       },
-      "price": 699.0
+      "price": 1076.46
     }
   ],
   "rag_knowledge": {

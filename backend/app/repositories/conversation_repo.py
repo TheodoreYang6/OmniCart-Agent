@@ -83,6 +83,22 @@ class ConversationRepository:
         finally:
             await gen.aclose()
 
+    async def aget_latest_by_session(self, user_id: str, session_id: str) -> Optional[ConversationModel]:
+        """按 session_id 取最近活跃会话（P0-1 会话连续性：不回传 cid 的客户端同 session 复用）。"""
+        if not session_id:
+            return None
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            stmt = select(ConversationModel).where(ConversationModel.session_id == session_id)
+            if user_id:
+                stmt = stmt.where(ConversationModel.user_id == user_id)
+            stmt = stmt.order_by(desc(ConversationModel.updated_at)).limit(1)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+        finally:
+            await gen.aclose()
+
     async def aupdate(self, conversation_id: str, **kwargs) -> Optional[ConversationModel]:
         gen = self._aget_session()
         session = await anext(gen)
@@ -164,6 +180,9 @@ class ConversationRepository:
 
     def list_by_user(self, user_id: str, limit: int = 20) -> list[ConversationModel]:
         return run_async(self.alist_by_user(user_id, limit))
+
+    def get_latest_by_session(self, user_id: str, session_id: str) -> Optional[ConversationModel]:
+        return run_async(self.aget_latest_by_session(user_id, session_id))
 
     def append_message(self, conversation_id: str, user_id: str, session_id: str,
                        role: str, content: str, **kwargs) -> ConversationMessageModel:

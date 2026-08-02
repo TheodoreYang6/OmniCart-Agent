@@ -4,8 +4,8 @@
   "brand": "李锦记",
   "category": "食品饮料",
   "sub_category": "调味品",
-  "base_price": 29.0,
-  "image_path": "4_食品生活/images/p_food_018_live.jpg",
+  "base_price": 15.0,
+  "image_path": "4_食品生活/images/p_food_018.jpg",
   "skus": [
     {
       "sku_id": "s_p_food_018_1",
@@ -21,7 +21,7 @@
         "容量": "500ml",
         "包装类型": "塑料瓶装"
       },
-      "price": 9.0
+      "price": 17.2
     },
     {
       "sku_id": "s_p_food_018_3",
@@ -37,7 +37,7 @@
         "容量": "1.65L",
         "包装类型": "家庭塑料装"
       },
-      "price": 29.0
+      "price": 35.56
     }
   ],
   "rag_knowledge": {

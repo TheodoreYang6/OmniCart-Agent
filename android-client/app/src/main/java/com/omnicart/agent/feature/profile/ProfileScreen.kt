@@ -130,7 +130,7 @@ fun ProfileScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        ProfileItem(Icons.Filled.Info, "关于豆仔", "参赛版 · 基于 RAG 的多模态电商智能导购 Agent")
+        ProfileItem(Icons.Filled.Info, "关于小O", "参赛版 · 基于 RAG 的多模态电商智能导购 Agent")
     }
 }
 

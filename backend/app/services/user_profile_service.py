@@ -24,13 +24,17 @@ _SUB_TO_CATEGORY = {
     "手机": "数码电子", "电脑": "数码电子", "耳机": "数码电子",
     "充电宝": "数码电子", "平板": "数码电子", "手表": "数码电子",
     "相机": "数码电子", "音箱": "数码电子", "键盘": "数码电子", "鼠标": "数码电子",
-    "护肤品": "美妆护肤", "彩妆": "美妆护肤", "洗发水": "美妆护肤",
-    "沐浴露": "美妆护肤", "面膜": "美妆护肤", "防晒": "美妆护肤",
+    "护肤品": "美妆护肤", "彩妆": "美妆护肤", "面膜": "美妆护肤", "防晒": "美妆护肤",
     "精华": "美妆护肤", "面霜": "美妆护肤", "粉底": "美妆护肤",
-    "灯具": "家居生活", "收纳": "家居生活", "清洁": "家居生活",
+    "洗发水": "个护清洁", "沐浴露": "个护清洁", "牙膏": "个护清洁",
+    "洗衣液": "个护清洁", "吹风机": "个护清洁", "剃须刀": "个护清洁",
+    "灯具": "家居用品", "收纳": "家居用品", "锅具": "家居用品", "保温杯": "家居用品",
+    "床品": "家居用品", "餐具": "家居用品",
     "上衣": "服饰运动", "裤子": "服饰运动", "鞋": "服饰运动",
     "零食": "食品饮料", "饮料": "食品饮料", "茶叶": "食品饮料",
     "跑步": "运动户外", "露营": "运动户外", "骑行": "运动户外", "健身": "运动户外",
+    "帐篷": "运动户外", "瑜伽垫": "运动户外",
+    "纸尿裤": "母婴用品", "奶瓶": "母婴用品", "婴儿推车": "母婴用品", "辅食": "母婴用品",
 }
 
 # 品类关键词 → category 快速检测（用于 inject 时从 query 推断品类）
@@ -38,13 +42,19 @@ _CATEGORY_KEYWORDS = {
     "数码电子": ["手机", "电脑", "笔记本", "耳机", "充电宝", "平板", "手表", "相机", "音箱",
                 "键盘", "鼠标", "显示器", "数据线", "充电器", "ipad", "iphone", "macbook"],
     "美妆护肤": ["护肤", "化妆", "洗面奶", "面膜", "防晒", "精华", "粉底", "口红", "香水",
-                "卸妆", "沐浴露", "洗发", "护发", "爽肤水", "面霜", "眼影", "遮瑕"],
-    "家居生活": ["灯具", "收纳", "清洁", "床上", "厨房", "抱枕", "地毯", "窗帘", "拖把"],
+                "卸妆", "爽肤水", "面霜", "眼影", "遮瑕"],
+    "个护清洁": ["洗发", "护发", "沐浴露", "身体乳", "牙膏", "牙刷", "漱口水", "卫生巾",
+                "洗衣液", "洗洁精", "消毒液", "剃须", "脱毛", "吹风机", "卷发棒", "直发器"],
+    "家居用品": ["灯具", "收纳", "床上", "厨房", "抱枕", "地毯", "窗帘", "四件套", "枕头",
+                "被子", "毛巾", "锅", "餐具", "保温杯", "砧板", "香薰", "花瓶", "台灯"],
     "服饰运动": ["上衣", "裤子", "裙子", "鞋", "包", "配饰", "帽子", "围巾", "袜子", "T恤",
-                "衣服", "运动", "健身", "跑步", "瑜伽", "羽绒服", "冲锋衣", "卫衣", "短裤", "长裤", "衬衫"],
+                "衣服", "运动", "羽绒服", "卫衣", "短裤", "长裤", "衬衫"],
     "食品饮料": ["零食", "饮料", "茶叶", "咖啡", "牛奶", "坚果", "饼干", "巧克力",
                 "吃的", "食物", "面包", "蛋糕", "方便面", "泡面", "辣条", "薯片", "可乐", "矿泉水"],
-    "运动户外": ["跑步", "健身", "瑜伽", "露营", "骑行", "游泳", "登山", "跳绳", "哑铃"],
+    "运动户外": ["跑步", "健身", "瑜伽", "露营", "骑行", "游泳", "登山", "跳绳", "哑铃",
+                "帐篷", "睡袋", "登山杖", "瑜伽垫", "球拍", "篮球", "足球", "滑板", "轮滑"],
+    "母婴用品": ["婴儿", "宝宝", "母婴", "孕妇", "纸尿裤", "尿不湿", "奶瓶", "奶嘴", "辅食",
+                "安全座椅", "吸奶器", "绘本", "积木", "儿童"],
 }
 
 
@@ -115,7 +125,17 @@ class UserProfileService:
                 # 没检测到品类 → 不注入任何偏好，避免污染无关品类的搜索
                 return result
 
-            entries = await self.list_entries(user_id, category)
+            # 借鉴 amap MemoryBank：偏好条目经多路召回(TagPath+RecencyPath)+RRF 排序后再注入。
+            # include={"preference"} 只跑长期偏好 Provider；返回的条目集合与旧实现一致
+            # （品类内全量），仅排序不同，而下游 hints 构建对品牌/标签做集合去重，故对外契约不变。
+            from app.framework.memory import MemoryRecallRequest
+            from app.providers.memory import get_memory_bank
+
+            items = await get_memory_bank().recall_items(
+                MemoryRecallRequest(user_id=user_id, query=query, category=category, top_n=50),
+                include={"preference"},
+            )
+            entries = [it.extra.get("entry", {}) for it in items if it.extra.get("entry")]
             if not entries:
                 # 该品类无偏好条目 → 不注入，不 fallback 到其他品类
                 return result
@@ -144,7 +164,7 @@ class UserProfileService:
             return None
         parsed = self._normalize_fields(parsed)
         if not parsed.get("category"):
-            return None
+            parsed["category"] = "通用"  # P1-2: 全局性偏好无品类归属，落通用而非拒存
         return parsed
 
     async def parse_and_save(self, user_id: str, raw_text: str,
@@ -159,11 +179,17 @@ class UserProfileService:
 
         parsed = self._normalize_fields(parsed)
         if not parsed.get("category"):
-            return None
+            # P1-2: “预算都在500以内”这类全局偏好无品类 → 落“通用”（全品类召回），不再拒存
+            parsed["category"] = "通用"
 
-        repo = get_user_preference_repo()
-        entry = await repo.asave(user_id, raw_text.strip(), parsed, entry_id)
-        return entry.to_dict()
+        # 显式编辑既有条目 → 直接覆盖；新增 → 走写入整合器做去重/冲突处理（读现有同品类条目→合并）。
+        if entry_id:
+            repo = get_user_preference_repo()
+            entry = await repo.asave(user_id, raw_text.strip(), parsed, entry_id)
+            return entry.to_dict()
+        from app.providers.memory import get_preference_writer
+
+        return await get_preference_writer().merge_and_save(user_id, raw_text.strip(), parsed)
 
     # ---- 对话提取信号检测 ----
 
@@ -341,24 +367,10 @@ class UserProfileService:
     # ---- 内部：Qwen 解析 ----
 
     async def _parse_with_qwen(self, raw_text: str) -> dict | None:
-        system = (
-            "你是一个购物偏好解析器。从用户输入中提取网购偏好，输出 JSON。\n\n"
-            "规则：\n"
-            "1. 只提取明确提到的内容，绝对不推测\n"
-            "2. categories 字段填写大类（数码电子/美妆护肤/家居生活/服饰运动/食品饮料/运动户外）\n"
-            "3. sub_categories 填写小类（手机/电脑/耳机/护肤品/面膜/洗发水...）\n"
-            "4. 肤质/发质放入 skin_type 或 hair_type\n"
-            "5. '不喜欢/讨厌/怕/别给我'后面的内容放入 avoid_tags\n"
-            "6. '喜欢/偏好/想要/必须'后面的特性放入 must_tags\n"
-            "7. 空值用 [] 或 null，只输出 JSON\n\n"
-            "示例：\n"
-            "- '喜欢苹果手机预算500' → {categories:['数码电子'],sub_categories:['手机'],brands:['Apple'],devices:['iPhone'],budget_max:500}\n"
-            "- '我是油皮敏感肌，喜欢资生堂'\n"
-            "  → {skin_type:['油皮','敏感肌'],brands:['资生堂'],categories:['美妆护肤'],sub_categories:['护肤品']}\n"
-            "- '经常出差要便携，不喜欢太重，要支持快充'\n"
-            "  → {scenarios:['出差'],avoid_tags:['太重'],must_tags:['快充']}"
-        )
-        prompt = f"用户输入: {raw_text}\n\nJSON:"
+        from app.prompts.service_prompts import build_profile_parse_user, get_profile_parse_system
+
+        system = get_profile_parse_system()
+        prompt = build_profile_parse_user(raw_text)
 
         try:
             from app.model_gateway.gateway import get_model_gateway

@@ -1,0 +1,280 @@
+{
+  "run_id": "20260729-213955-rag-132d",
+  "timestamp": "2026-07-29T13:40:12.178695+00:00",
+  "config": {
+    "top_k": 10,
+    "enable_rerank": true,
+    "context_products": 5
+  },
+  "total_queries": 2,
+  "avg_recall_at_5": 1.0,
+  "avg_recall_at_10": 1.0,
+  "avg_mrr": 0.4166,
+  "avg_ndcg_at_10": 0.571,
+  "avg_faithfulness": 0.7778,
+  "avg_context_precision": 0.4166,
+  "avg_context_recall": 0.9,
+  "avg_latency_ms": 8300,
+  "details": [
+    {
+      "query_id": "G001",
+      "user_query": "预算200以内，想买一个适合iPhone 15日常用的充电宝",
+      "answer_preview": "推荐**罗马仕20000mAh双向快充移动电源（高兼容版）**。\n\n该商品售价¥199，符合预算。它专为iPhone 15优化，支持PD3.0协议，实测iPhone 15 Pro满电回充仅需38分钟，充电效率高。采用锂聚合物电芯与智能温控芯片，安全性好，且配备LED数显屏可精准显示电量。相比其他同价位型号，其65W双向快充能力更强，兼顾手机与笔记本充电需求，是性价比极高的日常选择。",
+      "retrieved_count": 5,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "mrr": 0.3333,
+      "ndcg_at_10": 0.5,
+      "faithfulness": 0.8889,
+      "faithfulness_detail": {
+        "score": 0.8889,
+        "statements": [
+          {
+            "statement": "推荐的商品是罗马仕20000mAh双向快充移动电源（高兼容版）。",
+            "supported": true,
+            "evidence": "[文档2] 标题: 罗马仕20000mAh双向快充移动电源PD3.0/SCP双协议高兼容Type-C接口大容量充电宝... [文档2] 描述: ...支持PD3.0/SCP/AFC/FCP多协议兼容..."
+          },
+          {
+            "statement": "该商品售价¥199。",
+            "supported": true,
+            "evidence": "[文档2] 价格: ¥199"
+          },
+          {
+            "statement": "它专为iPhone 15优化。",
+            "supported": false,
+            "evidence": "无"
+          },
+          {
+            "statement": "支持PD3.0协议。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...支持PD3.0/SCP/AFC/FCP多协议兼容..."
+          },
+          {
+            "statement": "实测iPhone 15 Pro满电回充仅需38分钟。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...实测iPhone15 Pro满电回充仅需38分钟..."
+          },
+          {
+            "statement": "采用锂聚合物电芯与智能温控芯片。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...采用锂聚合物电芯+双IC智能温控芯片..."
+          },
+          {
+            "statement": "配备LED数显屏可精准显示电量。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...支持边充边放与LED数显电量屏，精准显示剩余电量及实时功率。"
+          },
+          {
+            "statement": "其65W双向快充能力更强。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...最高65W双向快充。"
+          },
+          {
+            "statement": "兼顾手机与笔记本充电需求。",
+            "supported": true,
+            "evidence": "[文档2] FAQ: Q: 65W输出功率能否给MacBook Air（M2版）稳定供电？ A: 可以。该款65W规格SKU实测可为MacBook Air M2（2022）持续供电并同步充电..."
+          }
+        ],
+        "summary": "AI回答中大部分事实声明（如价格、协议、充电速度、硬件配置、功能特性等）均可在检索上下文[文档2]中找到明确支撑，但“专为iPhone 15优化”这一主观或特定营销说法在上下文中无直接证据支持，属于过度推断。",
+        "latency_ms": 3341
+      },
+      "context_precision": 0.3333,
+      "context_precision_detail": {
+        "score": 0.3333,
+        "verdicts": [
+          {
+            "product_id": "p_digital_095",
+            "relevant": 0
+          },
+          {
+            "product_id": "p_digital_129",
+            "relevant": 0
+          },
+          {
+            "product_id": "p_digital_028",
+            "relevant": 1
+          },
+          {
+            "product_id": "p_digital_061",
+            "relevant": 0
+          },
+          {
+            "product_id": "p_digital_060",
+            "relevant": 0
+          }
+        ],
+        "is_llm_judged": false,
+        "latency_ms": 0
+      },
+      "context_recall": 0.8,
+      "context_recall_detail": {
+        "score": 0.8,
+        "checks": [
+          {
+            "info_point": "预算200元以内",
+            "covered": 1,
+            "evidence_fragment": "价格: ¥199"
+          },
+          {
+            "info_point": "兼容iPhone 15",
+            "covered": 1,
+            "evidence_fragment": "实测iPhone15 Pro满电回充仅需38分钟 / 给iPhone15 Pro充3次还有40%余电"
+          },
+          {
+            "info_point": "便携日常通勤使用",
+            "covered": 1,
+            "evidence_fragment": "用了5个月每天通勤+出差带出门 / 每天通勤给iPhone15和AirPods Pro充电"
+          },
+          {
+            "info_point": "PD快充",
+            "covered": 1,
+            "evidence_fragment": "支持PD3.0/PPS/SCP/AFC/QC4+等12种主流快充协议 / PD3.0双协议"
+          },
+          {
+            "info_point": "可带上飞机",
+            "covered": 0,
+            "evidence_fragment": "无"
+          }
+        ],
+        "summary": "检索上下文明确覆盖了预算（¥199）、兼容性（iPhone 15系列）、使用场景（通勤）以及技术规格（PD快充）。然而，关于‘可带上飞机’这一关键航空安全合规信息，上下文中未提及任何关于电池容量是否符合民航局规定（如额定能量不超过100Wh或160Wh的限制说明）的内容，尽管20000mAh通常符合标准，但文本中缺乏直接证据。",
+        "latency_ms": 2424
+      },
+      "latency_ms": 7009
+    },
+    {
+      "query_id": "G002",
+      "user_query": "经常出差需要给MacBook和iPhone同时充电，推荐一个充电宝",
+      "answer_preview": "推荐罗马仕20000mAh双向快充充电宝（¥199）。其支持PD3.0协议，单口可达65W，实测可为MacBook Air提供满速充电，同时兼容iPhone快充。该型号内置智能分流算法，支持三口同时输出且功率不降，完美满足MacBook与iPhone同充需求。相比小米款，它明确标注了对笔记本的满速支持；相比倍思（实为充电器）和Anker（价格较高），它在百元价位提供了更明确的“双设备同充”解决方案",
+      "retrieved_count": 5,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "mrr": 0.5,
+      "ndcg_at_10": 0.6419,
+      "faithfulness": 0.6667,
+      "faithfulness_detail": {
+        "score": 0.6667,
+        "statements": [
+          {
+            "statement": "罗马仕20000mAh双向快充充电宝的价格为¥199。",
+            "supported": true,
+            "evidence": "[文档2] 价格: ¥199"
+          },
+          {
+            "statement": "该型号支持PD3.0协议。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...支持最高65W双向PD3.0协议..."
+          },
+          {
+            "statement": "单口可达65W。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...支持最高65W双向PD3.0协议... [规格] 输出功率:22.5W/30W/65W"
+          },
+          {
+            "statement": "实测可为MacBook Air提供满速充电。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...为MacBook Air（M1）提供单口满速充电。 FAQ: Q: 65W输出功率能否真正为MacBook Air M2满速充电？ A: 可以。该款65W SKU经实测...为MacBook Air M2提供稳定63.2W输入..."
+          },
+          {
+            "statement": "兼容iPhone快充。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...实测为iPhone 15 Pro补电32分钟达50%..."
+          },
+          {
+            "statement": "内置智能分流算法。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...自研PowerLink智能分流算法..."
+          },
+          {
+            "statement": "支持三口同时输出且功率不降。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...可同时激活USB-C1/C2+USB-A三口输出且不降速。 匹配片段: ...更绝的是能同时给MacBook+AirPods+Pixel 8充电，三口全开不掉速。"
+          },
+          {
+            "statement": "完美满足MacBook与iPhone同充需求。",
+            "supported": true,
+            "evidence": "[文档2] 描述: ...尤其满足笔记本+手机+耳机全天候续航需求。"
+          },
+          {
+            "statement": "相比小米款，它明确标注了对笔记本的满速支持。",
+            "supported": false,
+            "evidence": "无"
+          },
+          {
+            "statement": "相比倍思（实为充电器）。",
+            "supported": false,
+            "evidence": "无"
+          },
+          {
+            "statement": "相比Anker（价格较高）。",
+            "supported": false,
+            "evidence": "无"
+          },
+          {
+            "statement": "在百元价位提供了更明确的“双设备同充”解决方案。",
+            "supported": false,
+            "evidence": "无"
+          }
+        ],
+        "summary": "AI回答中关于产品参数、价格及核心功能（如PD3.0、65W、三口不降速、MacBook/iPhone兼容性）的声明均有上下文支撑；但关于竞品对比（小米、倍思、Anker的具体表现及定位）以及“更明确解决方案”的主观评价在上下文中完全缺失，属于无支撑信息。",
+        "latency_ms": 5256
+      },
+      "context_precision": 0.5,
+      "context_precision_detail": {
+        "score": 0.5,
+        "verdicts": [
+          {
+            "product_id": "p_digital_061",
+            "relevant": 0
+          },
+          {
+            "product_id": "p_digital_028",
+            "relevant": 1
+          },
+          {
+            "product_id": "p_digital_095",
+            "relevant": 0
+          },
+          {
+            "product_id": "p_digital_029",
+            "relevant": 1
+          },
+          {
+            "product_id": "p_digital_052",
+            "relevant": 0
+          }
+        ],
+        "is_llm_judged": false,
+        "latency_ms": 0
+      },
+      "context_recall": 1.0,
+      "context_recall_detail": {
+        "score": 1.0,
+        "checks": [
+          {
+            "info_point": "支持多设备同时充电",
+            "covered": 1,
+            "evidence_fragment": "文档1: 'USB-C+USB-A双口协同输出时总功率达33W...尤其满足笔记本+手机同充需求'; 文档2: '自研PowerLink智能分流算法可同时激活USB-C1/C2+USB-A三口输出且不降速' / '能同时给MacBook+AirPods+Pixel 8充电，三口全开不掉速'"
+          },
+          {
+            "info_point": "适合MacBook和iPhone",
+            "covered": 1,
+            "evidence_fragment": "文档1: '实测满电可为iPhone 15 Pro充约5.2次...配原装65W线给MacBook Air M2充电'; 文档2: '为iPhone 15 Pro补电...为MacBook Air（M1）提供单口满速充电' / '专为MacBook Air M2配的'"
+          },
+          {
+            "info_point": "大容量",
+            "covered": 1,
+            "evidence_fragment": "文档1: '小米移动电源3 20000mAh 大容量快充充电宝'; 文档2: '罗马仕20000mAh...大容量便携充电宝'; 文档3: '品牌旗舰级大容量快充产品'"
+          },
+          {
+            "info_point": "出差场景",
+            "covered": 1,
+            "evidence_fragment": "文档1: '适合差旅通勤...出差塞进背包毫无压力'; 文档2: '适合商务差旅...旅行两周没找过插座'; 文档3: '适合商务差旅...用了5个月每天通勤+出差带出门'"
+          }
+        ],
+        "summary": "检索上下文完全覆盖了所有关键信息点。文档中多次明确提及‘20000mAh’、‘大容量’、‘差旅/出差’场景，以及针对‘MacBook’和‘iPhone’的具体充电表现和多设备同时充电的功能描述。",
+        "latency_ms": 2829
+      },
+      "latency_ms": 9592
+    }
+  ]
+}

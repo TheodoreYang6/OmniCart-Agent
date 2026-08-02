@@ -22,8 +22,10 @@ async def list_addresses(user_id: str = DEMO_USER_ID):
 @router.post("/api/addresses")
 async def create_address(req: AddressCreate, user_id: str = DEMO_USER_ID):
     repo = get_address_repo()
-    data = req.model_dump()
-    result = repo.create(_uid(user_id), data)
+    # P1-1: body 里的 user_id 优先（此前被静默丢弃→写到 demo 用户名下）；query 参数向后兼容
+    effective_uid = _uid(req.user_id or user_id)
+    data = req.model_dump(exclude={"user_id"})
+    result = repo.create(effective_uid, data)
     if result is None:
         raise HTTPException(status_code=500, detail="failed to create address")
     return result
@@ -32,8 +34,9 @@ async def create_address(req: AddressCreate, user_id: str = DEMO_USER_ID):
 @router.put("/api/addresses/{address_id}")
 async def update_address(address_id: str, req: AddressUpdate, user_id: str = DEMO_USER_ID):
     repo = get_address_repo()
-    data = {k: v for k, v in req.model_dump().items() if v is not None}
-    result = repo.update(address_id, _uid(user_id), data)
+    effective_uid = _uid(req.user_id or user_id)
+    data = {k: v for k, v in req.model_dump(exclude={"user_id"}).items() if v is not None}
+    result = repo.update(address_id, effective_uid, data)
     if result is None:
         raise HTTPException(status_code=404, detail="address not found")
     return result

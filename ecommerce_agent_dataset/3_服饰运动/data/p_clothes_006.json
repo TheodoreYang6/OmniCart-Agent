@@ -5,7 +5,7 @@
   "category": "服饰运动",
   "sub_category": "运动长裤",
   "base_price": 349.0,
-  "image_path": "3_服饰运动/images/p_clothes_006_live.jpg",
+  "image_path": "3_服饰运动/images/p_clothes_006.jpg",
   "skus": [
     {
       "sku_id": "s_p_clothes_006_1",
@@ -21,7 +21,7 @@
         "尺码": "L码",
         "颜色": "黑色"
       },
-      "price": 349.0
+      "price": 377.92
     },
     {
       "sku_id": "s_p_clothes_006_3",
@@ -29,7 +29,7 @@
         "尺码": "XL码",
         "颜色": "黑色"
       },
-      "price": 359.0
+      "price": 409.15
     },
     {
       "sku_id": "s_p_clothes_006_4",
@@ -37,7 +37,7 @@
         "尺码": "M码",
         "颜色": "黑色"
       },
-      "price": 349.0
+      "price": 442.88
     },
     {
       "sku_id": "s_p_clothes_006_5",
@@ -45,7 +45,7 @@
         "尺码": "L码",
         "颜色": "深灰色"
       },
-      "price": 349.0
+      "price": 479.31
     },
     {
       "sku_id": "s_p_clothes_006_6",
@@ -53,7 +53,7 @@
         "尺码": "XL码",
         "颜色": "深灰色"
       },
-      "price": 359.0
+      "price": 518.65
     }
   ],
   "rag_knowledge": {

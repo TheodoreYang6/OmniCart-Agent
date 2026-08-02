@@ -1,0 +1,65 @@
+[project]
+name = "omnicart-agent"
+version = "2.0.0"
+description = "OmniCart Agent — 基于 RAG 的多模态电商智能导购 Agent（后端）"
+requires-python = ">=3.11"
+
+# ============================================================
+# Ruff — Lint + 格式化（对齐 amap-ai-agent 的 ruff.toml 实践）
+# CI 对 backend/app/framework 与 backend/app/providers 强制门禁；
+# 存量代码以 `ruff check --statistics` 非阻塞报告，渐进收敛。
+# ============================================================
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [
+    "android-client",
+    "ecommerce_agent_dataset",
+    "data",
+    "submission",
+    "alembic/versions",
+    "**/__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "C4"]
+ignore = [
+    "B008",    # FastAPI 依赖注入常用 Depends() 作默认值
+    "SIM105",  # contextlib.suppress 非强制
+    "SIM108",  # 三元表达式非强制
+    "UP041",   # 显式保留 asyncio.TimeoutError（3.9 dev-import 下与内建 TimeoutError 不等价）
+    "UP042",   # 保留 str+Enum（StrEnum 为 3.11+，framework 需 3.9 可导入做单测）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["B", "F401", "F811", "E402"]
+"scripts/**" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ============================================================
+# Pytest — 测试金字塔（tests/{unit,integration,smoke} + backend/tests）
+# pythonpath 注入 backend/，使 `from app.xxx import ...` 在仓库根可运行。
+# ============================================================
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["backend"]
+testpaths = ["backend/tests", "tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: 需要外部依赖或起服务的集成测试",
+    "smoke: 冒烟测试",
+]
+
+[tool.coverage.run]
+source = ["backend/app"]
+omit = ["**/tests/**", "**/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true

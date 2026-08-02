@@ -1,0 +1,32 @@
+{
+  "tag": "v6_rerank",
+  "collection": "product_chunks_v6_1024",
+  "cases": 128,
+  "elapsed_s": 31.7,
+  "faq": {
+    "n": 64,
+    "hit@1": 0.969,
+    "hit@5": 1.0,
+    "mrr@10": 0.978
+  },
+  "title": {
+    "n": 64,
+    "hit@1": 0.703,
+    "hit@5": 1.0,
+    "mrr@10": 0.836
+  },
+  "faq_reranked": {
+    "n": 64,
+    "hit@1": 0.766,
+    "hit@5": 1.0,
+    "mrr@10": 0.854
+  },
+  "title_reranked": {
+    "n": 64,
+    "hit@1": 0.656,
+    "hit@5": 1.0,
+    "mrr@10": 0.801
+  },
+  "misses_sample": [],
+  "miss_count": 0
+}

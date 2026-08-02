@@ -12,31 +12,24 @@ import json
 import logging
 import re
 
+from app.framework.context import Tier, TierSelector
+from app.prompts.service_prompts import build_compression_user, get_compression_system
+
 _log = logging.getLogger(__name__)
 
-# 压缩 prompt — 低温，结构化输出
-_COMPRESSION_SYSTEM = (
-    "你是购物对话摘要器。将对话历史压缩为 ≤120 字的要点摘要。\n\n"
-    "规则：\n"
-    "1. 只保留事实：用户需求、约束、偏好、已推荐商品、风险提示、态度反馈\n"
-    "2. 不编造、不推测、不评价用户的选择\n"
-    "3. 如果用户表达了对推荐的态度（喜欢/不喜欢/太贵/不合适），必须记录\n"
-    "4. 如果有豆仔提出但用户尚未回答的问题，记录为 open_question\n"
-    "5. 输出 JSON 格式，不要其他内容\n\n"
-    '格式: {"summary": "摘要", "open_question": "未回答问题"|null}'
-)
-
-_COMPRESSION_USER = (
-    "历史摘要: {prev_summary}\n"
-    "本轮用户: {last_query}\n"
-    "豆仔回复: {last_answer}\n"
-    "待回答: {pending_question}\n\n"
-    "请更新摘要 JSON:"
-)
+# 摘要块的 token 预算：低于该量的内容走 L0（跳过 LLM、增量拼接省延迟）。
+_SUMMARY_TOKEN_BUDGET = 150
 
 
 class ContextCompressor:
-    """增量对话摘要器 — 每轮调用 qwen-turbo 更新 summary。"""
+    """增量对话摘要器 — 分级压缩（借鉴 amap context_compaction 的 TierSelector）。
+
+    按 token 用量选择档位：L0 内容很短 → 跳过 LLM 直接增量拼接（省延迟）；
+    L1/L2/L3 → 调 qwen-turbo 摘要。
+    """
+
+    def __init__(self) -> None:
+        self._selector = TierSelector(token_budget=_SUMMARY_TOKEN_BUDGET)
 
     async def compress(
         self,
@@ -53,11 +46,16 @@ class ContextCompressor:
         if not last_query:
             return {"summary": prev_summary or "", "open_question": None}
 
+        # 分级：内容很短(L0) → 跳过 LLM，直接增量拼接
+        combined = f"{prev_summary}\n{last_query}\n{(last_answer or '')[:200]}"
+        if self._selector.select(combined) == Tier.L0:
+            return self._fallback(prev_summary, last_query, last_answer, pending_question)
+
         p_summary = prev_summary or "（首轮对话）"
         p_answer = (last_answer or "")[:200]
         p_pending = pending_question or "无"
 
-        prompt = _COMPRESSION_USER.format(
+        prompt = build_compression_user(
             prev_summary=p_summary,
             last_query=last_query[:200],
             last_answer=p_answer,
@@ -70,7 +68,7 @@ class ContextCompressor:
             response = await gateway.chat(
                 capability="context_compression",
                 prompt=prompt,
-                system=_COMPRESSION_SYSTEM,
+                system=get_compression_system(),
             )
             return self._parse(response, prev_summary or "")
         except Exception as e:

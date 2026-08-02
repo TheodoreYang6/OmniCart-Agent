@@ -1,0 +1,79 @@
+{
+  "product_id": "p_digital_034",
+  "title": "三星Odyssey G55C 27英寸曲面电竞显示器 165Hz高刷 1ms响应 HDR10 游戏办公两用",
+  "brand": "三星",
+  "category": "数码电子",
+  "sub_category": "显示器",
+  "base_price": 1999.0,
+  "image_path": "2_数码电子/images/p_digital_034.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_034_1",
+      "properties": {
+        "尺寸": "27英寸",
+        "刷新率": "165Hz"
+      },
+      "price": 1999.0
+    },
+    {
+      "sku_id": "s_p_digital_034_2",
+      "properties": {
+        "尺寸": "32英寸",
+        "刷新率": "165Hz"
+      },
+      "price": 2499.0
+    },
+    {
+      "sku_id": "s_p_digital_034_3",
+      "properties": {
+        "尺寸": "27英寸",
+        "刷新率": "240Hz"
+      },
+      "price": 2899.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "三星Odyssey G55C是品牌专为FPS与MOBA玩家打造的曲面电竞显示器，搭载VA面板与量子点技术，实现125% sRGB广色域与1000:1静态对比度。采用AMD FreeSync Premium与NVIDIA G-Sync Compatible双认证，配合1ms GTG响应时间与165Hz/240Hz可变刷新率，大幅减少画面撕裂与拖影。内置低蓝光模式与无闪烁背光，支持HDR10动态调光。适合25-35岁硬核玩家、直播UP主及多任务办公人群；建议搭配DisplayPort 1.4线材启用满血240Hz，游戏前开启‘游戏模式’并校准暗部细节。首次使用需暖机30分钟以稳定色彩输出，长期闲置建议每月通电一次。",
+    "official_faq": [
+      {
+        "question": "VA面板在暗场细节和可视角度上相比IPS有何实际差异？",
+        "answer": "Odyssey G55C采用三星原厂VA面板，静态对比度达3000:1（实测典型值），暗场层次更丰富，黑色更纯净，尤其在《黑暗之魂》《控制》等暗场景游戏中优势明显；但水平可视角度为178°，垂直视角约160°，较IPS略窄——当坐姿偏移中心超30cm时，可能出现轻微泛白或亮度衰减。建议固定正对屏幕使用，若需多人协作看屏，可微调支架仰角+5°补偿。"
+      },
+      {
+        "question": "标称1ms GTG响应时间，在240Hz模式下是否仍能保持？如何验证？",
+        "answer": "是的，240Hz SKU经DisplayMate测试，在灰阶过渡（G2G）中90%帧均≤1ms（实测0.8ms±0.15ms），但需满足三条件：①使用原装DP 1.4线（非HDMI 2.0）；②显卡驱动开启‘Adaptive Sync’且关闭V-Sync；③OSD菜单中‘响应时间’设为‘极速’档（非‘标准’或‘均衡’）。可用Blur Busters UFO Test网页逐帧检测拖影残留，建议每两周校准一次OSD设置。"
+      },
+      {
+        "question": "HDR10认证是否意味着支持真正的HDR效果？对显卡和内容有何要求？",
+        "answer": "G55C通过VESA DisplayHDR 400认证，峰值亮度达400cd/m²，支持10bit色深（8bit+FRC），但非Full Array Local Dimming，因此无法呈现高端HDR的分区控光效果。需搭配RTX 3060/RX 6700XT及以上显卡，Windows 11系统开启‘Windows HD Color’并选择‘HDR’模式；仅播放Netflix/Steam原生HDR游戏（如《赛博朋克2077》）时生效，普通SDR内容开启HDR会过曝。建议日常办公关闭HDR开关以保色彩准确。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "李小米",
+        "rating": 5,
+        "content": "27英寸165Hz版1999元入手，已用5个月，每天玩《CS2》3小时。开启FreeSync后完全没撕裂，1ms响应让爆头反馈快得惊人；曲面屏包裹感强，侧边不反光。唯一小遗憾是底座不能升降，加了120元买第三方支架就完美了。"
+      },
+      {
+        "nickname": "王梓涵",
+        "rating": 4,
+        "content": "32英寸165Hz版2499元购入，作为设计师兼LOL玩家很值——sRGB 125%让修图更准，165Hz打排位丝滑。用了4个月，接MacBook Pro M3时需手动调分辨率到2560×1440才能满屏，说明书没写这点，查论坛才解决。"
+      },
+      {
+        "nickname": "张雅静",
+        "rating": 2,
+        "content": "27英寸240Hz版2899元下单，结果发现我RTX 4060显卡在240Hz下DP接口偶尔黑屏重启，换线+重装驱动都没用，客服说要换主板BIOS才行。最后降频到165Hz才稳定，等于多花了900元买个心理安慰，退货又怕运费亏。"
+      },
+      {
+        "nickname": "陈哲远",
+        "rating": 5,
+        "content": "1999元拿下27英寸165Hz款，配i5-12400F+RTX 3060，玩《永劫无间》全程稳帧160+。低蓝光模式晚上开1小时也不眼酸，支架旋转功能让我竖屏写代码特别顺。就是包装泡沫有点少，拆箱时右下角有轻微压痕，不影响显示。"
+      },
+      {
+        "nickname": "赵婉婷",
+        "rating": 3,
+        "content": "2499元买的32英寸165Hz，办公剪视频很舒服，但HDR10开启后《权游》夜戏发灰，关掉反而更自然。另外OSD菜单反应慢，调亮度要等2秒才响应，比LG同价位菜单卡顿。色彩准确度确实好，校色仪测ΔE＜2。"
+      }
+    ]
+  }
+}

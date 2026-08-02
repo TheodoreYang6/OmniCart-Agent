@@ -28,7 +28,7 @@ class Product(BaseModel):
     product_id: str
     title: str
     brand: str
-    category: str  # 美妆护肤 / 数码电子 / 服饰运动 / 食品饮料
+    category: str  # 美妆护肤 / 数码电子 / 服饰运动 / 食品饮料 / 家居用品 / 母婴用品 / 运动户外 / 个护清洁
     sub_category: str = ""
     base_price: float
     image_path: str = ""  # 数据集内相对路径

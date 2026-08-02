@@ -59,7 +59,7 @@ fun LoginScreen(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            if (uiState.isRegisterMode) "注册豆仔智能导购账号" else "登录您的豆仔智能导购账号",
+            if (uiState.isRegisterMode) "注册小O智能导购账号" else "登录您的小O智能导购账号",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -5,7 +5,7 @@
   "category": "服饰运动",
   "sub_category": "帽子",
   "base_price": 169.0,
-  "image_path": "3_服饰运动/images/p_clothes_019_live.jpg",
+  "image_path": "3_服饰运动/images/p_clothes_019.jpg",
   "skus": [
     {
       "sku_id": "s_p_clothes_019_1",
@@ -25,7 +25,7 @@
         "刺绣logo配色": "黑勾",
         "帽围类型": "可调节帽围"
       },
-      "price": 169.0
+      "price": 183.52
     },
     {
       "sku_id": "s_p_clothes_019_3",
@@ -35,7 +35,7 @@
         "刺绣logo配色": "白勾",
         "帽围类型": "可调节帽围"
       },
-      "price": 169.0
+      "price": 199.2
     },
     {
       "sku_id": "s_p_clothes_019_4",
@@ -45,7 +45,7 @@
         "刺绣logo配色": "黑勾",
         "帽围类型": "可调节帽围"
       },
-      "price": 169.0
+      "price": 216.14
     },
     {
       "sku_id": "s_p_clothes_019_5",
@@ -55,7 +55,7 @@
         "刺绣logo配色": "白勾",
         "帽围类型": "可调节帽围"
       },
-      "price": 179.0
+      "price": 234.43
     },
     {
       "sku_id": "s_p_clothes_019_6",
@@ -65,7 +65,7 @@
         "刺绣logo配色": "黑勾",
         "帽围类型": "可调节帽围"
       },
-      "price": 179.0
+      "price": 254.18
     }
   ],
   "rag_knowledge": {

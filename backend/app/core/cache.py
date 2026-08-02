@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import time
+import functools
 from typing import Any, Callable, Awaitable, Optional
 
 from app.core.redis_client import get_redis
@@ -120,3 +121,33 @@ async def cache_get(key: str) -> Optional[Any]:
         return json.loads(raw) if raw else None
     except Exception:
         return None
+
+
+def cache_result(
+    prefix: str,
+    ttl: int,
+    *,
+    serializer: Optional[Callable[[Any], str]] = None,
+    deserializer: Optional[Callable[[str], Any]] = None,
+):
+    """装饰器版 get-or-compute（spec §七）：按 prefix + 参数生成缓存键。
+
+    统一四级 TTL 缓存的声明式写法，Key 规范集中在本文件。示例::
+
+        @cache_result("semantic_search", REDIS_CACHE_TTL_SEARCH)
+        async def search(query: str, top_k: int) -> list[dict]: ...
+    """
+
+    def _decorator(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+        @functools.wraps(fn)
+        async def _wrapped(*args: Any, **kwargs: Any) -> Any:
+            parts = [str(a) for a in args] + [f"{k}={v}" for k, v in sorted(kwargs.items())]
+            key = make_key(prefix, *parts)
+            return await cached(
+                key, ttl, lambda: fn(*args, **kwargs),
+                serializer=serializer, deserializer=deserializer,
+            )
+
+        return _wrapped
+
+    return _decorator

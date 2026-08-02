@@ -78,8 +78,12 @@ class FollowUpEngine:
         conversation_id: str = "",
         session_id: str = "",
         current_query: str = "",
+        snapshot: dict | None = None,
     ) -> dict:
         """检测追问模式，返回约束更新 + 上下文提示。
+
+        snapshot: 调用方可预取的 context_snapshot（async 路径）；
+        未传入时回退同步 PG 读（兼容旧调用方）。
 
         Returns:
             {
@@ -109,9 +113,11 @@ class FollowUpEngine:
         pending_question = None
         if conversation_id:
             try:
-                from app.services.conversation_service import get_conversation_service
-                svc = get_conversation_service()
-                snapshot = svc.get_context_snapshot_sync(conversation_id)
+                if snapshot is None:
+                    from app.services.conversation_service import get_conversation_service
+                    svc = get_conversation_service()
+                    snapshot = svc.get_context_snapshot_sync(conversation_id)
+                snapshot = snapshot or {}
                 # 产品引用 — 兼容新旧格式: [{id,title,brand}] 或 ["P001","P003"]
                 last_products_raw = snapshot.get("last_products") or snapshot.get("last_recommended_product_ids", [])
                 last_product_ids = []
@@ -337,9 +343,9 @@ class FollowUpEngine:
                 f"[Follow-up] 用户在当前上下文下追问（{'，'.join(details) if details else '继承上轮约束'}）。"
             )
 
-        # ---- 问答链: 豆仔问了问题，用户正在回答 ----
+        # ---- 问答链: 欧米问了问题，用户正在回答 ----
         if pending_question and result["is_follow_up"]:
-            parts.append(f"[问答链] 上轮豆仔问: {pending_question}")
+            parts.append(f"[问答链] 上轮欧米问: {pending_question}")
 
         # ---- Layer 1 (热): 最近一轮原文 ----
         if last_answer:

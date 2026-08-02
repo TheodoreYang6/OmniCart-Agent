@@ -1,0 +1,79 @@
+{
+  "product_id": "p_digital_147",
+  "title": "戴尔S2721DGF 27英寸2K QHD曲面显示器165Hz高刷电竞屏HDR10支持AMD FreeSync Premium 1ms响应",
+  "brand": "戴尔",
+  "category": "数码电子",
+  "sub_category": "显示器",
+  "base_price": 1899.0,
+  "image_path": "2_数码电子/images/p_digital_147.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_147_1",
+      "properties": {
+        "尺寸": "27英寸",
+        "刷新率": "165Hz"
+      },
+      "price": 1899.0
+    },
+    {
+      "sku_id": "s_p_digital_147_2",
+      "properties": {
+        "尺寸": "32英寸",
+        "刷新率": "165Hz"
+      },
+      "price": 2499.0
+    },
+    {
+      "sku_id": "s_p_digital_147_3",
+      "properties": {
+        "尺寸": "27英寸",
+        "刷新率": "240Hz"
+      },
+      "price": 2799.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "戴尔S2721DGF是品牌专为电竞与内容创作双场景设计的高性能曲面显示器。搭载27英寸VA面板，原生2560×1440 QHD分辨率，1800R曲率增强沉浸感；采用快速VA技术实现1ms GTG灰阶响应，配合165Hz（可超频至170Hz）刷新率，大幅降低动态拖影。支持HDR10、99% sRGB广色域及出厂Delta E<2专业级色准。适配NVIDIA G-SYNC Compatible与AMD FreeSync Premium双重自适应同步技术。适合FPS/RTS玩家、视频剪辑师及远程办公需多窗口高效协同人群。建议搭配DisplayPort 1.4线材启用满血165Hz+HDR，Windows系统中开启‘游戏模式’并校准色彩配置文件。注意：HDMI接口最高仅支持144Hz，需优先使用DP口以释放全部性能。",
+    "official_faq": [
+      {
+        "question": "S2721DGF的1ms响应时间是GTG还是MPRT？实测在CS2和APEX中是否存在明显残影？",
+        "answer": "该机型标称1ms为GTG（Gray-to-Gray）灰阶响应时间，经DisplayMate实验室实测，在165Hz下90%灰阶过渡均≤1.2ms；在CS2 1080p@165Hz高帧率场景下，高速横向扫射时偶有极轻微残影（肉眼需刻意捕捉），但远低于同价位IPS屏；APEX英雄中垂直跳狙无拖尾感。建议开启‘响应时间加速’中的‘中’档（默认关闭），可进一步抑制残影而不引发明显过冲，实测过冲像素占比＜0.3%。"
+      },
+      {
+        "question": "32英寸SKU是否与27英寸同款面板？色准和亮度参数是否有差异？",
+        "answer": "32英寸SKU（型号S3221DGF）采用同一世代三星VA面板，但因尺寸增大导致背光分区结构微调：峰值亮度从27英寸的350cd/m²降至320cd/m²（HDR模式下），sRGB覆盖仍为99%，但Delta E平均值由27英寸的1.32升至1.58（仍优于行业2.0阈值）。色域一致性经出厂逐台校准，32英寸在100%亮度下白点偏移量≤0.002xy，实际观感无可见色差。两尺寸均支持硬件校准LUT，可通过Dell Display Manager软件导入ICC配置文件。"
+      },
+      {
+        "question": "FreeSync Premium认证要求低帧率补偿（LFC），该显示器在60Hz以下能否稳定启用？最低支持多少Hz？",
+        "answer": "S2721DGF通过AMD FreeSync Premium官方认证，具备完整LFC功能：当显卡输出帧率跌至48Hz以下时，显示器自动启用LFC，将刷新率动态匹配至帧率±10Hz范围内（如42fps→40-52Hz区间）。实测在《赛博朋克2077》光追中帧率波动于38-55fps时，画面撕裂完全消失；但需确保显卡驱动为Adrenalin 23.5.1或更新版，并在Radeon设置中开启‘增强同步’与‘FreeSync Premium’双开关。注意：LFC在HDMI下不可用，必须使用DisplayPort 1.4连接。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "李小米",
+        "rating": 5,
+        "content": "1899元入手27英寸165Hz版，用了5个月每天打Valorant+剪B站视频。开启FreeSync后完全没撕裂，1ms响应让甩枪跟手性极强；出厂校色报告Delta E=0.97，Premiere里调色不用额外校准，比上台LG 27GL850还稳。支架升降旋转也顺滑，就是底座略宽占桌面。"
+      },
+      {
+        "nickname": "王梓涵",
+        "rating": 4,
+        "content": "2499买了32英寸版，主要做UI设计。QHD分辨率+99% sRGB看着舒服，双屏拼接无色差。但发现开机后前3分钟有轻微泛白（尤其看纯黑背景），之后消失；客服说属VA面板正常特性，已接受。对比MacBook Pro外接效果更通透，HDR看电影层次感明显。"
+      },
+      {
+        "nickname": "张雅静",
+        "rating": 2,
+        "content": "1899买的27寸，结果收到货发现DP接口接触不良——插上后显示几秒就黑屏，换线/换显卡口都一样，售后检测说是主板DP PHY芯片批次问题，等换货等了11天。虽然后来换了新机没问题，但对戴尔品控失望，同批论坛好多人反馈类似问题。"
+      },
+      {
+        "nickname": "陈哲远",
+        "rating": 5,
+        "content": "2799上了240Hz版本，玩《火箭联盟》帧生成时间（FGT）比165Hz版降低23%，回放慢动作能看清球体旋转细节。实测OSD菜单里开‘Ultra Low Motion Blur’后拖影几乎不可见，配合RTX4070Ti跑满240帧很稳。支架兼容VESA100，挂双臂后桌面清爽多了。"
+      },
+      {
+        "nickname": "赵婉婷",
+        "rating": 3,
+        "content": "1899购入，办公兼轻度游戏。文字锐利度满意，但发现暗场细节丢失较明显——看《权游》夜戏时城堡阴影里纹理糊成一片，调低对比度也没改善。查资料才知道VA面板固有缺陷，不是个体问题。HDR开关打开后反而发灰，建议日常关HDR，只在看纪录片时手动开启。"
+      }
+    ]
+  }
+}

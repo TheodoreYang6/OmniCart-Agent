@@ -182,6 +182,9 @@ class DecisionAgent(BaseAgent):
 
             # Sort by final_score
             results.sort(key=lambda r: r["final_score"], reverse=True)
+            # 批内校准高分制（促单原则，用户拍板）：display_score 映射到 [8.0, 9.6]
+            # 拉开区分度，标签纯按校准分分档（消灭同分不同标）；final_score 保留真实值
+            self._calibrate_batch(results)
             state.decision_results = results
 
             risky = sum(1 for r in results if r["display_score"] < 5.0)
@@ -203,6 +206,66 @@ class DecisionAgent(BaseAgent):
         "欧美": ["雅诗兰黛", "兰蔻", "欧莱雅", "科颜氏", "娇韵诗", "倩碧",
                  "雅顿", "赫莲娜", "理肤泉", "薇姿", "修丽可", "海蓝之谜", "La Mer"],
     }
+
+    # ---- 批内校准高分制（展示层，不动 final_score/component_scores 真实值）----
+
+    _CAL_LO, _CAL_HI = 8.0, 9.6      # 校准显示区间（促单：普遍高分但可辨）
+    _HONEST_FLOOR = 0.5              # 原始 final < 0.5 = 明显不相关，不参与高分映射
+    _HONEST_CAP = 7.9                # 不相关商品显示分封顶（诚实线）
+
+    @classmethod
+    def _level_of(cls, display: float) -> str:
+        """标签单一口径：纯按校准后 display_score 分档，同分必同标。"""
+        if display >= 9.2:
+            return "strong_recommend"
+        if display >= 8.5:
+            return "recommended"
+        if display >= 8.0:
+            return "worth_considering"
+        return "cautious"
+
+    @classmethod
+    def _calibrate_batch(cls, results: list[dict]) -> None:
+        """批内 min-max 校准 display_score 到 [8.0, 9.6] 并重定标签（原地修改）。
+
+        背景（实测）：relevance 透传 reranker 分 0.85-0.93 致全员 8.7-9.2 扎堆，
+        且标签三条件判定与分数公式两套口径出现"同分不同标"。
+        规则：
+        - 硬约束 fail（hard_constraint_status=failed）不参与，保留原低分与 not_recommended
+        - 原始 final < 0.5 不抬分：display 封顶 7.9（促单≠把不相关商品抬到 9 分）
+        - 单品候选直接 9.3；批内极差 < 0.02（全员同分）按位次 0.15/位递减保可辨
+        """
+        pool = [r for r in results
+                if r.get("hard_constraint_status") != "failed"
+                and r.get("final_score", 0.0) >= cls._HONEST_FLOOR]
+        low = [r for r in results
+               if r.get("hard_constraint_status") != "failed"
+               and r.get("final_score", 0.0) < cls._HONEST_FLOOR]
+
+        # 不相关商品：保持真实比例但封顶诚实线
+        for r in low:
+            r["display_score"] = min(round(r.get("final_score", 0.0) * 10, 1), cls._HONEST_CAP)
+            r["recommendation_level"] = cls._level_of(r["display_score"])
+
+        if not pool:
+            return
+        if len(pool) == 1:
+            pool[0]["display_score"] = 9.3
+            pool[0]["recommendation_level"] = cls._level_of(9.3)
+            return
+
+        scores = [r.get("final_score", 0.0) for r in pool]
+        s_max, s_min = max(scores), min(scores)
+        spread = s_max - s_min
+        for idx, r in enumerate(pool):  # pool 沿用 results 的 final_score 降序
+            if spread < 0.02:
+                display = cls._CAL_HI - 0.1 - idx * 0.15  # 全员同分 → 位次微阶梯
+            else:
+                norm = (r.get("final_score", 0.0) - s_min) / spread
+                display = cls._CAL_LO + norm * (cls._CAL_HI - cls._CAL_LO)
+            display = round(max(cls._CAL_LO, min(display, cls._CAL_HI)), 1)
+            r["display_score"] = display
+            r["recommendation_level"] = cls._level_of(display)
 
     def _passes_hard_constraints(self, product, constraints) -> bool:
         """硬约束判断 — 不满足则直接过滤。

@@ -29,19 +29,8 @@ def _check_pg() -> bool:
         _pg_available = False
         return False
     try:
-        import asyncpg
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # 没有运行中的事件循环，用 asyncio.run()
-            asyncio.run(_check_pg_async())
-            _pg_available = True
-            return True
-        # 有运行中的循环，用 nest_asyncio
-        import nest_asyncio
-        nest_asyncio.apply(loop)
-        loop.run_until_complete(_check_pg_async())
+        from app.core.database import run_async
+        run_async(_check_pg_async())
         _pg_available = True
         return True
     except Exception:

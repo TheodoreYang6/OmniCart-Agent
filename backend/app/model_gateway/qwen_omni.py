@@ -19,7 +19,8 @@ from app.core.config import QWEN_API_KEY, QWEN_BASE_URL
 logger = logging.getLogger(__name__)
 
 _VOICES = ["Cherry", "Serena", "Ethan", "Chelsie"]
-_OPENAI_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# OpenAI 兼容地址从 QWEN_BASE_URL 派生（支持专属 MaaS 实例域名，不再硬编码公共云）
+_OPENAI_BASE = QWEN_BASE_URL.rstrip("/").replace("/api/v1", "/compatible-mode/v1")
 
 # 全局异步客户端
 _http: httpx.AsyncClient | None = None
@@ -53,19 +54,21 @@ class QwenOmni:
 
     async def transcribe(self, audio_bytes: bytes, hint: str = "") -> str:
         """纯转写：音频 → 文字。prompt 要求只输出转写结果。"""
-        prompt = hint or "请把这段语音逐字转写成文字，只输出转写结果，一个字都不要多。"
+        from app.prompts.gateway_prompts import get_asr_transcribe_prompt
+        prompt = hint or get_asr_transcribe_prompt()
         result = await self._call_multimodal(audio_bytes, prompt, system="")
         return (result.get("text") or "").strip()
 
     async def transcribe_and_recommend(self, audio_bytes: bytes) -> dict:
         """转写并推荐：音频 → 文字回复 + 语音（保留旧兼容）。"""
+        from app.prompts.gateway_prompts import (
+            get_voice_recommend_system,
+            get_voice_recommend_user_prompt,
+        )
         return await self._call_multimodal(
             audio_bytes,
-            "请分析这段语音，帮我推荐合适的商品",
-            system=(
-                "你是豆仔，字节跳动旗下的智能购物导购助手（豆包之弟）。"
-                "专精商品推荐、截图分析、购物对比。回复控制在 3-5 句话，活泼专业。"
-            ),
+            get_voice_recommend_user_prompt(),
+            system=get_voice_recommend_system(),
         )
 
     async def _call_multimodal(
@@ -161,9 +164,10 @@ class QwenOmni:
 
     async def text_to_speech(self, text: str, voice: str = "") -> dict:
         """纯 TTS：文本 → WAV 音频。voice 为空则用默认。"""
+        from app.prompts.gateway_prompts import get_tts_system
         v = voice if voice in _VOICES else self._voice
         messages = [
-            {"role": "system", "content": "你是豆仔，购物导购助手。用自然语速朗读以下内容。"},
+            {"role": "system", "content": get_tts_system()},
             {"role": "user", "content": text},
         ]
 
@@ -233,8 +237,9 @@ class QwenOmni:
         return loop.run_until_complete(self._text_to_speech_sync_wrapper(text, system))
 
     async def _text_to_speech_sync_wrapper(self, text: str, system: str) -> dict:
+        from app.prompts.gateway_prompts import get_tts_system_fallback
         messages = [
-            {"role": "system", "content": system or "你是豆仔。用自然语速朗读以下内容。"},
+            {"role": "system", "content": system or get_tts_system_fallback()},
             {"role": "user", "content": text},
         ]
         t0 = time.perf_counter()

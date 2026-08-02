@@ -10,11 +10,10 @@ import asyncio
 import time
 from langgraph.graph import StateGraph, END
 
-from app.agents.router_agent import RouterAgent
-from app.agents.visual_agent import VisualAgent
-from app.agents.retrieval_agent import RetrievalAgent
-from app.agents.decision_agent import DecisionAgent
-from app.agents.response_agent import ResponseAgent
+from app.framework.agent_manager import AgentManager
+from app.core.display import trim_for_grid
+from app.providers.agents import builtin as agents_builtin
+from app.providers.recall.rerank_fusion import RerankFusion
 from app.model_gateway.gateway import get_model_gateway
 from app.verification.response_guard import ResponseGuard
 from app.verification.evidence_checker import EvidenceSufficiencyChecker
@@ -28,16 +27,58 @@ import json
 import logging
 _log = logging.getLogger(__name__)
 
-# 全局单例 — 通过 factory 注入 repo，PG/JSON 自动切换
+# 全局单例 — Agent 经 AgentManager 注册表装配（替换硬编码 import + new），
+# repo 通过 factory 注入，PG/JSON 自动切换。节点函数仍用 _router/_visual/... 引用，逻辑不变。
 _product_repo = get_product_repo()
-_router = RouterAgent()
-_visual = VisualAgent()
-_retrieval = RetrievalAgent(repo=_product_repo)
-_decision = DecisionAgent(repo=_product_repo)
-_response = ResponseAgent()
+_agents = AgentManager.default(builtin=lambda: agents_builtin(_product_repo))
+_router = _agents.get("router")
+_visual = _agents.get("visual")
+_retrieval = _agents.get("retrieval")
+_decision = _agents.get("decision")
+_response = _agents.get("response")
 _gateway = get_model_gateway()
+_reranker = RerankFusion(_gateway)
 _guard = ResponseGuard()
 _evidence_checker = EvidenceSufficiencyChecker()
+
+
+def get_response_agent():
+    """暴露 Response Agent 单例 — 供 SSE 真流式路径调 generate_stream。"""
+    return _response
+
+
+def get_response_guard():
+    """暴露 ResponseGuard 单例 — 真流式路径流完后补跑 harness 检查。"""
+    return _guard
+
+# 可注册路由表（spec §六）：条件边通过名称查找路由函数，支持业务侧覆盖/扩展。
+_ROUTES: dict = {}
+
+
+def register_route(name: str):
+    """声明式注册一个条件边路由函数。"""
+
+    def _deco(fn):
+        _ROUTES[name] = fn
+        return fn
+
+    return _deco
+
+
+def get_route(name: str):
+    """按名获取路由函数。"""
+    return _ROUTES[name]
+
+
+# 可注册能力表已下沉 framework/orchestration/capabilities.py（P0-1 依赖方向治理）：
+# graph 是注册方，providers 层子管线按名消费；此处 re-export 保持存量引用兼容。
+from app.framework.orchestration.capabilities import (  # noqa: F401
+    get_capability,
+    register_capability,
+)
+
+# supervisor 单次进入的最大派发批次（死循环护栏）
+MAX_SUPERVISOR_STEPS = 16
 
 
 async def _node_router(state: WorkflowState) -> WorkflowState:
@@ -73,9 +114,46 @@ async def _node_router(state: WorkflowState) -> WorkflowState:
         except Exception as e:
             _log.debug(f"Constraint merge skipped: {e}")
 
+    # Memory-aware：从 MemoryBank 召回长期偏好 → used_memories，供 Decision 评分消费（spec §四）。
+    # 无 user_id / 该品类无偏好条目时为空 → 评分不变（评测 demo 用户无条目，指标不回退）。
+    # Phase 3 A2A：动态编排模式下（run_workflow 已绑请求级黑板 ContextVar），
+    # 召回改后台任务发布 memories.ready，与检索/精排并行；
+    # Decision 消费前 wait_for（超时降级空）。legacy 模式（无黑板）保持内联 await。
+    from app.framework.blackboard import current_board
+
+    bb = current_board()
+
+    if state.user_id:
+        from app.providers.memory import recall_used_memories
+
+        _recall_kwargs = dict(
+            user_id=state.user_id,
+            query=state.user_query,
+            category=state.constraints.category or "",
+            conversation_id=state.conversation_id or "",
+        )
+        if bb is not None:
+            async def _recall_bg():
+                try:
+                    mems = await recall_used_memories(**_recall_kwargs)
+                except Exception as e:  # noqa: BLE001
+                    _log.debug(f"used_memories recall skipped: {e}")
+                    mems = []
+                await bb.publish("memories.ready", {"memories": mems or []}, producer="router")
+
+            bb.spawn(_recall_bg())
+        else:
+            try:
+                state.used_memories = await recall_used_memories(**_recall_kwargs)
+            except Exception as e:
+                _log.debug(f"used_memories recall skipped: {e}")
+    elif bb is not None:
+        await bb.publish("memories.ready", {"memories": []}, producer="router")
+
     return state
 
 
+@register_capability("visual")
 async def _node_visual(state: WorkflowState) -> WorkflowState:
     t0 = time.perf_counter()
     if not state.image_url:
@@ -186,6 +264,23 @@ def _map_visual_category(cat: str) -> str:
         "酸奶": "食品饮料", "气泡水": "食品饮料", "碳酸饮料": "食品饮料", "功能饮料": "食品饮料",
         "方便面": "食品饮料", "方便食品": "食品饮料", "调味品": "食品饮料", "酱油": "食品饮料",
         "矿泉水": "食品饮料", "可乐": "食品饮料",
+        # 家居用品
+        "保温杯": "家居用品", "水杯": "家居用品", "四件套": "家居用品", "床品": "家居用品",
+        "枕头": "家居用品", "被子": "家居用品", "毛巾": "家居用品", "收纳盒": "家居用品",
+        "锅具": "家居用品", "炒锅": "家居用品", "餐具": "家居用品", "砧板": "家居用品",
+        "台灯": "家居用品", "香薰": "家居用品", "花瓶": "家居用品",
+        # 母婴用品
+        "纸尿裤": "母婴用品", "尿不湿": "母婴用品", "奶瓶": "母婴用品", "奶嘴": "母婴用品",
+        "婴儿推车": "母婴用品", "安全座椅": "母婴用品", "婴儿湿巾": "母婴用品",
+        "婴儿床": "母婴用品", "绘本": "母婴用品", "积木": "母婴用品",
+        # 运动户外
+        "帐篷": "运动户外", "睡袋": "运动户外", "登山杖": "运动户外", "瑜伽垫": "运动户外",
+        "哑铃": "运动户外", "跳绳": "运动户外", "篮球": "运动户外", "足球": "运动户外",
+        "羽毛球拍": "运动户外", "泳镜": "运动户外", "滑板": "运动户外",
+        # 个护清洁
+        "洗发水": "个护清洁", "护发素": "个护清洁", "沐浴露": "个护清洁", "身体乳": "个护清洁",
+        "牙膏": "个护清洁", "牙刷": "个护清洁", "洗衣液": "个护清洁", "吹风机": "个护清洁",
+        "剃须刀": "个护清洁", "卫生巾": "个护清洁",
     }
     # 模糊匹配：子串命中即可
     for k, v in mapping.items():
@@ -194,6 +289,7 @@ def _map_visual_category(cat: str) -> str:
     return ""
 
 
+@register_capability("retrieval")
 async def _node_retrieval(state: WorkflowState) -> WorkflowState:
     t0 = time.perf_counter()
     result = await _retrieval.execute(state)
@@ -243,12 +339,220 @@ async def _node_retrieval(state: WorkflowState) -> WorkflowState:
     return result
 
 
+@register_capability("compare_retrieval")
+async def _node_compare_retrieval(state: WorkflowState) -> WorkflowState:
+    """对比意图多目标并行检索（Phase 4 compare 深化）。
+
+    每个对比目标用独立子查询并行检索（避免单次混合检索稀释品牌信号），
+    交替合并保证双方都进精排窗口；per-target 命中数注入 context_prompt，
+    让回答基于链路验证过的有/无（而非 LLM 看不到候选就宣布没有）。
+    提不出目标时回退单路 retrieval。
+    """
+    t0 = time.perf_counter()
+    targets = ((state.plan or {}).get("meta") or {}).get("compare_targets") or []
+    if not targets:
+        return await _node_retrieval(state)
+
+    cat_hint = state.constraints.sub_category or state.constraints.category or ""
+
+    async def _retrieve_one(target: str):
+        sub = state.model_copy(deep=True)  # 独立子状态，并行写入互不干扰
+        sub.user_query = f"{target} {cat_hint}".strip() if cat_hint not in target else target
+        sub.user_query_original = None
+        sub.retrieved_products = []
+        sub.evidence_list = []
+        sub.trace_steps = []
+        return await _node_retrieval(sub)
+
+    results = await asyncio.gather(*[_retrieve_one(t) for t in targets], return_exceptions=True)
+
+    # 交替合并（A1,B1,A2,B2…）+ 去重，保证每个目标的头部商品都在精排窗口内
+    per_target: list[list[dict]] = []
+    counts: dict[str, int] = {}
+    merged_ev: list[dict] = []
+    for tgt, res in zip(targets, results):
+        if isinstance(res, Exception):
+            _log.warning(f"compare_retrieval target failed: {tgt}: {res}")
+            per_target.append([])
+            counts[tgt] = 0
+            continue
+        # 子查询命中里只保留与目标词相关的头部（品牌/型号词命中标题才算目标命中）
+        tgt_low = tgt.lower()
+        tokens = [w for w in tgt_low.replace("的", " ").split() if w] or [tgt_low]
+        hits = [p for p in res.retrieved_products
+                if any(w in (p.get("brand", "") + p.get("title", "")).lower() for w in tokens)]
+        others = [p for p in res.retrieved_products if p not in hits]
+        per_target.append(hits + others)
+        counts[tgt] = len(hits)
+        merged_ev.extend(res.evidence_list or [])
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for i in range(max((len(lst) for lst in per_target), default=0)):
+        for lst in per_target:
+            if i < len(lst):
+                pid = lst[i].get("product_id", "")
+                if pid and pid not in seen:
+                    seen.add(pid)
+                    merged.append(lst[i])
+    state.retrieved_products = trim_for_grid(merged[:12])
+    # 目标命中商品钉顶（复用精确匹配机制：reranker/decision 均会保持其在前），
+    # 否则后续重排会把目标挤出生成 prompt 的候选 top-N → LLM 看不到命中商品（复测实锤）
+    hit_pids = [lst[0].get("product_id", "") for lst, tgt in zip(per_target, targets)
+                if lst and counts.get(tgt, 0) > 0]
+    if hit_pids:
+        state.visual_matched_pids = list(dict.fromkeys(
+            (state.visual_matched_pids or []) + [p for p in hit_pids if p]))
+        for p in state.retrieved_products:
+            if p.get("product_id") in hit_pids:
+                p["reranker_score"] = max(p.get("reranker_score", 0), 0.95)
+    kept = {p.get("product_id") for p in state.retrieved_products}
+    ev_seen: set[tuple] = set()
+    state.evidence_list = []
+    for e in merged_ev:
+        key = (e.get("product_id", ""), str(e.get("text", e.get("content", "")))[:60])
+        if e.get("product_id") in kept and key not in ev_seen:
+            ev_seen.add(key)
+            state.evidence_list.append(e)
+
+    # 链路验证过的 per-target 命中数 → 注入 Response 的上下文提示
+    lines = []
+    for tgt in targets:
+        n = counts.get(tgt, 0)
+        lines.append(f"- 「{tgt}」库内命中 {n} 件" + ("（未找到，请明确告知用户无法对比此目标）" if n == 0 else ""))
+    state.context_prompt = (state.context_prompt or "") + \
+        "\n[对比检索结果（已逐目标验证）]\n" + "\n".join(lines)
+
+    from app.framework.blackboard import current_board as _cb
+
+    bb = _cb()
+    if bb is not None:
+        await bb.publish("compare.targets_retrieved", {"counts": counts}, producer="compare_retrieval")
+
+    state.trace_steps.append({
+        "step_id": f"T{len(state.trace_steps) + 1:03d}",
+        "agent_name": "Compare Retrieval (multi-target)",
+        "action": "parallel_target_retrieval",
+        "input_summary": f"targets={targets}",
+        "output_summary": f"counts={counts}, merged={len(state.retrieved_products)}",
+        "latency_ms": round((time.perf_counter() - t0) * 1000),
+        "status": "success" if any(counts.values()) else "fallback",
+    })
+    state.timing["compare_retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
+    return state
+
+
+@register_capability("multi_query_retrieval")
+async def _node_multi_query_retrieval(state: WorkflowState) -> WorkflowState:
+    """QU V2 多目标并行检索（compare_retrieval 的泛化）。
+
+    消费 Router 拆分的 retrieval_plan.sub_queries（如 bundle 场景的 上衣/裤子/鞋 三路）：
+    每路独立子查询并行检索→打 group_role 标记→交替合并去重→每组 top1 钉顶，
+    命中统计注入 context_prompt 让回答分组说明（缺货组诚实声明）。无 sub_queries 退化单路。
+    """
+    t0 = time.perf_counter()
+    sub_queries = state.retrieval_plan.sub_queries or []
+    if len(sub_queries) < 2:
+        return await _node_retrieval(state)
+
+    async def _retrieve_group(sq):
+        sub = state.model_copy(deep=True)
+        sub.user_query = sq.query
+        sub.user_query_original = None
+        sub.retrieved_products = []
+        sub.evidence_list = []
+        sub.trace_steps = []
+        if sq.category:
+            sub.constraints.category = sq.category
+            sub.retrieval_plan.category = sq.category
+        if sq.budget_hint:
+            sub.constraints.budget_max = sq.budget_hint
+        sub.retrieval_plan.sub_queries = []  # 子路不再递归拆分
+        sub.retrieval_plan.top_k = max(4, state.retrieval_plan.top_k // len(sub_queries))
+        return await _node_retrieval(sub)
+
+    results = await asyncio.gather(*[_retrieve_group(sq) for sq in sub_queries],
+                                   return_exceptions=True)
+
+    per_group: list[list[dict]] = []
+    counts: dict[str, int] = {}
+    merged_ev: list[dict] = []
+    for sq, res in zip(sub_queries, results):
+        role = sq.role or sq.query
+        if isinstance(res, Exception):
+            _log.warning(f"multi_query group failed: {role}: {res}")
+            per_group.append([])
+            counts[role] = 0
+            continue
+        prods = res.retrieved_products or []
+        for p in prods:
+            p["group_role"] = role  # 分组标记（前端分组卡/分组回答依据）
+        per_group.append(prods)
+        counts[role] = len(prods)
+        merged_ev.extend(res.evidence_list or [])
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for i in range(max((len(lst) for lst in per_group), default=0)):
+        for lst in per_group:
+            if i < len(lst):
+                pid = lst[i].get("product_id", "")
+                if pid and pid not in seen:
+                    seen.add(pid)
+                    merged.append(lst[i])
+    state.retrieved_products = trim_for_grid(merged[:12])
+    # 每组 top1 钉顶（复用 compare 修复机制，防全局重排把某一组挤出生成 prompt 窗口）
+    top_pids = [lst[0].get("product_id", "") for lst in per_group if lst]
+    if top_pids:
+        state.visual_matched_pids = list(dict.fromkeys(
+            (state.visual_matched_pids or []) + [p for p in top_pids if p]))
+        for p in state.retrieved_products:
+            if p.get("product_id") in top_pids:
+                p["reranker_score"] = max(p.get("reranker_score", 0), 0.95)
+    kept = {p.get("product_id") for p in state.retrieved_products}
+    ev_seen: set[tuple] = set()
+    state.evidence_list = []
+    for e in merged_ev:
+        key = (e.get("product_id", ""), str(e.get("text", e.get("content", "")))[:60])
+        if e.get("product_id") in kept and key not in ev_seen:
+            ev_seen.add(key)
+            state.evidence_list.append(e)
+
+    # 分组命中统计 → Response 分组回答依据（缺货组必须如实说明）
+    stat = " ".join(f"{r}:{n}件" for r, n in counts.items())
+    missing = [r for r, n in counts.items() if n == 0]
+    miss_note = ("；" + "、".join(f"「{r}」未找到符合条件的商品" for r in missing)
+                 + "，回答时须如实说明") if missing else ""
+    state.context_prompt = (state.context_prompt or "") + \
+        f"\n[分组检索] {stat}{miss_note}"
+
+    from app.framework.blackboard import current_board as _cb2
+
+    bb = _cb2()
+    if bb is not None:
+        await bb.publish("multi_query.groups_retrieved", {"counts": counts},
+                         producer="multi_query_retrieval")
+
+    state.trace_steps.append({
+        "step_id": f"T{len(state.trace_steps) + 1:03d}",
+        "agent_name": "Multi-Query Retrieval (grouped)",
+        "action": "parallel_group_retrieval",
+        "input_summary": f"groups={[sq.role or sq.query for sq in sub_queries]}",
+        "output_summary": f"counts={counts}, merged={len(state.retrieved_products)}",
+        "latency_ms": round((time.perf_counter() - t0) * 1000),
+        "status": "success" if any(counts.values()) else "fallback",
+    })
+    state.timing["multi_query_retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
+    return state
+
+
+@register_capability("reranker")
 async def _node_reranker(state: WorkflowState) -> WorkflowState:
     """Qwen Reranker 精排：对语义检索结果进行语义重排序"""
     t0 = time.perf_counter()
     products = state.retrieved_products
-    # 快速模式：跳过 Reranker LLM 调用
-    if state.context_prompt and "[FAST_MODE]" in (state.context_prompt or ""):
+    # lite 档：跳过 Reranker LLM 调用（P2-1：state.mode 替代 [FAST_MODE] 字符串嵌 prompt）
+    if state.mode == "lite":
         state.timing["rerank_ms"] = 0
         return state
     if len(products) <= 1:
@@ -256,79 +560,26 @@ async def _node_reranker(state: WorkflowState) -> WorkflowState:
         return state
 
     try:
-        # Build evidence lookup by product_id for richer reranker input
-        ev_by_pid: dict[str, list[str]] = {}
-        for ev in state.evidence_list:
-            pid = ev.get("product_id", "")
-            content = ev.get("content", "")
-            if pid and content and "余弦相似度" not in str(content) and "Text match" not in str(content):
-                ev_by_pid.setdefault(pid, []).append(str(content)[:300])
-
-        documents = []
-        for p in products:
-            pid = p.get("product_id", "")
-            doc = f"{p.get('title','')} {p.get('category','')} {p.get('sub_category','')}"
-            desc = p.get('description', '')
-            if desc:
-                doc += f" {desc[:300]}"
-            # Add rag_knowledge content for richer semantic matching
-            rk = p.get("rag_knowledge") or {}
-            if isinstance(rk, dict):
-                mkt = rk.get("marketing_description", "")
-                if mkt:
-                    doc += f" {str(mkt)[:300]}"
-                faqs = rk.get("official_faq", [])
-                if isinstance(faqs, list):
-                    for faq in faqs[:2]:
-                        if isinstance(faq, dict):
-                            doc += f" {faq.get('question','')[:150]} {faq.get('answer','')[:300]}"
-                revs = rk.get("user_reviews", [])
-                if isinstance(revs, list):
-                    for rev in revs[:2]:
-                        if isinstance(rev, dict):
-                            doc += f" 用户评价: {rev.get('content','')[:200]}"
-            # Add evidence snippets
-            ev_snippets = ev_by_pid.get(pid, [])[:2]
-            if ev_snippets:
-                doc += " " + " ".join(ev_snippets)
-            documents.append(doc)
-
-        ranked = await _gateway.rerank(
+        # 精排逻辑已收敛到 RerankFusion（LLM 精排 + 校准 + 视觉置顶钩子）
+        # 候选门控：只精排前 8 个（本地 reranker 每 doc ~百毫秒级），尾部保留召回序拼接
+        _head, _tail = products[:8], products[8:]
+        _ranked_head = await _reranker.rerank(
             query=state.user_query,
-            documents=documents,
-            top_n=len(products),
+            products=_head,
+            evidence=state.evidence_list,
+            visual_matched_pids=state.visual_matched_pids,
         )
-
-        # 按 relevance_score 降序重排，同时把分数写回每个 product dict
-        index_map = {r["index"]: r["relevance_score"] for r in ranked}
-        # 固定校准: Reranker 排序分(0~1) → 商业可读分，保留质量信号和区分度
-        for idx in index_map:
-            index_map[idx] = 0.68 + 0.38 * index_map[idx]
-        reordered = sorted(
-            enumerate(products),
-            key=lambda x: index_map.get(x[0], 0.0),
-            reverse=True,
-        )
-        # 将 reranker_score 写入 product dict，供 Decision V4 scoring 使用
-        for idx, p in enumerate(products):
-            p["reranker_score"] = index_map.get(idx, 0.0)
-            p["relevance_score"] = p["reranker_score"]
-        state.retrieved_products = [p for _, p in reordered]
-        # 视觉精确匹配商品锁定最高分（Reranker 可能覆盖了之前的加分）
-        visual_pids = set(state.visual_matched_pids or [])
-        for p in state.retrieved_products:
-            if p.get("product_id") in visual_pids:
-                p["reranker_score"] = 0.99
-                p["relevance_score"] = 0.99
+        state.retrieved_products = _ranked_head + _tail
 
         # 记录 trace
         step_num = len(state.trace_steps) + 1
+        top3 = [f"{p.get('reranker_score', 0):.3f}" for p in state.retrieved_products[:3]]
         state.trace_steps.append({
             "step_id": f"T{step_num:03d}",
             "agent_name": "Qwen Reranker",
             "action": "semantic_rerank",
             "input_summary": f"{len(products)} candidates",
-            "output_summary": f"reranked, top3 scores: {[f'{index_map.get(i,0):.3f}' for i in range(min(3,len(products)))]}",
+            "output_summary": f"reranked, top3 scores: {top3}",
             "latency_ms": 0,
             "status": "success",
         })
@@ -351,8 +602,18 @@ async def _node_reranker(state: WorkflowState) -> WorkflowState:
     return state
 
 
+@register_capability("decision")
 async def _node_decision(state: WorkflowState) -> WorkflowState:
     t0 = time.perf_counter()
+    # Phase 3 A2A：动态模式下等待 Router 后台召回的长期偏好（与检索/精排已并行）；
+    # 超时降级空，评分不受阻塞。
+    from app.framework.blackboard import current_board as _cb
+
+    _bb = _cb()
+    if _bb is not None and not state.used_memories:
+        _art = await _bb.wait_for("memories.ready", timeout=1.5)
+        if _art:
+            state.used_memories = _art.content.get("memories", []) or []
     state = await _decision.execute(state)
     # 按 final_score 排序，但视觉精确匹配商品始终排在最前
     if state.decision_results and state.retrieved_products:
@@ -394,6 +655,7 @@ async def _node_decision(state: WorkflowState) -> WorkflowState:
     return state
 
 
+@register_capability("response")
 async def _node_response(state: WorkflowState) -> WorkflowState:
     t0 = time.perf_counter()
     result = await _response.execute(state)
@@ -401,6 +663,7 @@ async def _node_response(state: WorkflowState) -> WorkflowState:
     return result
 
 
+@register_capability("evidence_check")
 def _node_evidence_check(state: WorkflowState) -> WorkflowState:
     """证据充足性检查：在 Reranker 之后、Decision 之前执行。"""
     t0 = time.perf_counter()
@@ -432,6 +695,7 @@ def _node_guard(state: WorkflowState) -> WorkflowState:
     return state
 
 
+@register_route("router_next")
 def _router_next(state: WorkflowState) -> str:
     """Router 后决定下一节点：有图优先视觉解析，闲聊且无图→直接回复，否则→检索"""
     if state.image_url:
@@ -441,30 +705,275 @@ def _router_next(state: WorkflowState) -> str:
     return "retrieval"
 
 
+@register_route("has_results")
 def _has_results(state: WorkflowState) -> str:
     return "decision" if state.retrieved_products else "response"
+
+
+# ================================================================
+# Phase 4+5: 动态编排（Planner / Supervisor 执行器 / Reflect 自纠错）
+# ================================================================
+
+
+async def _node_planner(state: WorkflowState) -> WorkflowState:
+    """Plan-and-Execute 第一段：按 intent 生成 ExecutionPlan（本期规则模板，0 LLM 调用）。"""
+    t0 = time.perf_counter()
+    from app.framework.orchestration import get_planner
+
+    plan = await get_planner().plan(state)
+    state.plan = plan.model_dump()
+    elapsed = round((time.perf_counter() - t0) * 1000)
+    _pname = "Planner (llm)" if plan.meta.get("planner") == "llm" else "Planner (rule)"
+    _trigger = f", trigger={plan.meta['trigger']}" if plan.meta.get("trigger") else ""
+    state.trace_steps.append({
+        "step_id": f"T{len(state.trace_steps) + 1:03d}",
+        "agent_name": _pname,
+        "action": "plan_generation",
+        "input_summary": f"intent={state.intent}, image={bool(state.image_url)}{_trigger}",
+        "output_summary": f"steps={[s.capability for s in plan.steps]} | {plan.rationale}",
+        "latency_ms": elapsed,
+        "status": "success",
+    })
+    state.timing["plan_ms"] = elapsed
+    return state
+
+
+async def _dispatch_capability(step, state: WorkflowState) -> WorkflowState:
+    """派发单个计划步骤：内置节点能力 / tool:<name> 工具 / 未知能力降级跳过。"""
+    cap = step.capability
+
+    # 真流式模式（P0-2）：response 步交由 SSE 层 generate_stream 边生成边推，
+    # 这里只记 completed；compare 命中提示/工具步回填都在 context_prompt 中被其消费
+    if cap == "response" and (state.plan or {}).get("stream_response"):
+        state.trace_steps.append({
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": "Supervisor", "action": "dispatch",
+            "input_summary": cap, "output_summary": "deferred to SSE stream",
+            "latency_ms": 0, "status": "skipped",
+        })
+        return state
+
+    # 短路：无检索结果时跳过 decision（对齐 legacy has_results 语义；response 自带空结果模板）
+    if cap == "decision" and not state.retrieved_products:
+        state.trace_steps.append({
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": "Supervisor", "action": "dispatch",
+            "input_summary": cap, "output_summary": "skipped: no retrieved products",
+            "latency_ms": 0, "status": "skipped",
+        })
+        return state
+
+    if cap.startswith("tool:"):
+        tool_name = cap[len("tool:"):]
+        from app.framework.tools import ToolContext
+        from app.providers.tools import get_tool_registry
+
+        ctx = ToolContext(user_id=state.user_id, session_id=state.session_id,
+                          conversation_id=state.conversation_id,
+                          args_raw=state.user_query, state=state)
+        res = await get_tool_registry().invoke(tool_name, {}, ctx)  # trace 自动进 skill_executions
+        # Phase 6-B2：工具步结果回填上下文，供后续 response 步骤合成回答
+        if res.message:
+            state.context_prompt = (state.context_prompt or "") + \
+                f"\n[工具 {tool_name} 结果]\n{res.message[:400]}"
+        return state
+
+    fn = get_capability(cap)
+    if fn is None:
+        _log.warning(f"unknown capability in plan: {cap}")
+        state.trace_steps.append({
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": "Supervisor", "action": "dispatch",
+            "input_summary": cap, "output_summary": "skipped: unknown capability",
+            "latency_ms": 0, "status": "skipped",
+        })
+        return state
+
+    result = fn(state)
+    if asyncio.iscoroutine(result):
+        result = await result
+    return result if result is not None else state
+
+
+async def _node_supervisor(state: WorkflowState) -> WorkflowState:
+    """Plan-and-Execute 第二段：循环派发就绪步骤；同 parallel_group 用 gather 并发。"""
+    from app.framework.orchestration import ExecutionPlan
+
+    plan = ExecutionPlan(**(state.plan or {}))
+    from app.framework.blackboard import current_board as _cb
+
+    bb = _cb()
+    batches = 0
+    while True:
+        batches += 1
+        if batches > MAX_SUPERVISOR_STEPS:
+            _log.warning("supervisor batch guard tripped, aborting plan")
+            break
+        ready = plan.next_ready(set(state.completed_steps))
+        if not ready:
+            break
+        if len(ready) == 1:
+            state = await _dispatch_capability(ready[0], state)
+            state.completed_steps.append(ready[0].step_id)
+        else:
+            t0 = time.perf_counter()
+            # 并行组：共享同一 state（asyncio 单线程，追加安全；写字段互不冲突由 Planner 保证）
+            await asyncio.gather(*[_dispatch_capability(s, state) for s in ready])
+            group = ready[0].parallel_group or "pg"
+            state.timing[f"parallel_{group}_ms"] = round((time.perf_counter() - t0) * 1000)
+            for s in ready:
+                state.completed_steps.append(s.step_id)
+        # Phase 3 A2A：每步完成发布 <capability>.done 事件（供未来跨 Agent 订阅消费）
+        if bb is not None:
+            for s in ready:
+                await bb.publish(f"{s.capability}.done", {"step_id": s.step_id},
+                                 producer="supervisor")
+    return state
+
+
+def _requeue(state: WorkflowState, capabilities: list) -> None:
+    """Reflect 回环：向计划尾部追加新步骤（step_id 带 reflect 轮次前缀，保证唯一）。"""
+    steps = list(state.plan.get("steps", []))
+    base = len(steps) + 1
+    prev: list = []
+    for i, cap in enumerate(capabilities):
+        sid = f"r{state.reflect_count}_{base + i}_{cap.replace('tool:', 'tool_')}"
+        steps.append({"step_id": sid, "capability": cap, "depends_on": list(prev),
+                      "parallel_group": None, "optional": False})
+        prev = [sid]
+    state.plan["steps"] = steps
+
+
+async def _node_reflect(state: WorkflowState) -> WorkflowState:
+    """Reflexion 节点：Guard 评估 + 自纠错决策（取代动态模式下的 guard 节点）。
+
+    决策写入 state.plan["reflect_route"]，供纯函数路由 reflect_next 读取：
+    - 硬失败（幻觉/无货编造）→ 清空 answer + 纠正指令 → 重排 response；
+    - 零结果（非闲聊，仅首轮）→ top_k+5 → 重排检索链；
+    - 预算耗尽/通过 → end。
+    """
+    t0 = time.perf_counter()
+    _guard.check(state)  # 填 harness_report（与 legacy guard 输出字段一致）
+    passed = state.harness_report.get("passed", True)
+    state.harness_report["failure_source"] = None if passed else "response_guard"
+
+    from app.core.config import REFLECT_MAX_RETRIES
+
+    max_reflects = int((state.plan or {}).get("max_reflects", REFLECT_MAX_RETRIES))
+    route = "end"
+    reason = "passed" if passed else "budget_exhausted"
+    if state.reflect_count < max_reflects:
+        if not passed:
+            state.reflect_count += 1
+            state.context_prompt = (state.context_prompt or "") + \
+                "\n[纠正] 只能引用候选列表内的商品/品牌/价格，禁止编造"
+            state.answer = ""
+            _requeue(state, ["response"])
+            route, reason = "supervisor", "guard_failed -> regenerate"
+        elif (not state.retrieved_products and state.intent != "chitchat"
+              and state.reflect_count == 0):
+            state.reflect_count += 1
+            state.retrieval_plan.top_k += 5
+            _requeue(state, ["retrieval", "reranker", "evidence_check", "decision", "response"])
+            route, reason = "supervisor", "zero_results -> widen retrieval"
+    state.plan["reflect_route"] = route
+
+    # Phase 3 A2A：请求结束时落黑板汇总（timing 计数 + trace 可见）
+    from app.framework.blackboard import current_board as _cb
+
+    bb = _cb()
+    if bb is not None and route == "end":
+        state.timing["a2a_events"] = len(bb.history)
+        state.trace_steps.append({
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": "Blackboard (A2A)",
+            "action": "a2a_summary",
+            "input_summary": f"{len(bb.history)} artifacts",
+            "output_summary": f"topics={bb.topics()}",
+            "latency_ms": 0,
+            "status": "success",
+        })
+
+    elapsed = round((time.perf_counter() - t0) * 1000)
+    state.trace_steps.append({
+        "step_id": f"T{len(state.trace_steps) + 1:03d}",
+        "agent_name": "Reflect",
+        "action": "self_check",
+        "input_summary": f"passed={passed}, products={len(state.retrieved_products)}",
+        "output_summary": f"route={route} ({reason}), reflect_count={state.reflect_count}",
+        "latency_ms": elapsed,
+        "status": "success" if passed else "fallback",
+    })
+    state.timing["reflect_ms"] = state.timing.get("reflect_ms", 0) + elapsed
+    return state
+
+
+@register_route("reflect_next")
+def _reflect_next(state: WorkflowState) -> str:
+    """纯函数路由：读 reflect 节点写入的决策。"""
+    return (state.plan or {}).get("reflect_route", "end")
+
+
+def _traced(name: str, fn):
+    """节点观测统一包裹（P1-3，对齐 amap 观测套壳的单服务版）。
+
+    不用 monkey-patch add_node（那是多服务+第三方节点全覆盖的方案，代价是上游私有 API
+    耦合），构图处显式包裹：
+    - timing 兜底：节点未自写 ``{name}_ms`` 时补齐（已写则不覆盖，零行为变更）；
+    - 异常兜底：记失败 trace 后 re-raise（观测失败不吞业务异常）；
+    - 兼容 sync/async 节点；观测自身异常独立容错（观测不能杀死业务）。
+    """
+    if getattr(fn, "_observability_wrapped", False):  # 防重包装（多张图复用同一节点）
+        return fn
+
+    async def wrapper(state: WorkflowState) -> WorkflowState:
+        t0 = time.perf_counter()
+        try:
+            result = fn(state)
+            out = await result if asyncio.iscoroutine(result) else result
+        except Exception:
+            try:
+                state.trace_steps.append({
+                    "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                    "agent_name": name, "action": "node",
+                    "input_summary": (state.user_query or "")[:40], "output_summary": "exception",
+                    "latency_ms": round((time.perf_counter() - t0) * 1000), "status": "failed",
+                })
+                state.timing.setdefault(f"{name}_ms", round((time.perf_counter() - t0) * 1000))
+            except Exception:  # noqa: BLE001 — 观测失败绝不覆盖业务异常
+                pass
+            raise
+        try:
+            out.timing.setdefault(f"{name}_ms", round((time.perf_counter() - t0) * 1000))
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    wrapper._observability_wrapped = True
+    wrapper.__name__ = f"traced_{name}"
+    return wrapper
 
 
 def build_workflow() -> StateGraph:
     workflow = StateGraph(WorkflowState)
 
-    workflow.add_node("router", _node_router)
-    workflow.add_node("visual", _node_visual)
-    workflow.add_node("retrieval", _node_retrieval)
-    workflow.add_node("reranker", _node_reranker)
-    workflow.add_node("evidence_check", _node_evidence_check)
-    workflow.add_node("decision", _node_decision)
-    workflow.add_node("response", _node_response)
-    workflow.add_node("guard", _node_guard)
+    workflow.add_node("router", _traced("router", _node_router))
+    workflow.add_node("visual", _traced("visual", _node_visual))
+    workflow.add_node("retrieval", _traced("retrieval", _node_retrieval))
+    workflow.add_node("reranker", _traced("reranker", _node_reranker))
+    workflow.add_node("evidence_check", _traced("evidence_check", _node_evidence_check))
+    workflow.add_node("decision", _traced("decision", _node_decision))
+    workflow.add_node("response", _traced("response", _node_response))
+    workflow.add_node("guard", _traced("guard", _node_guard))
 
     workflow.set_entry_point("router")
 
-    workflow.add_conditional_edges("router", _router_next,
+    workflow.add_conditional_edges("router", get_route("router_next"),
                                    {"visual": "visual", "retrieval": "retrieval", "response": "response"})
     workflow.add_edge("visual", "retrieval")
     workflow.add_edge("retrieval", "reranker")
     workflow.add_edge("reranker", "evidence_check")
-    workflow.add_conditional_edges("evidence_check", _has_results,
+    workflow.add_conditional_edges("evidence_check", get_route("has_results"),
                                    {"decision": "decision", "response": "response"})
     workflow.add_edge("decision", "response")
     workflow.add_edge("response", "guard")
@@ -487,31 +996,133 @@ _compiled_no_response = None
 
 
 def get_workflow_no_response():
-    """无 response/guard 节点的 workflow — 供 SSE 流式路径使用。"""
+    """无 response/guard 节点的 workflow — 供 SSE 真流式路径使用。
+
+    注意不能在 build_workflow() 上追加 decision→END 边（LangGraph 会 fan-out，
+    response 仍会执行），必须重建一张不含 response/guard 的图；
+    回答生成由 SSE 层调 ResponseAgent.generate_stream 真流式输出。
+    """
     global _compiled_no_response
     if _compiled_no_response is None:
-        wf = build_workflow()
-        # 移除 response 和 guard，decision 直接到 END
-        # LangGraph 的 StateGraph 在 compile 前可以修改
+        wf = StateGraph(WorkflowState)
+        wf.add_node("router", _traced("router", _node_router))
+        wf.add_node("visual", _traced("visual", _node_visual))
+        wf.add_node("retrieval", _traced("retrieval", _node_retrieval))
+        wf.add_node("reranker", _traced("reranker", _node_reranker))
+        wf.add_node("evidence_check", _traced("evidence_check", _node_evidence_check))
+        wf.add_node("decision", _traced("decision", _node_decision))
+        wf.set_entry_point("router")
+        wf.add_conditional_edges("router", get_route("router_next"),
+                                 {"visual": "visual", "retrieval": "retrieval", "response": END})
+        wf.add_edge("visual", "retrieval")
+        wf.add_edge("retrieval", "reranker")
+        wf.add_edge("reranker", "evidence_check")
+        wf.add_conditional_edges("evidence_check", get_route("has_results"),
+                                 {"decision": "decision", "response": END})
         wf.add_edge("decision", END)
         _compiled_no_response = wf.compile()
     return _compiled_no_response
+
+
+def build_dynamic_workflow() -> StateGraph:
+    """Phase 4+5 动态图：router -> planner -> supervisor -> reflect -> (supervisor | END)。
+
+    legacy build_workflow 保持不变；由 ENABLE_DYNAMIC_ORCHESTRATION 切换（默认关）。
+    """
+    wf = StateGraph(WorkflowState)
+    wf.add_node("router", _traced("router", _node_router))
+    wf.add_node("planner", _traced("planner", _node_planner))
+    wf.add_node("supervisor", _traced("supervisor", _node_supervisor))
+    wf.add_node("reflect", _traced("reflect", _node_reflect))
+    wf.set_entry_point("router")
+    wf.add_edge("router", "planner")
+    wf.add_edge("planner", "supervisor")
+    wf.add_edge("supervisor", "reflect")
+    wf.add_conditional_edges("reflect", get_route("reflect_next"),
+                             {"supervisor": "supervisor", "end": END})
+    return wf
+
+
+_compiled_dynamic = None
+
+
+def get_dynamic_workflow():
+    global _compiled_dynamic
+    if _compiled_dynamic is None:
+        _compiled_dynamic = build_dynamic_workflow().compile()
+    return _compiled_dynamic
+
+
+async def _node_planner_stream(state: WorkflowState) -> WorkflowState:
+    """真流式变体 planner：标记 response 步延迟到 SSE 层生成。"""
+    state = await _node_planner(state)
+    state.plan["stream_response"] = True
+    return state
+
+
+def build_dynamic_workflow_no_response() -> StateGraph:
+    """P0-2：真流式主链的动态图变体（router -> planner_stream -> supervisor -> END）。
+
+    已知限制：无 reflect 回环——答案由 SSE 层边生成边推送无法撤回，
+    guard 由 SSE 层流完后补跑（agent_stream 真流式段）；重生成式纠错另立课题。
+    """
+    wf = StateGraph(WorkflowState)
+    wf.add_node("router", _traced("router", _node_router))
+    wf.add_node("planner", _traced("planner", _node_planner_stream))
+    wf.add_node("supervisor", _traced("supervisor", _node_supervisor))
+    wf.set_entry_point("router")
+    wf.add_edge("router", "planner")
+    wf.add_edge("planner", "supervisor")
+    wf.add_edge("supervisor", END)
+    return wf
+
+
+_compiled_dynamic_no_response = None
+
+
+def get_dynamic_workflow_no_response():
+    global _compiled_dynamic_no_response
+    if _compiled_dynamic_no_response is None:
+        _compiled_dynamic_no_response = build_dynamic_workflow_no_response().compile()
+    return _compiled_dynamic_no_response
 
 
 async def run_workflow(user_query: str, image_url: str | None = None, session_id: str = "",
                       user_id: str = "", conversation_id: str = "", enable_checkpoint: bool = True,
                       prefill_state: WorkflowState | None = None,
                       context_prompt: str = "", no_response: bool = False,
-                      fast_mode: bool = False) -> WorkflowState:
-    wf = get_workflow_no_response() if no_response else get_workflow()
+                      fast_mode: bool = False, use_cache: bool = True,
+                      mode: str = "") -> WorkflowState:
+    # P2-1 三档派发：mode 显式优先；fast_mode 旧参数映射 lite（兼容存量调用方）
+    resolved_mode = mode or ("lite" if fast_mode else "standard")
+    if no_response:
+        # P0-2：真流式主链同样按 flag 选动态图（否则动态编排/LLM Planner/compare_retrieval 在主路径全部失效）
+        from app.core.config import ENABLE_DYNAMIC_ORCHESTRATION as _dyn_nr
 
-    # ---- Workflow 级缓存：相同 query + image 在 TTL 内直接返回 ----
-    cache_key = make_key("workflow", user_query, image_url or "noimg", user_id, session_id)
-    if not enable_checkpoint:
-        state = await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt, fast_mode)
+        # mode=max 作为动态编排的按请求灰度入口（比全局 flag 更细粒度）
+        wf = get_dynamic_workflow_no_response() if (_dyn_nr or resolved_mode == "max") \
+            else get_workflow_no_response()
+    else:
+        from app.core.config import ENABLE_DYNAMIC_ORCHESTRATION
+
+        wf = get_dynamic_workflow() if (ENABLE_DYNAMIC_ORCHESTRATION or resolved_mode == "max") \
+            else get_workflow()
+
+    # 全链路 trace：为本次请求设置共享 trace_id（session_id 作为关联键），
+    # 使 Router/Retrieval/Reranker/Decision/Response 的 LLM span 串成一条链路。
+    from app.observability.request_context import ensure_trace_id
+    ensure_trace_id(session_id)
+
+    # ---- Workflow 级缓存（与 checkpoint 解耦）：相同 query + image 在 TTL 内直接返回 ----
+    # key 含 context_prompt 摘要：同 query 不同会话上下文（追问/偏好）不串结果；
+    # 含 mode：lite/standard/max 不同档链路结果不互串
+    cache_key = make_key("workflow", user_query, image_url or "noimg", user_id, session_id,
+                         resolved_mode, (context_prompt or "")[:120])
+    if not use_cache:
+        state = await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt, resolved_mode)
     else:
         async def _do_run():
-            return await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt, fast_mode)
+            return await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt, resolved_mode)
 
         state = await cached(
             cache_key, REDIS_CACHE_TTL_WORKFLOW, _do_run,
@@ -529,18 +1140,18 @@ async def run_workflow(user_query: str, image_url: str | None = None, session_id
 async def _run_uncached(user_query: str, image_url: str | None, session_id: str,
                         user_id: str, conversation_id: str, wf, enable_checkpoint: bool,
                         prefill_state: WorkflowState | None = None,
-                        context_prompt: str = "", fast_mode: bool = False) -> WorkflowState:
-    # 快速模式：context_prompt 前缀标记，Router 和 Reranker 节点读取
-    if fast_mode:
-        context_prompt = "[FAST_MODE]" + (context_prompt or "")
+                        context_prompt: str = "", mode: str = "standard") -> WorkflowState:
+    # P2-1：mode 显式字段替代 "[FAST_MODE]" 嵌 prompt 的 magic string
     if prefill_state is not None:
         state = prefill_state
         state.user_query = user_query
         state.image_url = image_url
         state.context_prompt = context_prompt
+        state.mode = mode
     else:
         state = WorkflowState(session_id=session_id or "", user_id=user_id, conversation_id=conversation_id,
-                              user_query=user_query, image_url=image_url, context_prompt=context_prompt)
+                              user_query=user_query, image_url=image_url, context_prompt=context_prompt,
+                              mode=mode)
 
     if enable_checkpoint and state.session_id:
         try:
@@ -553,7 +1164,22 @@ async def _run_uncached(user_query: str, image_url: str | None, session_id: str,
             _log.debug(f"Checkpoint restore skipped: {e}")
 
     # 使用 ainvoke 以支持 async node（Visual / Retrieval）
-    result_dict = await wf.ainvoke(state)
+    # Phase 3 A2A：动态编排模式下绑请求级黑板（ContextVar，节点子任务继承可见；
+    # 不挂 state：LangGraph 节点边界重建 Pydantic state 会丢失动态私有属性）
+    from app.core.config import ENABLE_DYNAMIC_ORCHESTRATION as _dyn
+
+    _bb_token = None
+    if _dyn:
+        from app.framework.blackboard import Blackboard, set_current_board
+
+        _bb_token = set_current_board(Blackboard())
+    try:
+        result_dict = await wf.ainvoke(state)
+    finally:
+        if _bb_token is not None:
+            from app.framework.blackboard import reset_current_board
+
+            reset_current_board(_bb_token)
     if isinstance(result_dict, dict):
         result = WorkflowState(**result_dict)
     else:

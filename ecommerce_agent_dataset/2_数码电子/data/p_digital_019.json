@@ -5,7 +5,7 @@
   "category": "数码电子",
   "sub_category": "平板电脑",
   "base_price": 3299.0,
-  "image_path": "2_数码电子/images/p_digital_019_live.jpg",
+  "image_path": "2_数码电子/images/p_digital_019.jpg",
   "skus": [
     {
       "sku_id": "s_p_digital_019_1",
@@ -37,7 +37,7 @@
         "存储配置": "8GB+256GB",
         "网络版本": "全网通5G版"
       },
-      "price": 3699.0
+      "price": 4211.92
     },
     {
       "sku_id": "s_p_digital_019_5",
@@ -45,7 +45,7 @@
         "存储配置": "12GB+256GB",
         "网络版本": "全网通5G版"
       },
-      "price": 3999.0
+      "price": 4549.87
     },
     {
       "sku_id": "s_p_digital_019_6",
@@ -53,7 +53,7 @@
         "存储配置": "12GB+512GB",
         "网络版本": "全网通5G版"
       },
-      "price": 4299.0
+      "price": 4914.86
     }
   ],
   "rag_knowledge": {

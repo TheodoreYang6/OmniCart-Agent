@@ -1,0 +1,79 @@
+{
+  "product_id": "p_digital_043",
+  "title": "三星QA75Q60CAJXXZ 75英寸4K超高清量子点QLED电视杜比视界HDR智能语音遥控2023款",
+  "brand": "三星",
+  "category": "数码电子",
+  "sub_category": "电视",
+  "base_price": 4299.0,
+  "image_path": "2_数码电子/images/p_digital_043.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_043_1",
+      "properties": {
+        "尺寸": "55英寸",
+        "分辨率": "3840×2160（4K）"
+      },
+      "price": 4299.0
+    },
+    {
+      "sku_id": "s_p_digital_043_2",
+      "properties": {
+        "尺寸": "65英寸",
+        "分辨率": "3840×2160（4K）"
+      },
+      "price": 6499.0
+    },
+    {
+      "sku_id": "s_p_digital_043_3",
+      "properties": {
+        "尺寸": "75英寸",
+        "分辨率": "3840×2160（4K）"
+      },
+      "price": 8999.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "三星QA75Q60CAJXXZ是三星2023年主力中高端QLED电视，搭载第四代量子点技术与Quantum HDR 10+，峰值亮度达1200尼特，实现100%色域覆盖与10亿级色彩表现。采用Direct Full Array 12X背光分区与AI画质引擎，实时优化对比度与细节；内置Tizen 7.0系统，支持Bixby/Amazon Alexa/Google Assistant三平台语音控制及Apple AirPlay 2。适合客厅主力观影、PS5/Xbox Series X主机游戏及家庭多屏协同场景。开机即连Wi-Fi，推荐搭配三星Soundbar Q700A通过Q-Symphony同步发声。注意：需预留≥12cm背部散热空间，HDMI 2.1接口仅限下置接口支持4K@120Hz输入。",
+    "official_faq": [
+      {
+        "question": "Quantum HDR 10+和普通HDR10有什么区别？实测峰值亮度能达到多少？",
+        "answer": "Quantum HDR 10+是三星专属动态元数据HDR标准，基于每帧画面独立分析亮度与色彩分布，配合Direct Full Array 12X背光分区实现精准控光；而普通HDR10仅使用静态元数据。本机经DisplayMate认证，全屏持续亮度为600尼特，窗口峰值亮度（10%面积）达1200尼特（IEC 62087-3标准），显著提升爆炸、阳光等高光场景的层次感。建议在环境照度≤50lux的客厅使用以获得最佳HDR观感。"
+      },
+      {
+        "question": "HDMI 2.1接口有几个？是否支持VRR和ALLM？游戏延迟实测值是多少？",
+        "answer": "本机共2个HDMI接口，仅HDMI IN 2（标注‘Game’）为完整HDMI 2.1规格，支持4K@120Hz输入、可变刷新率（VRR）、自动低延迟模式（ALLM）及eARC。实测《使命召唤：现代战争II》1080p/1440p模式下输入延迟为12.8ms（RTINGS 2023.09测试数据），开启Game Mode后稳定低于13ms；但4K@120Hz需确保主机固件更新至最新版，且线材须为Ultra High Speed HDMI认证（带宽≥48Gbps）。"
+      },
+      {
+        "question": "Tizen系统能否安装第三方APK？是否支持国内主流视频平台投屏？",
+        "answer": "Tizen OS 7.0为封闭系统，不支持手动安装非三星应用商店（Samsung Galaxy Store TV版）的APK文件，亦无法侧载爱奇艺/腾讯视频等安卓APK。但原生预装优酷、芒果TV、哔哩哔哩TV版（2023年8月已上架），并全面支持Miracast与DLNA协议——华为/小米手机通过‘多屏协同’或‘TV投屏’功能可实现1080P无压缩投屏，延迟＜0.8秒；苹果设备需通过AirPlay 2镜像，首次连接需同Wi-Fi且iOS 15.4+。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "李小米",
+        "rating": 5,
+        "content": "75英寸版8999元入手，已用5个月。每天晚上看Netflix杜比视界片源，量子点显色太惊艳了——樱花粉、青金石蓝完全不发灰，老公打《艾尔登法环》时暗场细节全看得清。语音遥控识别率很高，说‘打开腾讯视频’秒响应。唯一小遗憾是底座略窄，配了加宽支架。"
+      },
+      {
+        "nickname": "王梓涵",
+        "rating": 4,
+        "content": "65英寸6499元购入，挂墙安装。Tizen系统流畅度远超老LG，优酷4K HDR片源加载只要2秒。用HDMI 2.1接PS5玩《蜘蛛侠2》，120Hz+VRR让丝滑感拉满。就是待机耗电稍高（实测0.8W），比宣传的0.5W略高，不过不影响使用体验。"
+      },
+      {
+        "nickname": "张雅静",
+        "rating": 3,
+        "content": "55英寸4299元买来放父母卧室，老人觉得遥控器按钮太多难上手，语音偶尔听不清‘央视一套’。画质确实比老海信强，但白天开窗帘后反光明显（镜面屏），老妈总说‘像照镜子’。已换哑光贴膜，现在好多了。"
+      },
+      {
+        "nickname": "陈哲宇",
+        "rating": 5,
+        "content": "75英寸8999元京东自营下单，到货当天就挂好。用CalMAN软件校准后ΔE＜2.1，比朋友家万元索尼X90L还准。看BBC纪录片羽毛纹理清晰到根根分明，杜比全景声通过Q-Symphony联动Q700A Soundbar后声场宽度惊人。真香！"
+      },
+      {
+        "nickname": "周婷",
+        "rating": 2,
+        "content": "65英寸6499元买的，用了3周。APP更新频繁（两周3次系统升级），每次重启要3分钟，有次升级失败黑屏10分钟。更糟的是，HDMI 2.1接口插拔5次后接触不良，主机信号断续，客服只让寄修。对非技术用户来说，售后响应慢（等了4天才上门）。"
+      }
+    ]
+  }
+}

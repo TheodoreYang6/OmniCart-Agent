@@ -1,0 +1,79 @@
+{
+  "product_id": "p_digital_107",
+  "title": "Anker 737充电器（GaNPrime）65W双USB-C快充氮化镓迷你桌面充电器，支持PD3.1/PPS/全协议兼容，含折叠插脚",
+  "brand": "Anker",
+  "category": "数码电子",
+  "sub_category": "充电器",
+  "base_price": 199.0,
+  "image_path": "2_数码电子/images/p_digital_107.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_digital_107_1",
+      "properties": {
+        "功率": "65W",
+        "接口": "2×USB-C"
+      },
+      "price": 199.0
+    },
+    {
+      "sku_id": "s_p_digital_107_2",
+      "properties": {
+        "功率": "100W",
+        "接口": "2×USB-C"
+      },
+      "price": 269.0
+    },
+    {
+      "sku_id": "s_p_digital_107_3",
+      "properties": {
+        "功率": "140W",
+        "接口": "2×USB-C"
+      },
+      "price": 329.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "Anker 737充电器（GaNPrime）是Anker旗舰级氮化镓快充产品，采用自研GaNPrime第三代氮化镓芯片，转换效率达94.5%，满载温控≤42℃。搭载智能AI-PD协议识别引擎，兼容USB PD3.1（28V/5A）、PPS、QC4+等30+快充协议，单C口最高65W（140W型号单口140W），双口同时输出时智能动态分配（如65W+30W）。体积仅89×49×49mm，重量168g，配备可折叠国标插脚与阻燃PC+ABS复合壳体。适合多设备用户（MacBook Pro/华为MateBook/Dell XPS+iPhone 15 Pro+Pixel 8）出差通勤场景。建议搭配原装或Anker认证线材使用，双口满载时优先为高功耗设备分配主C口。首次使用前建议空载通电5分钟激活IC芯片，勿长期置于密闭散热不良环境。",
+    "official_faq": [
+      {
+        "question": "GaNPrime芯片相比普通GaN芯片有何实际提升？",
+        "answer": "GaNPrime是Anker自研第三代氮化镓技术，集成SiC肖特基二极管与主动式动态频率调制（ADFM）电路，在65W满载下温升降低11.3℃（实测41.2℃ vs 普通GaN 52.5℃），转换效率提升至94.5%（UL报告编号E495418），并支持更宽输入电压范围（100–240V AC）。这意味着在连续3小时双口满载充电时，机身无明显烫感，且适配老旧公寓稳压能力更强，不因电压波动触发降频。"
+      },
+      {
+        "question": "140W型号能否给MacBook Pro 16英寸（2023 M3 Max）实现满速充电？",
+        "answer": "可以。140W型号在单C口模式下支持USB PD3.1 EPR档位（28V/5A），实测为MacBook Pro 16英寸（M3 Max，需macOS 13.5+）提供135W持续输入（峰值140W），30分钟从20%充至72%（官方电池容量100Wh）。注意必须使用Anker PowerLine III USB-C to C 240W认证线（线缆标识‘240W’），普通100W线将被限频至100W以下，无法触发EPR协议。"
+      },
+      {
+        "question": "双USB-C口同时输出时，功率如何智能分配？是否支持给两台笔记本同时快充？",
+        "answer": "支持智能动态功率分配：当双口均接入设备时，系统依据设备协商电压/电流实时调整。例如65W型号可输出65W+30W（总95W），100W型号为100W+30W（总130W），140W型号为140W+30W（总170W）。但两台高性能笔记本（如MacBook Pro+Surface Laptop Studio）同时接入时，若均需65W以上，系统会优先保障主C口（左侧）满速，副口降至30W（5V/3A或9V/3.33A），此时副口仅适合补电或充手机，无法维持笔记本持续快充。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "李小米",
+        "rating": 5,
+        "content": "买的是65W版199元，用了4个月，每天给iPhone 15 Pro（用原装线）和AirPods Pro充电，15分钟充到65%，AirPods一小时满电。最惊喜是给MacBook Air M2（2022）能稳定45W输入，比原装30W快一半，发热几乎感觉不到，出差塞进包里不占地方，折叠插脚太实用了！"
+      },
+      {
+        "nickname": "王梓涵",
+        "rating": 4,
+        "content": "269元买了100W款，给华为MateBook X Pro（120W需求）和iPad Pro 12.9同时充，实测双口分别58W+32W，MateBook半小时充38%，iPad充得更快。唯一小遗憾是插脚折叠后还是略厚，放西装口袋有点硌，但性能真的没话说，比绿联同价位稳多了。"
+      },
+      {
+        "nickname": "张雅静",
+        "rating": 5,
+        "content": "329元入手140W版，配Anker 240W线给MacBook Pro 16寸（M3 Max）实测峰值138W，45分钟从0到81%，比原装96W充电器快近1倍；另一口接iPhone 15 Pro，全程不断连。已连续用52天，没一次过热保护，外壳始终温温的，做工扎实，值得这个价。"
+      },
+      {
+        "nickname": "陈哲远",
+        "rating": 2,
+        "content": "199元买的65W款，给联想ThinkPad X1 Carbon Gen11（65W需求）单口充，结果只能跑到52W左右，官网说支持65W但实测达不到，查了固件版本是V1.2.3，客服说要等V1.3.0升级才能解锁全功率，但至今没推送。现在只能当50W用，有点失望。"
+      },
+      {
+        "nickname": "赵琳琳",
+        "rating": 3,
+        "content": "269元100W款，给戴尔XPS 13和三星S23 Ultra一起充，XPS能上到60W但S23只充到15W（显示‘快速充电’但实际慢），换了三条不同PPS线都一样。后来发现是S23需要特定PPS电压段，这充电器默认输出9V档，手动切不了，不如小米120W那样可调，日常够用但不够灵活。"
+      }
+    ]
+  }
+}

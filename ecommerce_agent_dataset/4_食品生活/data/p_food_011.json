@@ -4,8 +4,8 @@
   "brand": "康师傅",
   "category": "食品饮料",
   "sub_category": "方便食品",
-  "base_price": 45.0,
-  "image_path": "4_食品生活/images/p_food_011_live.jpg",
+  "base_price": 26.0,
+  "image_path": "4_食品生活/images/p_food_011.jpg",
   "skus": [
     {
       "sku_id": "s_p_food_011_1",

@@ -1,0 +1,53 @@
+name: backend-unit
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "tests/**"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".github/workflows/backend-unit.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "tests/**"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".github/workflows/backend-unit.yml"
+
+jobs:
+  unit:
+    name: Unit (MOCK mode, no external deps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # MOCK 模式 + 不配置 DB/Qdrant/Redis → 三级降级到 JSON/本地/无缓存，无需外部服务
+    env:
+      OMNICART_MOCK_MODE: "true"
+      DATABASE_URL: ""
+      QDRANT_URL: ""
+      REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      # 优先跑纯框架层单测（快、无重依赖），再跑业务单测
+      - name: Run framework + unit tests
+        run: |
+          pytest tests/unit backend/tests/unit \
+            --cov=backend/app/framework --cov=backend/app/providers \
+            --cov-report=term-missing -v
+
+      # 组件治理门禁：校验各 builtin() 清单名称唯一 + 契约完整
+      - name: Component governance check
+        run: PYTHONPATH=backend python scripts/check_governance.py

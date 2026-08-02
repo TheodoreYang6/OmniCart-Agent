@@ -5,7 +5,7 @@
   "category": "美妆护肤",
   "sub_category": "眉笔",
   "base_price": 89.0,
-  "image_path": "1_美妆护肤/images/p_beauty_025_live.jpg",
+  "image_path": "1_美妆护肤/images/p_beauty_025.jpg",
   "skus": [
     {
       "sku_id": "s_p_beauty_025_1",
@@ -19,7 +19,7 @@
       "properties": {
         "色号": "0.08g 自然棕"
       },
-      "price": 89.0
+      "price": 105.02
     }
   ],
   "rag_knowledge": {

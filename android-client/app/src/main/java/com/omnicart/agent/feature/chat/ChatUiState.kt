@@ -31,7 +31,7 @@ data class ChatMessage(
     val isTranscribing: Boolean = false,
     val voiceAudioUrl: String? = null,
     val imageUri: android.net.Uri? = null,
-    // 问问豆仔对比数据
+    // 问问小O对比数据
     val targetProductAnalysis: Map<String, Any?>? = null,
     val comparisonTable: Map<String, Any?>? = null,
     val alternativeProducts: List<Map<String, Any?>>? = null,

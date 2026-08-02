@@ -113,6 +113,39 @@ class PgProductRepository(BaseProductRepository):
                 rows = [self._row_to_product(r) for r in result.scalars()]
             return rows
 
+    async def _akeyword_search(
+        self,
+        query: str,
+        top_k: int = 20,
+        category: str | None = None,
+        sub_category: str | None = None,
+        price_max: float | None = None,
+        price_min: float | None = None,
+    ) -> list[tuple[Product, float]]:
+        """pg_trgm 关键词检索（中文子串/模糊，基于 search_text 列 + word_similarity）。"""
+        factory = get_session_sync()
+        if factory is None:
+            return []
+        sim = func.word_similarity(query, ProductModel.search_text)
+        stmt = select(ProductModel, sim.label("sim"))
+        if category:
+            stmt = stmt.where(ProductModel.category == category)
+        if sub_category:
+            stmt = stmt.where(ProductModel.sub_category == sub_category)
+        if price_max is not None:
+            stmt = stmt.where(ProductModel.base_price <= price_max)
+        if price_min is not None:
+            stmt = stmt.where(ProductModel.base_price >= price_min)
+        stmt = stmt.order_by(sim.desc()).limit(top_k)
+        async with factory() as session:
+            result = await session.execute(stmt)
+            out: list[tuple[Product, float]] = []
+            for row in result.all():
+                score = float(row[1] or 0.0)
+                if score > 0:
+                    out.append((self._row_to_product(row[0]), score))
+            return out
+
     async def _aget_categories(self) -> list[str]:
         factory = get_session_sync()
         if factory is None:
@@ -200,6 +233,19 @@ class PgProductRepository(BaseProductRepository):
 
     def search_text(self, query: str, top_k: int = 20) -> list[Product]:
         return run_async(self._asearch_text(query, top_k))
+
+    def keyword_search(
+        self,
+        query: str,
+        top_k: int = 20,
+        category: str | None = None,
+        sub_category: str | None = None,
+        price_max: float | None = None,
+        price_min: float | None = None,
+    ) -> list[tuple[Product, float]]:
+        return run_async(
+            self._akeyword_search(query, top_k, category, sub_category, price_max, price_min)
+        )
 
     def get_categories(self) -> list[str]:
         return run_async(self._aget_categories())

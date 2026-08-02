@@ -1,0 +1,69 @@
+name: smoke
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "scripts/**"
+      - ".github/workflows/smoke.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "scripts/**"
+      - ".github/workflows/smoke.yml"
+
+jobs:
+  smoke:
+    name: Smoke (boot + health + recommend, MOCK mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OMNICART_MOCK_MODE: "true"
+      OMNICART_PORT: "8006"
+      DATABASE_URL: ""
+      QDRANT_URL: ""
+      REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Boot server (background) + health check
+        working-directory: backend
+        run: |
+          uvicorn app.main:app --host 127.0.0.1 --port 8006 &
+          echo $! > /tmp/omnicart.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8006/api/health; then
+              echo "\n✅ health ok"; break
+            fi
+            sleep 2
+            if [ "$i" -eq 30 ]; then echo "❌ server did not become healthy"; exit 1; fi
+          done
+
+      - name: Recommend smoke (V0 sync endpoint)
+        run: |
+          code=$(curl -s -o /tmp/rec.json -w "%{http_code}" -X POST \
+            http://127.0.0.1:8006/api/recommend \
+            -H 'Content-Type: application/json' \
+            -d '{"query":"推荐一款蓝牙耳机，500以内"}')
+          echo "HTTP $code"; head -c 400 /tmp/rec.json || true
+          test "$code" = "200"
+
+      - name: Optional smoke script
+        run: |
+          if [ -f scripts/smoke_recommend.py ]; then
+            python scripts/smoke_recommend.py || echo "⚠️ smoke_recommend.py returned non-zero (non-blocking)"
+          fi
+
+      - name: Stop server
+        if: always()
+        run: kill "$(cat /tmp/omnicart.pid)" 2>/dev/null || true

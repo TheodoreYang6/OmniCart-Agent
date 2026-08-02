@@ -4,8 +4,8 @@
   "brand": "良品铺子",
   "category": "食品饮料",
   "sub_category": "坚果/零食",
-  "base_price": 59.0,
-  "image_path": "4_食品生活/images/p_food_010_live.jpg",
+  "base_price": 35.0,
+  "image_path": "4_食品生活/images/p_food_010.jpg",
   "skus": [
     {
       "sku_id": "s_p_food_010_1",
@@ -29,7 +29,7 @@
         "数量": "约40枚",
         "容量": "500g"
       },
-      "price": 32.0
+      "price": 67.96
     },
     {
       "sku_id": "s_p_food_010_4",
@@ -37,7 +37,7 @@
         "数量": "约40枚",
         "容量": "1000g"
       },
-      "price": 59.0
+      "price": 74.4
     }
   ],
   "rag_knowledge": {

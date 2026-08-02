@@ -90,7 +90,7 @@ fun ConversationListSheet(
                             Text("暂无聊天记录", style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(4.dp))
-                            Text("开始和豆仔聊天吧", style = MaterialTheme.typography.bodySmall,
+                            Text("开始和小O聊天吧", style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }

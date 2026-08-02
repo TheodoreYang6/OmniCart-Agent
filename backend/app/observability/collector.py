@@ -71,6 +71,13 @@ class TraceCollector:
         """记录一条 span，缓冲写入"""
         span.timestamp = span.timestamp or datetime.now().isoformat()
         self._buffer.append(span)
+        # 可选：同步到 Langfuse（默认关闭，异常静默，不影响主链路）
+        try:
+            from app.observability.langfuse_exporter import get_langfuse_exporter
+
+            get_langfuse_exporter().export(span)
+        except Exception:
+            pass
         if len(self._buffer) >= 10 or (time.time() - self._last_flush) > 30:
             self._flush()
 
