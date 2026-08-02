@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="douzai.png" width="120" alt="豆仔 Logo" />
+  <img src="小O.png" width="120" alt="小O Logo" />
 </p>
 
 <h1 align="center">OmniCart Agent</h1>
@@ -25,8 +25,35 @@
 <p align="center">
   <strong>🚀 服务运行中：<a href="http://8.137.187.54:8006/api/health">http://8.137.187.54:8006/api/health</a></strong>
   &nbsp;|&nbsp;
-  <strong>📱 APK 下载：<a href="http://8.137.187.54:8006/api/uploads/douzai.apk">豆仔.apk</a></strong>
+  <strong>📱 APK 下载：<a href="http://8.137.187.54:8006/api/uploads/douzai.apk">小O.apk</a></strong>
 </p>
+
+---
+
+## 换一台机器接手？看这里
+
+本 README 是**产品与架构视角**的全景介绍（这个系统是什么、为什么这么设计）。
+如果你的目标是**在新机器上把它跑起来并继续开发**，请直接读开发者文档：
+
+| 文档 | 用途 |
+|------|------|
+| **[DEVELOPMENT.md](DEVELOPMENT.md)** | 开发者上手指南：五分钟最短路径、项目结构、环境配置、开发流程与门禁、踩坑清单 |
+| **[MODULES.md](MODULES.md)** | 重要功能模块说明：每个模块负责什么、关键文件在哪、改它要注意什么 |
+| **[DEPLOY.md](DEPLOY.md)** | 服务器部署：Docker 四容器、数据初始化、备份恢复、Nginx、APK 构建 |
+| **[SERVER_OPS.md](SERVER_OPS.md)** | 线上运维：启停、日志、健康检查、防火墙 |
+
+最短路径（不填密钥也能跑通全链路）：
+
+```bash
+git clone https://github.com/TheodoreYang6/OmniCart-Agent.git
+cd OmniCart-Agent && cp .env.example .env
+docker compose up -d postgres qdrant redis
+python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+cd backend && OMNICART_MOCK_MODE=true python -m uvicorn app.main:app --port 8006 --loop asyncio
+# 另开终端：cd web-client && npm install && npm run dev
+```
+
+> ⚠️ `--loop asyncio` 必加（uvloop 与 nest_asyncio 冲突），`.env` / `.env.local` 不入库需自行从 `.env.example` 复制。
 
 ---
 
@@ -67,13 +94,15 @@
 
 ## 系统架构
 
+> **V3 框架化升级**：后端已按「框架-实现分离 + Provider/Registry」重构（RAG / Memory / Context 三大框架 + AgentManager + ModelProvider/弹性 + 全链路 trace_id + CI/治理）。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/adr/](docs/adr/)。
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                       🖥  Android Native Client                        │
 │  Kotlin + Jetpack Compose + Material 3  ·  MVVM + StateFlow           │
 │                                                                        │
 │   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐          │
-│   │  📦 商品  │   │  🫘 豆仔  │   │  🛒 购物车 │   │  👤 我的  │          │
+│   │  📦 商品  │   │  🫘 小O  │   │  🛒 购物车 │   │  👤 我的  │          │
 │   │ 商品浏览  │   │ SSE 对话  │   │ 购物管理  │   │ 个人中心  │          │
 │   └──────────┘   └──────────┘   └──────────┘   └──────────┘          │
 │                         │                                              │
@@ -167,7 +196,7 @@ Decision Agent 每件商品产出完整可解释结构：`component_scores`（7 
 | **长期** | user_preference_entries (PG) | 持久 | 品类+品牌+场景+避雷标签，条目化管理，品类感知注入 |
 | **会话** | conversations + messages (PG) | 持久 | 对话历史+消息持久化，支持跨设备恢复、增量压缩摘要 |
 
-FollowUpEngine 覆盖 **7 种追问模式**：序数指代（"第二个怎么样"）、品牌引用（"Sony那个"）、上次引用（"刚才那个"）、预算更新、购物车意图、对比意图、模糊追问（"便宜一点"）。Router 的 `_build_session_context` 注入 pending_question 实现问答链：豆仔问了问题 → 用户简短回答"好"→ 自动推断搜索意图。
+FollowUpEngine 覆盖 **7 种追问模式**：序数指代（"第二个怎么样"）、品牌引用（"Sony那个"）、上次引用（"刚才那个"）、预算更新、购物车意图、对比意图、模糊追问（"便宜一点"）。Router 的 `_build_session_context` 注入 pending_question 实现问答链：小O问了问题 → 用户简短回答"好"→ 自动推断搜索意图。
 
 ### 生产就绪：Docker 一键部署 + 云服务器 + Release APK
 
@@ -204,7 +233,7 @@ curl 8.137.187.54:8006/api/health  # 公网可访问
 | V2 工作流推荐 | `POST /api/recommend/v2` LangGraph 5-Agent | ✅ |
 | SSE 流式推荐 | `POST /api/recommend/stream` 主力端点 | ✅ |
 | 约束引导推荐 | `POST /api/recommend/guide` 品类→预算多轮 | ✅ |
-| 商品聚焦分析 | 问豆仔 → product_focused_analysis → 深度+对比 | ✅ |
+| 商品聚焦分析 | 问小O → product_focused_analysis → 深度+对比 | ✅ |
 | Reranker 精排 | Qwen3-Rerank 语义重排序 + 视觉置顶 | ✅ |
 | 6 维加权评分 | relevance + budget_fit + user_sat + value_score + spec_quality + scenario_fit + risk扣分 + 偏好加成 | ✅ |
 | 幻觉检测 | 品牌验证 + 价格准确 + 证据绑定 + 风险覆盖 | ✅ |
@@ -225,7 +254,7 @@ curl 8.137.187.54:8006/api/health  # 公网可访问
 | 功能 | 说明 | 状态 |
 |------|------|:--:|
 | 多轮追问 | 7 种追问模式自动检测 + 约束继承 | ✅ |
-| 问答链 | 豆仔提问 → 用户简短回复 → 自动推断意图 | ✅ |
+| 问答链 | 小O提问 → 用户简短回复 → 自动推断意图 | ✅ |
 | 历史对话 | 对话列表 + 消息恢复 + 删除 | ✅ |
 | 对话标题 | LLM 自动生成 + 首条截断降级 | ✅ |
 | 上下文压缩 | Qwen-turbo 增量摘要 + context_snapshot 持久化 | ✅ |
@@ -275,7 +304,7 @@ OmniCart-Agent/
 │   │           │   │   └── AgentStreamClient.kt  # SSE 流式客户端
 │   │           │   └── theme/                # Material 3 主题 (Color/Type/Theme)
 │   │           └── feature/
-│   │               ├── chat/                 # 🫘 豆仔智能对话
+│   │               ├── chat/                 # 🫘 小O智能对话
 │   │               │   ├── ChatScreen.kt     # 对话界面 (LazyColumn + 流式动画)
 │   │               │   ├── ChatInputBar.kt   # 输入栏 (文字+图片+语音+⚡)
 │   │               │   ├── ChatViewModel.kt  # 对话状态管理 (SSE/语音/Demo)
@@ -490,8 +519,8 @@ OmniCart-Agent/
 ├── CLAUDE.md                                 # Claude Code 项目指令
 ├── DEPLOY.md                                 # 部署指南
 ├── SERVER_OPS.md                             # 服务器运维手册
-├── douzai.png                                # 豆仔 Logo
-├── 豆仔.apk                                  # Release APK 安装包
+├── douzai.png                                # 小O Logo
+├── 小O.apk                                  # Release APK 安装包
 └── README.md                                 # 本文件
 ```
 
@@ -708,7 +737,7 @@ adb install app/build/outputs/apk/release/app-release.apk
                            │
     ┌──────────────────────▼──────────────────────┐
     │  Response: LLM 流式生成 + 6s 超时模板兜底    │
-    │  "嘿嘿～豆仔来安利..."  (SSE token 逐字输出) │
+    │  "嘿嘿～小O来安利..."  (SSE token 逐字输出) │
     └──────────────────────┬──────────────────────┘
                            │
     ┌──────────────────────▼──────────────────────┐
@@ -897,7 +926,7 @@ evidence_confidence = 0.25 × evidence_relevance    # 检索/精排信号强度
 关键设计决策：
 - `followup_engine.py` — **7 种追问模式统一检测**，按优先级：序数指代 → 品牌引用 → 上次引用 → 预算更新 → 购物车意图 → 对比意图 → 模糊追问
 - `conversation_service.py` `merge_constraints` — **话题切换检测**：品类变化时自动清空旧约束，防止"上次搜 T 恤，这次搜耳机"品类泄漏
-- `router_agent.py` `_build_session_context` — **问答链**：豆仔问了问题 + 用户简短回答"好"→ 从 `pending_question` 推断搜索意图
+- `router_agent.py` `_build_session_context` — **问答链**：小O问了问题 + 用户简短回答"好"→ 从 `pending_question` 推断搜索意图
 - `context_compressor.py` — 对话增量压缩为 `conversation_summary`，异步执行不阻塞 SSE
 
 **效果：** 用户可连续 10+ 轮对话，系统正确理解指代、继承约束、感知话题切换。对话标题 LLM 自动生成。
@@ -1120,20 +1149,28 @@ curl http://localhost:8006/api/health          # 健康检查
 
 ## 文档索引
 
+### 开发与部署
+
 | 文档 | 内容 |
 |------|------|
-| [CLAUDE.md](CLAUDE.md) | Claude Code 项目指令（AI 协作规范） |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | 开发者上手指南（结构 / 环境 / 流程 / 门禁 / 踩坑） |
+| [MODULES.md](MODULES.md) | 重要功能模块说明 |
+| [本地运行指南.md](本地运行指南.md) | macOS 逐步启动（含端口与常见问题） |
 | [DEPLOY.md](DEPLOY.md) | 部署指南（Docker + 云服务器 + APK） |
 | [SERVER_OPS.md](SERVER_OPS.md) | 服务器运维手册 |
-| [docs/OMNICART_AGENT_COMPLETE_BLUEPRINT.md](docs/OMNICART_AGENT_COMPLETE_BLUEPRINT.md) | 完整蓝图（最终设计） |
-| [docs/AGENT_COLLABORATION.md](docs/AGENT_COLLABORATION.md) | 5 Agent 协同设计 |
-| [docs/RAG_PIPELINE.md](docs/RAG_PIPELINE.md) | RAG 全链路详解 |
-| [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) | 三层记忆系统 |
-| [docs/SCORING_SYSTEM_COMPLETE_REFERENCE.md](docs/SCORING_SYSTEM_COMPLETE_REFERENCE.md) | 评分体系完整参考 |
-| [docs/DATABASE_DESIGN.md](docs/DATABASE_DESIGN.md) | 数据库设计 |
-| [docs/答辩QA手册.md](docs/答辩QA手册.md) | 答辩问答准备 |
-| [docs/CHANGELOG.md](docs/CHANGELOG.md) | 变更日志 |
-| [docs/DEVELOPMENT_RULES.md](docs/DEVELOPMENT_RULES.md) | 开发规范 |
+| [CLAUDE.md](CLAUDE.md) | AI 协作规范（项目指令） |
+
+### 设计与决策
+
+| 文档 | 内容 |
+|------|------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构说明 |
+| [docs/CONSTITUTION.md](docs/CONSTITUTION.md) | 项目工程宪章（分层与质量约束） |
+| [docs/adr/](docs/adr/) | 架构决策记录：RAG 框架 / 多路记忆 / 上下文压缩 |
+| [docs/specs/](docs/specs/) | 各期需求与方案 spec（QU v2 / 向量化 v6 / amap 架构升级 等） |
+| [docs/全链路请求流程与性能优化分析.md](docs/全链路请求流程与性能优化分析.md) | 全链路请求流程拆解与性能优化 |
+| [docs/架构升级方案-借鉴amap治理与编排.md](docs/架构升级方案-借鉴amap治理与编排.md) | framework/providers 分层升级方案 |
+| [docs/工作日志.md](docs/工作日志.md) | 开发工作日志（按任务倒序，含动机与踩坑记录） |
 
 ---
 

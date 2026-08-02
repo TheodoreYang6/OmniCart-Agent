@@ -51,13 +51,20 @@ Desktop.ini
 AGENTS.md
 claude-auto.bat
 
-# ===== Docs (internal design docs, not for public) =====
-docs/
+# ===== Docs =====
+# docs/ 已改为入库：换机器接手时需要 ARCHITECTURE / CONSTITUTION / adr / specs
+# 作为上下文，因此不再排除。注意本仓库是公开的。
 
 # ===== Temp & Misc =====
 bug.txt
 snapshots/
 课题说明会*.pdf
+# 浏览器自动化留下的 Chrome 用户目录（含本机账号 ID / 登录态哈希 / 扩展密钥）
+.tmp_verify/
+# IDE 缓存
+.qoder/
+# 与已解压的 ecommerce_agent_dataset/ 内容重复，且 81MB 会拖慢 clone
+ecommerce_agent_dataset.zip
 
 # ===== Logs =====
 *.log
