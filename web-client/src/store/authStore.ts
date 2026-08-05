@@ -1,149 +1,189 @@
-/**
- * 认证状态 — 对应安卓端 AuthManager.kt + AuthViewModel.kt。
- *
- * - token / user 信息持久化到 localStorage
- * - deviceUserId：未登录时的设备级匿名 ID（保证不同浏览器数据隔离）
- * - effectiveUserId：已登录用真实 ID，否则用设备匿名 ID
- */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import type { AuthResponse } from '@/api/types'
 
 interface AuthState {
   token: string
   userId: string
+  guestId: string
   username: string
   email: string
   phone: string
-  deviceUserId: string
+  initialized: boolean
   isLoading: boolean
   error: string | null
 
   isLoggedIn: () => boolean
   effectiveUserId: () => string
-
+  initialize: () => Promise<void>
   login: (username: string, password: string) => Promise<boolean>
-  register: (
-    username: string,
-    password: string,
-    email?: string,
-    phone?: string,
-  ) => Promise<boolean>
-  logout: () => void
+  register: (username: string, password: string, email?: string, phone?: string) => Promise<boolean>
+  logout: () => Promise<boolean>
+  expireSession: () => void
   clearError: () => void
 }
 
-function genDeviceId(): string {
-  const rand =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID().slice(0, 8)
-      : Math.random().toString(36).slice(2, 10)
-  return `device_${rand}`
+async function resetUserScopedState(loadCart = true) {
+  const [{ useChatStore }, { useCartStore }] = await Promise.all([
+    import('./chatStore'),
+    import('./cartStore'),
+  ])
+  useChatStore.getState().newConversation()
+  useCartStore.getState().reset()
+  if (loadCart) void useCartStore.getState().loadCart()
 }
+
+let initializationPromise: Promise<void> | null = null
+let identityGeneration = 0
+
+const userFields = (res: AuthResponse) => ({
+  token: '', // Web relies on the HttpOnly cookie; Bearer remains available to native clients.
+  userId: res.user_id,
+  guestId: '',
+  username: res.username,
+  email: res.email ?? '',
+  phone: res.phone ?? '',
+})
 
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       token: '',
       userId: '',
+      guestId: '',
       username: '',
       email: '',
       phone: '',
-      deviceUserId: genDeviceId(),
+      initialized: false,
       isLoading: false,
       error: null,
 
-      isLoggedIn: () => get().token.trim().length > 0,
-      effectiveUserId: () => {
-        const s = get()
-        return s.userId.trim() || s.deviceUserId
+      isLoggedIn: () => Boolean(get().userId),
+      effectiveUserId: () => get().userId || get().guestId,
+
+      initialize: async () => {
+        if (get().initialized) return
+        if (initializationPromise) return initializationPromise
+
+        const generation = identityGeneration
+        set({ isLoading: true })
+        initializationPromise = (async () => {
+          try {
+            const profile = await api.profile()
+            if (generation === identityGeneration) {
+              set({ ...userFields(profile), initialized: true, isLoading: false, error: null })
+            }
+          } catch (error) {
+            if (generation !== identityGeneration) return
+            if (!(error instanceof ApiError) || error.status !== 401) {
+              set({ error: error instanceof Error ? error.message : '初始化身份失败' })
+            }
+            try {
+              const guest = await api.guest()
+              if (generation === identityGeneration) {
+                set({
+                  token: '', userId: '', guestId: guest.guest_id, username: '', email: '', phone: '',
+                  initialized: true, isLoading: false,
+                })
+              }
+            } catch (guestError) {
+              if (generation === identityGeneration) {
+                set({
+                  initialized: true,
+                  isLoading: false,
+                  error: guestError instanceof Error ? guestError.message : '游客身份建立失败',
+                })
+              }
+            }
+          } finally {
+            if (generation === identityGeneration) initializationPromise = null
+          }
+        })()
+        return initializationPromise
       },
 
       login: async (username, password) => {
-        if (!username.trim() || !password.trim()) {
+        if (!username.trim() || !password) {
           set({ error: '请输入用户名和密码' })
           return false
         }
         set({ isLoading: true, error: null })
         try {
-          const res: AuthResponse = await api.login({ username: username.trim(), password })
-          if (res.error) {
-            set({ isLoading: false, error: '用户名或密码错误' })
-            return false
-          }
-          set({
-            isLoading: false,
-            token: res.token,
-            userId: res.user_id,
-            username: res.username,
-            email: res.email ?? '',
-            phone: res.phone ?? '',
-          })
+          const res = await api.login({ username: username.trim(), password })
+          identityGeneration += 1
+          initializationPromise = null
+          set({ ...userFields(res), initialized: true, isLoading: false })
+          await resetUserScopedState(true)
           return true
-        } catch (e) {
-          set({ isLoading: false, error: e instanceof Error ? e.message : '登录失败' })
+        } catch (error) {
+          set({ isLoading: false, error: error instanceof Error ? error.message : '登录失败' })
           return false
         }
       },
 
       register: async (username, password, email = '', phone = '') => {
-        if (!username.trim() || !password.trim()) {
-          set({ error: '请输入用户名和密码' })
-          return false
-        }
         set({ isLoading: true, error: null })
         try {
-          const res: AuthResponse = await api.register({
-            username: username.trim(),
-            password,
-            email: email.trim(),
-            phone: phone.trim(),
+          const res = await api.register({
+            username: username.trim(), password, email: email.trim(), phone: phone.trim(),
           })
-          if (res.error) {
-            set({ isLoading: false, error: '用户名已存在' })
-            return false
-          }
-          set({
-            isLoading: false,
-            token: res.token,
-            userId: res.user_id,
-            username: res.username,
-            email: res.email ?? '',
-            phone: res.phone ?? '',
-          })
+          identityGeneration += 1
+          initializationPromise = null
+          set({ ...userFields(res), initialized: true, isLoading: false })
+          await resetUserScopedState(true)
           return true
-        } catch (e) {
-          set({ isLoading: false, error: e instanceof Error ? e.message : '注册失败' })
+        } catch (error) {
+          set({ isLoading: false, error: error instanceof Error ? error.message : '注册失败' })
           return false
         }
       },
 
-      logout: () =>
-        set({ token: '', userId: '', username: '', email: '', phone: '', error: null }),
+      logout: async () => {
+        set({ isLoading: true, error: null })
+        try {
+          const guest = await api.logout()
+          identityGeneration += 1
+          initializationPromise = null
+          set({
+            token: '', userId: '', guestId: guest.guest_id, username: '', email: '', phone: '',
+            error: null, initialized: true, isLoading: false,
+          })
+          await resetUserScopedState(true)
+          return true
+        } catch (error) {
+          set({
+            isLoading: false,
+            error: error instanceof Error ? error.message : '退出失败，请重试',
+          })
+          return false
+        }
+      },
 
+      expireSession: () => {
+        identityGeneration += 1
+        initializationPromise = null
+        set({ token: '', userId: '', username: '', email: '', phone: '', initialized: false })
+      },
       clearError: () => set({ error: null }),
     }),
     {
       name: 'omnicart_auth',
-      partialize: (s) => ({
-        token: s.token,
-        userId: s.userId,
-        username: s.username,
-        email: s.email,
-        phone: s.phone,
-        deviceUserId: s.deviceUserId,
+      partialize: (state) => ({
+        userId: state.userId,
+        guestId: state.guestId,
+        username: state.username,
+        email: state.email,
+        phone: state.phone,
       }),
     },
   ),
 )
 
-/** 供非 React 模块（api/client、api/stream）读取当前 token。 */
 export function getToken(): string {
   return useAuthStore.getState().token
 }
 
-/** 供非 React 模块读取当前有效用户 ID。 */
 export function getEffectiveUserId(): string {
   return useAuthStore.getState().effectiveUserId()
 }

@@ -19,7 +19,7 @@ const STATUS_CN: Record<string, string> = {
 
 export function OrdersPage() {
   const navigate = useNavigate()
-  const effectiveUserId = useAuthStore((s) => s.userId || s.deviceUserId)
+  const effectiveUserId = useAuthStore((s) => s.userId || s.guestId)
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -49,7 +49,7 @@ export function OrdersPage() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-4">
+        <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
           {loading ? (
             <LoadingBlock text="加载订单…" />
           ) : orders.length === 0 ? (
@@ -59,7 +59,7 @@ export function OrdersPage() {
               description="下单后可在这里查看"
             />
           ) : (
-            <div className="space-y-3">
+            <div className="relative grid items-start gap-4 lg:grid-cols-2 lg:before:absolute lg:before:-left-7 lg:before:top-2 lg:before:h-[calc(100%-1rem)] lg:before:w-px lg:before:bg-[var(--line)]">
               {orders.map((order) => (
                 <div
                   key={order.order_id}

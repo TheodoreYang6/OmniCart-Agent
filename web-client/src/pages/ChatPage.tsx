@@ -1,17 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { History, Plus, Sparkles, Mic, ImagePlus, MessageCircleHeart } from 'lucide-react'
 import { useChatStore, type ChatMessage } from '@/store/chatStore'
 import { useCartStore } from '@/store/cartStore'
-import { MessageBubble } from '@/components/chat/MessageBubble'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { ConversationHistory } from '@/components/chat/ConversationHistory'
 import { AgentInsights, type InsightData } from '@/components/chat/AgentInsights'
 import { ProductSpotlight } from '@/components/product/ProductSpotlight'
-import type { DecisionResult, Product } from '@/api/types'
+import type { ChatAction, DecisionResult, Product } from '@/api/types'
 import { Modal } from '@/components/ui/Modal'
-import { OmiAvatar } from '@/components/brand/Omi'
-import { OmiPerch } from '@/components/brand/OmiPerch'
+import { OmiAppIcon } from '@/components/brand/OmiAppIcon'
+import { OmiHero } from '@/components/brand/OmiHero'
 import { AgentTrail } from '@/components/chat/AgentTrail'
 import { useOmiState, omiExpressionForScore } from '@/hooks/useOmiState'
 import { toast } from '@/store/toastStore'
@@ -23,6 +22,8 @@ const SUGGESTIONS = [
   '帮我挑一双适合跑步的运动鞋',
   '有没有适合送礼的高性价比零食',
 ]
+
+const MessageBubble = lazy(() => import('@/components/chat/MessageBubble').then((module) => ({ default: module.MessageBubble })))
 
 export function ChatPage() {
   const navigate = useNavigate()
@@ -46,6 +47,7 @@ export function ChatPage() {
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const [insight, setInsight] = useState<InsightData | null>(null)
+  const [desktopWorkspace, setDesktopWorkspace] = useState(false)
   // Spotlight：点击聊天内商品卡原地展开评分细则 + AI 总结（不再跳详情页）
   const [spotlight, setSpotlight] = useState<{
     product: Product
@@ -77,6 +79,14 @@ export function ChatPage() {
   }
   // 思考-行动轨迹（纯视图层累计 loadingMessage 历史，深度思考时展示时间线）
   const [statusTrail, setStatusTrail] = useState<string[]>([])
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1024px)')
+    const sync = () => setDesktopWorkspace(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
 
   useEffect(() => {
     if (!isStreaming) {
@@ -142,7 +152,7 @@ export function ChatPage() {
 
   const isEmpty = messages.length === 0
 
-  const handleAction = async (action: Record<string, unknown>) => {
+  const handleAction = async (action: ChatAction) => {
     const type = String(action.type ?? '')
     const label = String(action.label ?? '')
     if (type === 'address_form') {
@@ -192,7 +202,7 @@ export function ChatPage() {
     <div className="aurora-bg flex h-full flex-col">
       {/* 头部：玻璃条 */}
       <header className="glass-strong z-10 flex items-center gap-3 border-b border-[var(--line)] px-4 py-3">
-        <OmiAvatar size={32} {...omiVisual} />
+        <OmiAppIcon size={42} phase={omiVisual.phase} shape="circle" />
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-bold leading-tight text-ink">{headerTitle}</p>
           <p className="text-xs text-ink-muted">
@@ -203,6 +213,7 @@ export function ChatPage() {
           onClick={() => newConversation()}
           className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-muted transition hover:bg-[var(--glass-bg-strong)] hover:text-brand-500"
           title="新对话"
+          aria-label="新对话"
         >
           <Plus size={20} />
         </button>
@@ -210,6 +221,7 @@ export function ChatPage() {
           onClick={() => setHistoryOpen(true)}
           className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-muted transition hover:bg-[var(--glass-bg-strong)] hover:text-brand-500"
           title="历史对话"
+          aria-label="历史对话"
         >
           <History size={20} />
         </button>
@@ -221,24 +233,26 @@ export function ChatPage() {
           <WelcomeScreen onPick={(t) => send(t)} />
         ) : (
           <div className="mx-auto max-w-3xl space-y-5 px-3 py-5 sm:px-4">
-            {messages.map((m) => (
-              <MessageBubble
-                key={m.id}
-                message={m}
-                onProductClick={(id) => openSpotlight(id)}
-                onAddToCart={handleAddToCart}
-                onAskAgent={askAgent}
-                onOpenInsights={openInsights}
-                onActionClick={handleAction}
-                onOptionClick={send}
-                onPlayTTS={playTTS}
-              />
-            ))}
+            <Suspense fallback={null}>
+              {messages.map((m) => (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  onProductClick={(id) => openSpotlight(id)}
+                  onAddToCart={handleAddToCart}
+                  onAskAgent={askAgent}
+                  onOpenInsights={openInsights}
+                  onActionClick={handleAction}
+                  onOptionClick={send}
+                  onPlayTTS={playTTS}
+                />
+              ))}
+            </Suspense>
 
             {/* 流式进行中的助手气泡 */}
             {isStreaming && (
               <div className="flex gap-2.5 animate-fade-in">
-                <OmiAvatar size={28} {...omiVisual} />
+                <OmiAppIcon size={38} phase={omiVisual.phase} shape="circle" />
                 <div className="flex min-w-0 max-w-[calc(100%-3rem)] flex-col gap-2">
                   {/* 思考-行动轨迹（P2 卡片流：完成步打勾、当前步 spinner+光环） */}
                   {!streamingText && statusTrail.length > 1 && (
@@ -275,8 +289,8 @@ export function ChatPage() {
         open={!!insight}
         onClose={() => setInsight(null)}
         title={`${AGENT_NAME}的推理过程`}
-        variant="bottom"
-        className="sm:max-w-2xl"
+        variant={desktopWorkspace ? 'right' : 'bottom'}
+        className={desktopWorkspace ? 'max-w-[420px]' : 'sm:max-w-2xl'}
       >
         <div className="h-[70vh]">{insight && <AgentInsights data={insight} />}</div>
       </Modal>
@@ -302,45 +316,44 @@ function WelcomeScreen({ onPick }: { onPick: (text: string) => void }) {
   return (
     // min-h-full（而非 h-full）：内容超高时自然撑开滚动，不会上下被裁切；
     // short: 矮视口紧凑档（MacBook Air 级），外接大屏视觉不变
-    <div className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center px-6 py-8 text-center short:py-5">
-      {/* P1 影院化主视觉：欧米卧在主标题上（前爪压住字的上沿）+ 顶部聚光锥。
-          -mb 负边距造重叠（而非 absolute）：保持在文档流内，标题不会因脉出而跳位 */}
+    <div className="mx-auto flex min-h-full w-full max-w-[960px] flex-col items-center justify-center px-3 py-3 text-center sm:px-6 sm:py-8 short:py-3">
+      {/* 欧米和标题各占一行。透明素材保留趴姿，但不再借负边距遮住标题。 */}
       <div className="hero-spotlight relative flex flex-col items-center">
         <div className="absolute inset-x-0 top-0 -z-10 mx-auto h-40 w-40 scale-125 rounded-full bg-brand-200/40 blur-3xl" />
-        <OmiPerch className="-mb-5 w-56 cursor-pointer sm:w-64 short:-mb-4 short:w-44" />
-        <h1 className="text-2xl font-extrabold sm:text-3xl short:text-xl">
-          嗨，我是<span className="gradient-text">{AGENT_NAME}</span> <span>👋</span>
+        <OmiHero size="default" className="mb-1" />
+        <h1 className="relative z-20 text-2xl font-extrabold sm:text-3xl short:text-xl">
+          嗨，我是<span className="gradient-text">{AGENT_NAME}</span> <span aria-hidden>👋</span>
         </h1>
       </div>
       <p className="gradient-text mt-1 text-sm font-semibold">{AGENT_TAGLINE}</p>
       {/* 打字循环行：轮播示例 query，降低“不知道问什么”的冷启动成本 */}
-      <p className="mt-3 h-6 text-[15px] text-ink-soft short:mt-2">
+      <p className="mt-2 h-6 text-sm text-ink-soft sm:mt-3 sm:text-[15px] short:mt-1">
         试试问我：<TypeCycle items={SUGGESTIONS} />
       </p>
 
       {/* 能力入口：Bento 玻璃三卡；矮屏下隐描述收成图标胶囊，省出呼吸空间 */}
-      <div className="mt-6 grid w-full max-w-xl grid-cols-1 gap-2.5 sm:grid-cols-3 short:mt-4">
+      <div className="mt-3 grid w-full max-w-3xl grid-cols-3 gap-1.5 sm:mt-6 sm:gap-2.5 short:mt-2">
         {[
           { icon: MessageCircleHeart, title: '文字对话', desc: '聊需求、比参数、直接下单' },
           { icon: Mic, title: '语音输入', desc: '说一句话，欧米听得懂' },
           { icon: ImagePlus, title: '拍图识物', desc: '截图/实拍，找同款比价' },
         ].map(({ icon: Icon, title, desc }) => (
-          <div key={title} className="glass card-hover flex flex-col items-center gap-1 px-3 py-4 short:flex-row short:justify-center short:gap-2 short:py-2.5">
+          <div key={title} className="glass card-hover flex min-w-0 flex-col items-center gap-1 px-1 py-2.5 sm:px-3 sm:py-4 short:py-2">
             <span className="gradient-brand flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-glow short:h-7 short:w-7">
               <Icon size={17} />
             </span>
-            <span className="mt-1 text-[13px] font-semibold text-ink short:mt-0">{title}</span>
-            <span className="text-[11px] leading-snug text-ink-muted short:hidden">{desc}</span>
+            <span className="mt-1 text-[11px] font-semibold text-ink sm:text-[13px] short:mt-0">{title}</span>
+            <span className="hidden text-[11px] leading-snug text-ink-muted sm:block short:hidden">{desc}</span>
           </div>
         ))}
       </div>
 
-      <div className="mt-6 grid w-full gap-2.5 sm:grid-cols-2 short:mt-4">
+      <div className="mt-3 grid w-full grid-cols-2 gap-1.5 sm:mt-6 sm:gap-2.5 short:mt-2">
         {SUGGESTIONS.map((s) => (
           <button
             key={s}
             onClick={() => onPick(s)}
-            className="glass card-hover group flex items-center gap-2 px-4 py-3.5 text-left text-sm text-ink-soft transition hover:text-brand-600 short:py-2.5"
+            className="glass card-hover group flex min-w-0 items-center gap-1.5 px-2 py-2 text-left text-[11px] text-ink-soft transition hover:text-brand-600 sm:gap-2 sm:px-4 sm:py-3.5 sm:text-sm short:py-2"
           >
             <Sparkles size={15} className="shrink-0 text-brand-400 transition-transform duration-200 group-hover:scale-125 group-hover:rotate-12" />
             <span className="line-clamp-1">{s}</span>

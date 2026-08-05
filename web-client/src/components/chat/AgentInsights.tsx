@@ -10,6 +10,7 @@ import type {
   DecisionResult,
   EvidenceItem,
   Product,
+  RetrievalPlan,
   TraceStepItem,
 } from '@/api/types'
 import { componentLabel, levelStyle, scoreColor } from '@/lib/format'
@@ -20,7 +21,7 @@ export interface InsightData {
   decisionResults: DecisionResult[]
   evidenceList: EvidenceItem[]
   traceSteps: TraceStepItem[]
-  retrievalPlan?: Record<string, unknown> | null
+  retrievalPlan?: RetrievalPlan | null
   sufficiencyReport?: Record<string, unknown> | null
   constraints?: Record<string, unknown> | null
   harnessReport?: Record<string, unknown> | null
@@ -218,12 +219,12 @@ function PlanView({
   constraints,
   harness,
 }: {
-  plan?: Record<string, unknown> | null
+  plan?: RetrievalPlan | null
   sufficiency?: Record<string, unknown> | null
   constraints?: Record<string, unknown> | null
   harness?: Record<string, unknown> | null
 }) {
-  const rows = (obj?: Record<string, unknown> | null) =>
+  const rows = (obj?: object | null) =>
     Object.entries(obj ?? {}).filter(([, v]) => v !== null && v !== undefined && v !== '')
 
   const Section = ({
@@ -233,7 +234,7 @@ function PlanView({
   }: {
     title: string
     icon: typeof Activity
-    obj?: Record<string, unknown> | null
+    obj?: object | null
   }) => {
     const r = rows(obj)
     if (!r.length) return null

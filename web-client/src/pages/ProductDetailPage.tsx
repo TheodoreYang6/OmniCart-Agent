@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ChevronDown, ShoppingCart, ShieldAlert } from 'lucide-react'
 import { api } from '@/api/client'
-import type { ProductDetail, Sku } from '@/api/types'
+import type { Sku } from '@/api/types'
 import { ProductImage } from '@/components/ui/ProductImage'
 import { Omi } from '@/components/brand/Omi'
 import { StarRating } from '@/components/product/ProductCard'
@@ -20,39 +21,30 @@ export function ProductDetailPage() {
   const addToCart = useCartStore((s) => s.addToCart)
   const askAgent = useChatStore((s) => s.askAgent)
 
-  const [product, setProduct] = useState<ProductDetail | null>(null)
-  const [loading, setLoading] = useState(true)
   const [activeImage, setActiveImage] = useState(0)
   const [selectedSku, setSelectedSku] = useState<Sku | null>(null)
   const [openFaq, setOpenFaq] = useState<number | null>(null)
 
+  const productQuery = useQuery({
+    queryKey: ['product', productId],
+    queryFn: ({ signal }) => api.getProduct(productId, signal),
+    enabled: Boolean(productId),
+  })
+  const product = productQuery.data
   useEffect(() => {
-    let alive = true
-    setLoading(true)
-    api
-      .getProduct(productId)
-      .then((p) => {
-        if (!alive) return
-        setProduct(p)
-        setSelectedSku(p.skus?.[0] ?? null)
-      })
-      .catch(() => alive && setProduct(null))
-      .finally(() => alive && setLoading(false))
-    return () => {
-      alive = false
-    }
-  }, [productId])
+    setSelectedSku(product?.skus?.[0] ?? null)
+    setActiveImage(0)
+    setOpenFaq(null)
+  }, [product])
 
-  if (loading) return <LoadingBlock text="加载商品详情…" />
-  if (!product) {
+  if (productQuery.isPending) return <LoadingBlock text="加载商品详情…" />
+  if (productQuery.isError || !product) {
     return (
       <EmptyState
-        title="商品不存在"
-        description="它可能已下架"
+        title="商品详情加载失败"
+        description={productQuery.error instanceof Error ? productQuery.error.message : '它可能已下架或网络暂时不可用'}
         action={
-          <button onClick={() => navigate(-1)} className="btn-outline mt-2">
-            返回
-          </button>
+          <div className="mt-2 flex gap-2"><button onClick={() => void productQuery.refetch()} className="btn-primary">重试</button><button onClick={() => navigate('/shop')} className="btn-outline">返回商品页</button></div>
         }
       />
     )
@@ -72,8 +64,9 @@ export function ProductDetailPage() {
       {/* 顶栏：玻璃条 */}
       <header className="glass-strong z-10 flex items-center gap-2 border-b border-[var(--line)] px-3 py-3">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/shop')}
           className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition hover:bg-[var(--glass-bg-strong)]"
+          aria-label="返回"
         >
           <ArrowLeft size={20} />
         </button>
@@ -210,6 +203,8 @@ export function ProductDetailPage() {
                       <button
                         onClick={() => setOpenFaq(openFaq === i ? null : i)}
                         className="flex w-full items-center justify-between gap-2 py-3 text-left"
+                        aria-expanded={openFaq === i}
+                        aria-controls={`faq-answer-${i}`}
                       >
                         <span className="text-sm font-medium text-ink">{f.question}</span>
                         <ChevronDown
@@ -221,7 +216,7 @@ export function ProductDetailPage() {
                         />
                       </button>
                       {openFaq === i && (
-                        <p className="pb-3 text-sm leading-relaxed text-ink-muted">{f.answer}</p>
+                        <p id={`faq-answer-${i}`} className="pb-3 text-sm leading-relaxed text-ink-muted">{f.answer}</p>
                       )}
                     </div>
                   ))}

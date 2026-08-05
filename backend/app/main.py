@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # 确保 prompt 日志可见
@@ -25,7 +26,7 @@ from app.api.eval_dashboard import router as dashboard_router
 from app.api.agent_stream import router as agent_stream_router
 from app.api.conversation import router as conversation_router
 from app.api.user_profile import router as user_profile_router
-from app.core.config import SERVICE_NAME, SERVICE_VERSION, DEMO_DATA_DIR, USE_POSTGRES, USE_QDRANT, USE_REDIS
+from app.core.config import SERVICE_NAME, SERVICE_VERSION, DEMO_DATA_DIR, USE_POSTGRES, USE_QDRANT, USE_REDIS, settings
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,8 @@ app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -74,7 +75,6 @@ app.include_router(conversation_router)
 app.include_router(user_profile_router)
 
 
-@app.on_event("startup")
 async def on_startup():
     """启动时初始化数据库连接（如果配置了）。"""
     # Composition root 预装配：工具注册表单例 + 向 framework Planner 注入
@@ -128,7 +128,6 @@ async def on_startup():
         asyncio.create_task(_warmup_local_models())
 
 
-@app.on_event("shutdown")
 async def on_shutdown():
     """关闭时释放数据库连接。"""
     if USE_POSTGRES:
@@ -153,6 +152,19 @@ async def on_shutdown():
             await close_redis()
         except Exception:
             pass
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Own local infrastructure connections for the whole application lifetime."""
+    await on_startup()
+    try:
+        yield
+    finally:
+        await on_shutdown()
+
+
+app.router.lifespan_context = lifespan
 
 
 @app.get("/")

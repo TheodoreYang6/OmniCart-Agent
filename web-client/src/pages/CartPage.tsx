@@ -9,11 +9,16 @@ import { LoadingBlock } from '@/components/ui/Spinner'
 import { toast } from '@/store/toastStore'
 import { formatPrice } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useAuthStore } from '@/store/authStore'
+import type { CartItem } from '@/api/types'
 
 export function CartPage() {
   const navigate = useNavigate()
   const items = useCartStore((s) => s.items)
   const isLoading = useCartStore((s) => s.isLoading)
+  const hasLoaded = useCartStore((s) => s.hasLoaded)
+  const error = useCartStore((s) => s.error)
   const loadCart = useCartStore((s) => s.loadCart)
   const toggleItem = useCartStore((s) => s.toggleItem)
   const toggleSelectAll = useCartStore((s) => s.toggleSelectAll)
@@ -22,14 +27,14 @@ export function CartPage() {
   const checkout = useCartStore((s) => s.checkout)
   const checkoutMessage = useCartStore((s) => s.checkoutMessage)
   const dismissCheckout = useCartStore((s) => s.dismissCheckoutMessage)
+  const pendingIds = useCartStore((s) => s.pendingIds)
+  const isSelectAllPending = useCartStore((s) => s.isSelectAllPending)
+  const isLoggedIn = useAuthStore((s) => s.isLoggedIn())
+  const [deleteTarget, setDeleteTarget] = useState<CartItem | null>(null)
 
   const selected = items.filter((i) => i.selected)
   const totalPrice = selected.reduce((sum, i) => sum + i.price * i.quantity, 0)
   const allSelected = items.length > 0 && items.every((i) => i.selected)
-
-  useEffect(() => {
-    loadCart()
-  }, [loadCart])
 
   // 场景③：下单完成 —— 欧米得意态瞬时浮层（1.6s 自动消失，不打断跳转）
   const [orderCheer, setOrderCheer] = useState(false)
@@ -46,6 +51,11 @@ export function CartPage() {
   const handleCheckout = async () => {
     if (selected.length === 0) {
       toast.info('请先选择要结算的商品')
+      return
+    }
+    if (!isLoggedIn) {
+      toast.info('登录后即可结算，购物车会自动保留')
+      navigate('/login', { state: { from: '/cart' } })
       return
     }
     const msg = await checkout()
@@ -75,9 +85,20 @@ export function CartPage() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-4">
-          {isLoading ? (
+        <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:py-6">
+          {isLoading && !hasLoaded ? (
             <LoadingBlock text="加载购物车…" />
+          ) : error && items.length === 0 ? (
+            <EmptyState
+              icon={<ShoppingCart size={28} />}
+              title="购物车加载失败"
+              description={error}
+              action={
+                <button onClick={() => void loadCart()} className="btn-primary mt-2">
+                  重新加载
+                </button>
+              }
+            />
           ) : items.length === 0 ? (
             <EmptyState
               icon={<ShoppingCart size={28} />}
@@ -90,14 +111,17 @@ export function CartPage() {
               }
             />
           ) : (
-            <div className="space-y-2.5">
-              {items.map((item) => (
+            <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="space-y-2.5">
+                {items.map((item) => (
                 <div
                   key={item.cart_item_id}
                   className="glass card-hover flex items-center gap-3 p-3"
                 >
                   <button
                     onClick={() => toggleItem(item.cart_item_id)}
+                    disabled={pendingIds.includes(item.cart_item_id)}
+                    aria-label={item.selected ? `取消选择 ${item.title}` : `选择 ${item.title}`}
                     className={cn(
                       'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition',
                       item.selected
@@ -133,8 +157,9 @@ export function CartPage() {
                           onInc={() => setQuantity(item.cart_item_id, item.quantity + 1)}
                         />
                         <button
-                          onClick={() => removeItem(item.cart_item_id)}
+                          onClick={() => setDeleteTarget(item)}
                           className="rounded-lg p-1.5 text-ink-muted transition hover:bg-rose-500/10 hover:text-rose-500"
+                          aria-label={`从购物车删除 ${item.title}`}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -142,7 +167,24 @@ export function CartPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+                ))}
+              </div>
+              <aside className="sticky top-5 hidden rounded-[24px] border border-[var(--line)] bg-[var(--surface)] p-5 shadow-soft lg:block">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-500">Order summary</p>
+                <h2 className="mt-1 text-lg font-bold text-ink">结算摘要</h2>
+                <button
+                  onClick={toggleSelectAll}
+                  disabled={isSelectAllPending}
+                  className="focus-ring mt-5 flex w-full items-center gap-2 rounded-xl py-2 text-sm text-ink-soft disabled:opacity-60"
+                >
+                  <SelectionMark selected={allSelected} /> 全选购物车商品
+                </button>
+                <div className="my-4 h-px bg-[var(--line)]" />
+                <div className="flex items-center justify-between text-sm text-ink-muted"><span>已选商品</span><span>{selected.length} 件</span></div>
+                <div className="mt-3 flex items-end justify-between"><span className="text-sm text-ink-muted">合计</span><strong className="text-2xl text-price">{formatPrice(totalPrice, 2)}</strong></div>
+                <button onClick={handleCheckout} disabled={selected.length === 0} className="btn-primary mt-5 w-full py-3 disabled:opacity-50">结算 ({selected.length})</button>
+                {!isLoggedIn && <p className="mt-3 text-xs leading-relaxed text-ink-muted">游客购物车会保留，登录后自动合并再结算。</p>}
+              </aside>
             </div>
           )}
         </div>
@@ -150,20 +192,14 @@ export function CartPage() {
 
       {/* 结算栏 */}
       {items.length > 0 && (
-        <div className="glass-strong border-t border-[var(--line)] px-4 py-3">
+        <div className="glass-strong border-t border-[var(--line)] px-4 py-3 lg:hidden">
           <div className="mx-auto flex max-w-3xl items-center gap-3">
             <button
               onClick={toggleSelectAll}
+              disabled={isSelectAllPending}
               className="flex items-center gap-1.5 text-sm text-ink-soft"
             >
-              <span
-                className={cn(
-                  'flex h-5 w-5 items-center justify-center rounded-full border-2 transition',
-                  allSelected ? 'gradient-brand border-transparent text-white shadow-glow' : 'border-[var(--field-border)]',
-                )}
-              >
-                {allSelected && <Check size={13} strokeWidth={3} />}
-              </span>
+              <SelectionMark selected={allSelected} />
               全选
             </button>
             <div className="ml-auto text-right">
@@ -180,7 +216,16 @@ export function CartPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog open={!!deleteTarget} title="移出购物车" description={`确定将“${deleteTarget?.title ?? ''}”移出购物车吗？`} onClose={() => setDeleteTarget(null)} onConfirm={async () => { if (!deleteTarget) return; await removeItem(deleteTarget.cart_item_id); setDeleteTarget(null) }} />
     </div>
+  )
+}
+
+function SelectionMark({ selected }: { selected: boolean }) {
+  return (
+    <span className={cn('flex h-5 w-5 items-center justify-center rounded-full border-2 transition', selected ? 'gradient-brand border-transparent text-white shadow-glow' : 'border-[var(--field-border)]')}>
+      {selected && <Check size={13} strokeWidth={3} />}
+    </span>
   )
 }
 
@@ -199,13 +244,16 @@ function Stepper({
         onClick={onDec}
         disabled={value <= 1}
         className="flex h-7 w-7 items-center justify-center text-ink-muted transition hover:bg-[var(--surface-variant)] disabled:opacity-30"
+        aria-label="减少数量"
       >
         <Minus size={14} />
       </button>
       <span className="w-8 text-center text-sm font-medium text-ink">{value}</span>
       <button
         onClick={onInc}
+        disabled={value >= 99}
         className="flex h-7 w-7 items-center justify-center text-ink-muted transition hover:bg-[var(--surface-variant)]"
+        aria-label="增加数量"
       >
         <Plus size={14} />
       </button>

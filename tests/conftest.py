@@ -8,6 +8,9 @@ os.environ["DATABASE_URL"] = ""
 os.environ["QDRANT_URL"] = ""
 os.environ["REDIS_URL"] = ""
 os.environ["OMNICART_MOCK_MODE"] = "true"
+# 旧集成测试通过 body/query 直接传 user_id。只在测试进程启用兼容层；
+# 生产 .env 仍保持 false，且安全单测会显式验证伪造 user_id 被拒绝。
+os.environ["OMNICART_ALLOW_LEGACY_USER_ID"] = "true"
 
 import pytest
 

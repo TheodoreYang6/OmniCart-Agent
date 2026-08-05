@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -32,6 +32,24 @@ export type OmiExpression =
 /** 会话相位（与 XiaoOPhase 同构）：thinking 光环呼吸 / talking 轻弹跳 */
 export type OmiPhase = 'idle' | 'thinking' | 'talking'
 
+export type OmiVisualState =
+  | 'idle' | 'listening' | 'searching' | 'analyzing' | 'talking'
+  | 'highScore' | 'added' | 'ordered' | 'error' | 'login'
+
+/** Product-wide state vocabulary so every Omi instance tells the same visual story. */
+export const OMI_VISUAL_STATES: Record<OmiVisualState, { expression: OmiExpression; phase: OmiPhase }> = {
+  idle: { expression: 'happy', phase: 'idle' },
+  listening: { expression: 'pleading', phase: 'idle' },
+  searching: { expression: 'search', phase: 'thinking' },
+  analyzing: { expression: 'thinking', phase: 'thinking' },
+  talking: { expression: 'happy', phase: 'talking' },
+  highScore: { expression: 'star', phase: 'idle' },
+  added: { expression: 'wink', phase: 'idle' },
+  ordered: { expression: 'smug', phase: 'idle' },
+  error: { expression: 'surprised', phase: 'idle' },
+  login: { expression: 'pleading', phase: 'idle' },
+}
+
 interface OmiProps {
   size?: number
   expression?: OmiExpression
@@ -42,6 +60,11 @@ interface OmiProps {
   /** 相位驱动动效：thinking=尾尖呼吸，talking=轻弹跳 */
   phase?: OmiPhase
   className?: string
+  /** Decorative instances stay silent; semantic instances announce the supplied label once. */
+  decorative?: boolean
+  label?: string
+  /** Enable timer-driven blinking only for a prominent, active instance. */
+  animated?: boolean
 }
 
 const CREAM = '#FDF6EC'
@@ -79,7 +102,7 @@ export function OmiAvatar({
       )}
       style={{ width: size + 10, height: size + 10 }}
     >
-      <Omi size={size} expression={exp} />
+      <Omi size={size} expression={exp} animated={phase !== 'idle'} />
     </div>
   )
 }
@@ -91,7 +114,14 @@ export function Omi({
   float = false,
   phase,
   className,
+  decorative = true,
+  label = '欧米',
+  animated = false,
 }: OmiProps) {
+  const idBase = useId().replace(/:/g, '')
+  const ids = {
+    ear: `${idBase}-ear`, eye: `${idBase}-eye`, tail: `${idBase}-tail`, glow: `${idBase}-glow`,
+  }
   const vb = withBody ? '0 0 120 152' : '0 0 120 112'
   const h = withBody ? size * (152 / 120) : size * (112 / 120)
   // 自动眨眼：只排除本身就是“闭眼语义”的两个表情——
@@ -99,7 +129,7 @@ export function Omi({
   // happy/smug 虽是月牙笑眼，但它们正是 idle 默认表情，不眨就等于
   // “让静态头像有生命感”完全落空（用户经常看到的就是 idle 态）。
   const blinkable = !['wink', 'sleepy'].includes(expression)
-  const blinking = useAutoBlink(blinkable)
+  const blinking = useAutoBlink(animated && blinkable)
   // talking 不再用 bounce-soft 的上下硬弹，统一走 .omi-talk 的柔和呼吸缩放
 
   return (
@@ -110,24 +140,25 @@ export function Omi({
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={cn(float && 'xo-float', phase === 'talking' && 'omi-talk', className)}
-      role="img"
-      aria-label="欧米"
+      role={decorative ? undefined : 'img'}
+      aria-label={decorative ? undefined : label}
+      aria-hidden={decorative || undefined}
     >
       <defs>
-        <linearGradient id="omiEar" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={ids.ear} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#7DD3FC" />
           <stop offset="1" stopColor="#256BFF" />
         </linearGradient>
-        <linearGradient id="omiEye" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={ids.eye} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#4D8BFF" />
           <stop offset="1" stopColor="#1A54E8" />
         </linearGradient>
-        <linearGradient id="omiTail" x1="0" y1="1" x2="1" y2="0">
+        <linearGradient id={ids.tail} x1="0" y1="1" x2="1" y2="0">
           <stop offset="0" stopColor={CREAM} />
           <stop offset="0.55" stopColor="#BFDCFF" />
           <stop offset="1" stopColor={BRAND} />
         </linearGradient>
-        <radialGradient id="omiGlow" cx="0.5" cy="0.5" r="0.5">
+        <radialGradient id={ids.glow} cx="0.5" cy="0.5" r="0.5">
           <stop offset="0" stopColor="#7DD3FC" stopOpacity="0.55" />
           <stop offset="1" stopColor="#7DD3FC" stopOpacity="0" />
         </radialGradient>
@@ -138,13 +169,13 @@ export function Omi({
         <g>
           {/* 尾尖光晕（thinking 相位下呼吸） */}
           <circle
-            cx="106" cy="110" r="18" fill="url(#omiGlow)"
+            cx="106" cy="110" r="18" fill={`url(#${ids.glow})`}
             className={phase === 'thinking' ? 'animate-breathe' : undefined}
           />
           {/* 尾巴：从右侧翘起，尾尖渐变为品牌蓝 */}
           <path
             d="M82 134 Q104 138 108 116 Q110 101 99 100"
-            stroke="url(#omiTail)" strokeWidth="12" strokeLinecap="round" fill="none"
+            stroke={`url(#${ids.tail})`} strokeWidth="12" strokeLinecap="round" fill="none"
           />
           {/* 躯干 */}
           <ellipse cx="60" cy="126" rx="29" ry="22" fill={CREAM} stroke={OUTLINE} strokeWidth="2" />
@@ -158,9 +189,9 @@ export function Omi({
 
       {/* ---- 耳朵：圆润三角 + 耳内品牌蓝渐变（最高识别度单点） ---- */}
       <path d="M27 47 Q13 6 55 31 Z" fill={CREAM} stroke={OUTLINE} strokeWidth="2" strokeLinejoin="round" />
-      <path d="M34 42 Q25 21 47 32 Z" fill="url(#omiEar)" />
+      <path d="M34 42 Q25 21 47 32 Z" fill={`url(#${ids.ear})`} />
       <path d="M93 47 Q107 6 65 31 Z" fill={CREAM} stroke={OUTLINE} strokeWidth="2" strokeLinejoin="round" />
-      <path d="M86 42 Q95 21 73 32 Z" fill="url(#omiEar)" />
+      <path d="M86 42 Q95 21 73 32 Z" fill={`url(#${ids.ear})`} />
 
       {/* ---- 头部：扁圆（圆度是萌感第一来源） ---- */}
       <ellipse cx="60" cy="66" rx="41" ry="34" fill={CREAM} stroke={OUTLINE} strokeWidth="2" />
@@ -188,7 +219,7 @@ export function Omi({
       <ellipse cx="91" cy="72" rx="8" ry="5.2" fill={BLUSH} opacity="0.85" />
 
       {/* 表情 */}
-      <OmiFace expression={expression} blinking={blinking} />
+      <OmiFace expression={expression} blinking={blinking} eyeId={ids.eye} />
 
       {/* 围巾（仅 withBody 时接到脖子） */}
       {withBody && (
@@ -274,9 +305,11 @@ function NoseMouth({ open = false }: { open?: boolean }) {
 function OmiFace({
   expression,
   blinking,
+  eyeId,
 }: {
   expression: OmiExpression
   blinking?: boolean
+  eyeId: string
 }) {
   const [cur, setCur] = useState(expression)
   const [fading, setFading] = useState<OmiExpression | null>(null)
@@ -291,25 +324,25 @@ function OmiFace({
 
   return (
     <g>
-      <FaceContent expression={cur} />
+      <FaceContent expression={cur} eyeId={eyeId} />
       {fading && (
         <g key={fading} className="omi-face-out">
-          <FaceContent expression={fading} />
+          <FaceContent expression={fading} eyeId={eyeId} />
         </g>
       )}
-      {blinking && <Eyelids />}
+      {blinking && <Eyelids eyeId={eyeId} />}
     </g>
   )
 }
 
 /** 眨眼眼睑：用毛色椭圆盖住眼睛 + 一道闭合眼缝，对所有表情通用。
  *  （比缩放眼睛本体更简单：眼睛分散在各表情层内部，不好统一变换）*/
-function Eyelids() {
+function Eyelids({ eyeId }: { eyeId: string }) {
   return (
     <g>
       <ellipse cx="44" cy="63" rx="9.6" ry="10.6" fill={CREAM} />
       <ellipse cx="76" cy="63" rx="9.6" ry="10.6" fill={CREAM} />
-      <g stroke="url(#omiEye)" strokeWidth="2.6" strokeLinecap="round" fill="none">
+      <g stroke={`url(#${eyeId})`} strokeWidth="2.6" strokeLinecap="round" fill="none">
         <path d="M37 63 Q44 68 51 62" />
         <path d="M69 63 Q76 68 83 62" />
       </g>
@@ -317,8 +350,8 @@ function Eyelids() {
   )
 }
 
-function FaceContent({ expression }: { expression: OmiExpression }) {
-  const eye = 'url(#omiEye)'
+function FaceContent({ expression, eyeId }: { expression: OmiExpression; eyeId: string }) {
+  const eye = `url(#${eyeId})`
 
   // 圆眼 + 双高光（默认眼型）
   const roundEyes = (
@@ -353,8 +386,8 @@ function FaceContent({ expression }: { expression: OmiExpression }) {
     // 星星眼 —— 发现好物的招牌表情
     return (
       <g>
-        <Star cx={44} cy={63} />
-        <Star cx={76} cy={63} />
+        <Star cx={44} cy={63} eyeId={eyeId} />
+        <Star cx={76} cy={63} eyeId={eyeId} />
         <NoseMouth open />
       </g>
     )
@@ -463,10 +496,10 @@ function FaceContent({ expression }: { expression: OmiExpression }) {
 }
 
 /** 四角星（星星眼） */
-function Star({ cx, cy }: { cx: number; cy: number }) {
+function Star({ cx, cy, eyeId }: { cx: number; cy: number; eyeId: string }) {
   return (
     <g>
-      <circle cx={cx} cy={cy} r="8" fill="url(#omiEye)" />
+      <circle cx={cx} cy={cy} r="8" fill={`url(#${eyeId})`} />
       <path
         d={`M${cx} ${cy - 7} Q${cx + 1.4} ${cy - 1.4} ${cx + 7} ${cy} Q${cx + 1.4} ${cy + 1.4} ${cx} ${cy + 7} Q${cx - 1.4} ${cy + 1.4} ${cx - 7} ${cy} Q${cx - 1.4} ${cy - 1.4} ${cx} ${cy - 7} Z`}
         fill="#FFFFFF"

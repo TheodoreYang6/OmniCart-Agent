@@ -2,12 +2,13 @@
 
 import uuid
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.schemas.cart import CartItem, CartItemCreate, DEMO_USER_ID
 from app.repositories.product_repo import get_product_repo
 from app.repositories.pg_cart_repo import get_cart_repo
+from app.core.identity import Actor, resolve_actor
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,7 +23,9 @@ class AgentActionRequest(BaseModel):
 
 
 @router.post("/api/agent/action")
-async def agent_action(req: AgentActionRequest):
+async def agent_action(req: AgentActionRequest, actor: Actor = Depends(resolve_actor)):
+    if isinstance(actor, Actor):
+        req.user_id = actor.user_id
     if req.action == "add_to_cart":
         repo = get_product_repo()
         product = repo.get_by_id(req.product_id)

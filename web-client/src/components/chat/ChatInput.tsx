@@ -25,6 +25,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const pendingPreview = useChatStore((s) => s.pendingImagePreview)
   const setPendingImage = useChatStore((s) => s.setPendingImage)
   const transcribe = useChatStore((s) => s.transcribe)
+  const stop = useChatStore((s) => s.stop)
 
   const recorder = useVoiceRecorder()
   const [transcribing, setTranscribing] = useState(false)
@@ -113,6 +114,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
               <button
                 onClick={() => setPendingImage(null)}
                 className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-ink/90 text-white shadow transition hover:scale-110"
+                aria-label="移除待发送图片"
               >
                 <X size={12} />
               </button>
@@ -138,12 +140,14 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             <button
               onClick={() => recorder.cancel()}
               className="rounded-lg px-3 py-1.5 text-sm text-ink-muted hover:bg-[var(--glass-bg-strong)]"
+              aria-label="取消录音"
             >
               取消
             </button>
             <button
               onClick={stopVoice}
               className="gradient-brand flex h-9 w-9 items-center justify-center rounded-full text-white shadow-glow"
+              aria-label="停止录音并发送"
             >
               <Square size={16} className="fill-white" />
             </button>
@@ -155,6 +159,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
               disabled={disabled}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-ink-muted transition hover:bg-brand-500/10 hover:text-brand-500 disabled:opacity-40"
               title="上传图片识别"
+              aria-label="上传图片识别"
             >
               <ImagePlus size={20} />
             </button>
@@ -163,6 +168,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
               disabled={disabled || transcribing}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-ink-muted transition hover:bg-brand-500/10 hover:text-brand-500 disabled:opacity-40"
               title="语音输入"
+              aria-label="语音输入"
             >
               <Mic size={20} className={transcribing ? 'animate-pulse text-brand-500' : ''} />
             </button>
@@ -185,20 +191,22 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
                   compositionEndedAtRef.current = Date.now()
                 }}
                 placeholder={transcribing ? '正在识别语音…' : '和欧米说说你想买点什么～'}
+                aria-label="给欧米发送消息"
                 disabled={disabled || transcribing}
-                className="max-h-[140px] w-full resize-none bg-transparent py-1.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-ink-muted"
+                className="composer-textarea max-h-[140px] w-full resize-none bg-transparent py-1.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-ink-muted"
               />
             </div>
 
             <button
-              onClick={handleSend}
-              disabled={!canSend}
+              onClick={disabled ? stop : handleSend}
+              disabled={!disabled && !canSend}
               className={cn(
                 'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition-all duration-200 active:scale-95',
-                canSend ? 'gradient-brand shadow-glow hover:shadow-glow-lg' : 'bg-[var(--field-border)]',
+                canSend || disabled ? 'gradient-brand shadow-glow hover:shadow-glow-lg' : 'bg-[var(--field-border)]',
               )}
+              aria-label={disabled ? '停止生成' : '发送消息'}
             >
-              <ArrowUp size={20} />
+              {disabled ? <Square size={17} className="fill-white" /> : <ArrowUp size={20} />}
             </button>
           </div>
         )}
@@ -215,6 +223,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
                   : 'text-ink-muted hover:bg-[var(--glass-bg-strong)] hover:text-ink-soft',
               )}
               title="快速模式：跳过部分推理，更快回复"
+              aria-pressed={fastMode}
             >
               <Zap size={13} className={fastMode ? 'fill-white' : ''} />
               极速回答{fastMode ? '·开' : ''}
@@ -228,6 +237,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
                   : 'text-ink-muted hover:bg-[var(--glass-bg-strong)] hover:text-ink-soft',
               )}
               title="深度思考：欧米自主多轮检索对比，更慢但更彻底"
+              aria-pressed={deepThink}
             >
               <BrainCircuit size={13} className={deepThink ? 'animate-breathe' : ''} />
               深度思考{deepThink ? '·开' : ''}

@@ -2,13 +2,14 @@ import uuid
 import time
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.repositories.product_repo import get_product_repo
 from app.retrieval.text_retriever import TextRetriever
 from app.decision.scoring import DecisionScoring
 from app.agents.visual_agent import VisualAgent
+from app.core.identity import Actor, resolve_public_actor
 
 router = APIRouter()
 
@@ -52,7 +53,9 @@ class RecommendResponse(BaseModel):
 
 
 @router.post("/api/recommend", response_model=RecommendResponse)
-async def recommend(req: RecommendRequest):
+async def recommend(req: RecommendRequest, actor: Actor = Depends(resolve_public_actor)):
+    if isinstance(actor, Actor):
+        req.user_id = actor.user_id
     session_id = req.session_id or str(uuid.uuid4())[:8]
     trace_steps: list[dict] = []
     visual_result = None
@@ -248,13 +251,15 @@ def _parse_constraints(query: str) -> dict:
 # ---- V2 LangGraph Workflow Endpoint ----
 
 @router.post("/api/recommend/v2", response_model=RecommendResponse)
-async def recommend_v2(req: RecommendRequest):
+async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_public_actor)):
     """V2 Agent Workflow: Router → Retrieval → Decision → Response"""
     from app.workflow.graph import run_workflow
     from app.services.conversation_service import get_conversation_service
     import logging
     _log = logging.getLogger(__name__)
 
+    if isinstance(actor, Actor):
+        req.user_id = actor.user_id
     session_id = req.session_id or str(uuid.uuid4())[:8]
     user_id = req.user_id or ""
     conversation_id = req.conversation_id or ""
@@ -504,10 +509,12 @@ class GuideResponse(BaseModel):
 
 
 @router.post("/api/recommend/guide", response_model=GuideResponse)
-async def recommend_guide(req: GuideRequest):
+async def recommend_guide(req: GuideRequest, actor: Actor = Depends(resolve_public_actor)):
     """约束引导式推荐: 每次返回下一轮追问或最终推荐结果。"""
     from app.services.constraint_guide import get_constraint_guide
 
+    if isinstance(actor, Actor):
+        req.user_id = actor.user_id
     session_id = req.session_id or str(uuid.uuid4())[:8]
 
     # P4: 加载长期偏好画像（预填约束 + 后续注入检索/上下文）

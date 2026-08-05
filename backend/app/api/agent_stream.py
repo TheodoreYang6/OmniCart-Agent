@@ -3,10 +3,11 @@ import asyncio, json, logging, uuid as _uuid
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.workflow.graph import run_workflow
+from app.core.identity import Actor, resolve_public_actor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recommend", tags=["stream"])
@@ -154,11 +155,12 @@ async def _write_focus_product(conv_svc, conversation_id: str, product):
 # ============================================================
 
 @router.post("/stream")
-async def recommend_stream(req: StreamRequest, raw_request: Request):
+async def recommend_stream(req: StreamRequest, raw_request: Request,
+                           actor: Actor = Depends(resolve_public_actor)):
 
     async def gen() -> AsyncGenerator[str, None]:
         sid = req.session_id or str(_uuid.uuid4())[:8]
-        uid = req.user_id or ""
+        uid = actor.user_id
         cid = req.conversation_id or ""
         msg = req.message or ""
 

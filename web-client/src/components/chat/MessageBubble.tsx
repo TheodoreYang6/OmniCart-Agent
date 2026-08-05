@@ -4,12 +4,13 @@ import remarkGfm from 'remark-gfm'
 import { Volume2, ScanSearch, MapPin, CornerDownRight } from 'lucide-react'
 import type { ChatMessage } from '@/store/chatStore'
 import { ProductCard } from '@/components/product/ProductCard'
-import { OmiAvatar } from '@/components/brand/Omi'
+import { OmiAppIcon } from '@/components/brand/OmiAppIcon'
 import { AGENT_NAME } from '@/config'
-import { cn, trimForGrid } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { ComparisonTable } from './ComparisonTable'
 import { TrailSummary } from './AgentTrail'
 import { EvidenceStrip } from './EvidenceStrip'
+import type { ChatAction } from '@/api/types'
 
 interface MessageBubbleProps {
   message: ChatMessage
@@ -17,12 +18,12 @@ interface MessageBubbleProps {
   onAddToCart?: (product: { product_id: string }) => void
   onAskAgent?: (productId: string, title: string) => void
   onOpenInsights?: (message: ChatMessage) => void
-  onActionClick?: (action: Record<string, unknown>) => void
+  onActionClick?: (action: ChatAction) => void
   onOptionClick?: (text: string) => void
   onPlayTTS?: (text: string) => void
 }
 
-const AgentAvatar = () => <OmiAvatar size={28} />
+const AgentAvatar = () => <OmiAppIcon size={38} shape="circle" />
 
 export function MessageBubble({
   message,
@@ -45,14 +46,10 @@ export function MessageBubble({
     const m = new Map<string, (typeof message.decisionResults)[number]>()
     message.decisionResults.forEach((d) => m.set(d.product_id, d))
     return m
-  }, [message.decisionResults])
+  }, [message])
 
-  // 商品卡每行 3 个（sm:grid-cols-3）。末行只落单 1 个时视觉最丑，砂掉相关度最低的
-  // 最后 1 个（列表已按得分降序）：4→3、7→6、10→9；5(3/2)、8(3/3/2) 末行 2 个可接受，不动。
-  const displayProducts = useMemo(
-    () => trimForGrid(message.products.slice(0, 9), 3),
-    [message.products],
-  )
+  // Preserve every ranked result; layout must adapt instead of discarding relevant products.
+  const displayProducts = message.products
 
   if (isUser) {
     return (
@@ -84,10 +81,12 @@ export function MessageBubble({
           <div className="markdown-body">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
           </div>
+          {message.status === 'stopped' && <p className="mt-2 text-xs text-ink-muted">已停止生成</p>}
           {onPlayTTS && message.text.length > 4 && (
             <button
               onClick={() => onPlayTTS(message.text)}
               className="mt-2 flex items-center gap-1 text-xs text-ink-muted transition hover:text-brand-500"
+              aria-label="朗读欧米的回答"
             >
               <Volume2 size={13} /> 朗读
             </button>

@@ -6,6 +6,7 @@
  */
 import { apiUrl, REQUEST_TIMEOUT_MS } from '@/config'
 import { getToken } from '@/store/authStore'
+import { parseSseFrames } from './sse'
 import type {
   AddToCartRequest,
   Address,
@@ -20,6 +21,7 @@ import type {
   ConversationMessagesResponse,
   GuideRequest,
   GuideResponse,
+  GuestResponse,
   HealthResponse,
   OkResponse,
   OrderListResponse,
@@ -34,12 +36,18 @@ import type {
   UploadResponse,
 } from './types'
 
+export type ApiErrorKind = 'http' | 'network' | 'timeout' | 'aborted'
+
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  code?: string
+  kind: ApiErrorKind
+  constructor(status: number, message: string, code?: string, kind: ApiErrorKind = status > 0 ? 'http' : 'network') {
     super(message)
     this.status = status
     this.name = 'ApiError'
+    this.code = code
+    this.kind = kind
   }
 }
 
@@ -50,6 +58,8 @@ interface RequestOptions {
   isForm?: boolean
   timeoutMs?: number
   raw?: boolean // 返回原始 Response（用于二进制 / TTS）
+  signal?: AbortSignal
+  skipUnauthorizedEvent?: boolean
 }
 
 function buildQuery(query?: RequestOptions['query']): string {
@@ -62,13 +72,18 @@ function buildQuery(query?: RequestOptions['query']): string {
   return s ? `?${s}` : ''
 }
 
-async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', query, body, isForm, timeoutMs = REQUEST_TIMEOUT_MS, raw } = opts
-  const url = apiUrl(path) + buildQuery(query)
-
+export function buildAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
   const token = getToken()
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
+export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', query, body, isForm, timeoutMs = REQUEST_TIMEOUT_MS, raw, signal, skipUnauthorizedEvent } = opts
+  const url = apiUrl(path) + buildQuery(query)
+
+  const headers = buildAuthHeaders()
 
   let payload: BodyInit | undefined
   if (body !== undefined && body !== null) {
@@ -81,11 +96,24 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   }
 
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let didTimeout = false
+  const timer = setTimeout(() => {
+    didTimeout = true
+    controller.abort('timeout')
+  }, timeoutMs)
+  const onAbort = () => controller.abort(signal?.reason)
+  signal?.addEventListener('abort', onAbort, { once: true })
 
   try {
-    const resp = await fetch(url, { method, headers, body: payload, signal: controller.signal })
-    if (raw) return resp as unknown as T
+    const resp = await fetch(url, {
+      method,
+      headers,
+      body: payload,
+      signal: controller.signal,
+      credentials: 'include',
+    })
+
+    if (raw && resp.ok) return resp as unknown as T
 
     const text = await resp.text()
     let data: unknown = null
@@ -98,21 +126,32 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     }
 
     if (!resp.ok) {
-      const detail =
-        (data && typeof data === 'object' && 'detail' in data
-          ? String((data as Record<string, unknown>).detail)
-          : '') || `请求失败 (${resp.status})`
-      throw new ApiError(resp.status, detail)
+      const payloadData = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+      const detailValue = payloadData.detail ?? payloadData.message
+      const detail = Array.isArray(detailValue)
+        ? detailValue.map((item) => typeof item === 'object' && item && 'msg' in item ? String(item.msg) : String(item)).join('；')
+        : String(detailValue ?? '') || `请求失败 (${resp.status})`
+      if (resp.status === 401 && !skipUnauthorizedEvent && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('omnicart:unauthorized', { detail: { path } }))
+      }
+      throw new ApiError(resp.status, detail, typeof payloadData.code === 'string' ? payloadData.code : undefined)
     }
     return data as T
   } catch (err) {
     if (err instanceof ApiError) throw err
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new ApiError(0, '请求超时，请检查网络或后端服务')
+    if (signal?.aborted) {
+      throw new ApiError(0, '请求已取消', undefined, 'aborted')
     }
-    throw new ApiError(0, err instanceof Error ? err.message : '网络请求失败')
+    if (didTimeout) {
+      throw new ApiError(0, '请求超时，请检查网络或后端服务', undefined, 'timeout')
+    }
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError(0, '请求已取消', undefined, 'aborted')
+    }
+    throw new ApiError(0, err instanceof Error ? err.message : '网络请求失败', undefined, 'network')
   } finally {
     clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
   }
 }
 
@@ -129,10 +168,10 @@ export const api = {
     price_max?: number
     page?: number
     page_size?: number
-  } = {}) => request<ProductListResponse>('/api/products', { query: params }),
+  } = {}, signal?: AbortSignal) => request<ProductListResponse>('/api/products', { query: params, signal }),
 
-  getProduct: (productId: string) =>
-    request<ProductDetail>(`/api/products/${encodeURIComponent(productId)}`),
+  getProduct: (productId: string, signal?: AbortSignal) =>
+    request<ProductDetail>(`/api/products/${encodeURIComponent(productId)}`, { signal }),
 
   // ---- 推荐 ----
   recommend: (req: RecommendRequest) =>
@@ -208,12 +247,14 @@ export const api = {
 
   // ---- 认证 ----
   register: (body: { username: string; password: string; email?: string; phone?: string }) =>
-    request<AuthResponse>('/api/auth/register', { method: 'POST', body }),
+    request<AuthResponse>('/api/auth/register', { method: 'POST', body, skipUnauthorizedEvent: true }),
 
   login: (body: { username: string; password: string }) =>
-    request<AuthResponse>('/api/auth/login', { method: 'POST', body }),
+    request<AuthResponse>('/api/auth/login', { method: 'POST', body, skipUnauthorizedEvent: true }),
 
-  profile: () => request<AuthResponse>('/api/auth/profile'),
+  profile: () => request<AuthResponse>('/api/auth/profile', { skipUnauthorizedEvent: true }),
+  guest: () => request<GuestResponse>('/api/auth/guest', { method: 'POST', skipUnauthorizedEvent: true }),
+  logout: () => request<GuestResponse & { ok: boolean }>('/api/auth/logout', { method: 'POST', skipUnauthorizedEvent: true }),
 
   // ---- 地址 ----
   getAddresses: (userId: string) =>
@@ -297,37 +338,47 @@ export const api = {
     onChunk: (text: string) => void,
     signal?: AbortSignal,
   ): Promise<void> => {
-    const resp = await fetch(
-      apiUrl(`/api/products/${encodeURIComponent(productId)}/ai-summary`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: query ?? '' }),
-        signal,
-      },
-    )
-    if (!resp.ok || !resp.body) {
-      throw new ApiError(resp.status, '总结生成失败')
-    }
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = ''
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const blocks = buf.split('\n\n')
-      buf = blocks.pop() ?? ''
-      for (const b of blocks) {
-        const line = b.split('\n').find((l) => l.startsWith('data: '))
-        if (!line) continue
+    try {
+      const resp = await fetch(
+        apiUrl(`/api/products/${encodeURIComponent(productId)}/ai-summary`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+          body: JSON.stringify({ query: query ?? '' }),
+          signal,
+          credentials: 'include',
+        },
+      )
+      if (!resp.ok || !resp.body) {
+        throw new ApiError(resp.status, '总结生成失败')
+      }
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      const dispatch = (data: string) => {
         try {
-          const payload = JSON.parse(line.slice(6)) as { text?: string }
+          const payload = JSON.parse(data) as { text?: string }
           if (payload.text) onChunk(payload.text)
         } catch {
-          /* 忽略非 JSON 心跳/done 事件 */
+          // heartbeat/done frames intentionally carry no summary text.
         }
       }
+      for (;;) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        buffer += decoder.decode(chunk.value, { stream: true })
+        const parsed = parseSseFrames(buffer)
+        buffer = parsed.rest
+        parsed.events.forEach((event) => dispatch(event.data))
+      }
+      buffer += decoder.decode()
+      parseSseFrames(buffer, true).events.forEach((event) => dispatch(event.data))
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+        throw new ApiError(0, '请求已取消', undefined, 'aborted')
+      }
+      throw new ApiError(0, error instanceof Error ? error.message : '总结读取失败', undefined, 'network')
     }
   },
 }

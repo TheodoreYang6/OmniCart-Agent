@@ -7,7 +7,7 @@ export function ToastHost() {
   const toasts = useToastStore((s) => s.toasts)
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-4 z-[100] flex flex-col items-center gap-2 px-4">
+    <div className="pointer-events-none fixed inset-x-0 top-4 z-[100] flex flex-col items-center gap-2 px-4" aria-live="polite" aria-atomic="false">
       {toasts.map((t) => (
         <div
           key={t.id}
@@ -17,6 +17,7 @@ export function ToastHost() {
             t.kind === 'error' && 'bg-rose-600 text-white',
             t.kind === 'info' && 'bg-ink text-white',
           )}
+          role={t.kind === 'error' ? 'alert' : 'status'}
         >
           {t.kind === 'success' && <CheckCircle2 size={18} className="shrink-0" />}
           {t.kind === 'error' && <XCircle size={18} className="shrink-0" />}

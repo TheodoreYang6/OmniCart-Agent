@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 /** 选择浏览器支持的录音 MIME 类型。 */
 function pickMime(): { mime: string; ext: string } {
@@ -117,6 +117,12 @@ export function useVoiceRecorder(): VoiceRecorderApi {
     }
     cleanup()
     setIsRecording(false)
+  }, [cleanup])
+
+  useEffect(() => () => {
+    cancelledRef.current = true
+    try { recorderRef.current?.stop() } catch { /* already stopped */ }
+    cleanup()
   }, [cleanup])
 
   return { isRecording, seconds, supported, start, stop, cancel }

@@ -43,6 +43,23 @@ class Settings(BaseSettings):
     host: str = Field("127.0.0.1", validation_alias="OMNICART_HOST")
     port: int = Field(8006, validation_alias="OMNICART_PORT")
 
+    # ---- Web 身份与跨域 ----
+    session_secret: str = Field(
+        "omnicart-development-secret-change-me",
+        validation_alias="OMNICART_SESSION_SECRET",
+    )
+    guest_ttl_days: int = Field(30, validation_alias="OMNICART_GUEST_TTL_DAYS")
+    session_cookie_secure: bool = Field(False, validation_alias="OMNICART_SESSION_COOKIE_SECURE")
+    cors_origins: str = Field(
+        "http://127.0.0.1:5173,http://localhost:5173",
+        validation_alias="OMNICART_CORS_ORIGINS",
+    )
+    allow_legacy_user_id: bool = Field(False, validation_alias="OMNICART_ALLOW_LEGACY_USER_ID")
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
     # ---- Qwen API（模型名在 model_gateway/model_config.yaml 管理）----
     qwen_api_key: str = Field("", validation_alias="QWEN_API_KEY")
     qwen_base_url: str = Field("https://dashscope.aliyuncs.com/api/v1", validation_alias="QWEN_BASE_URL")

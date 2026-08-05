@@ -6,6 +6,7 @@ Phase 1 仅注册 + 单测，暂不接入实时 SSE 路径（供后续 Planner �
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from app.framework.tools.protocols import Tool, ToolContext, ToolResult, ToolSpec
@@ -25,6 +26,7 @@ def _avg_rating(product) -> tuple[float, int]:
 class SearchProductsTool(Tool):
     spec = ToolSpec(
         name="shopping.search", category="shopping", permission="read",
+        timeout_ms=60_000,
         description=(
             "深度检索商品：语义召回+精排+证据检查+决策评分的完整管线。"
             "需要了解/推荐/比价商品时调用；可多次调用；对比多个目标时请分别检索每个目标"
@@ -55,12 +57,22 @@ class SearchProductsTool(Tool):
         if not query:
             return await self._shallow(query, category, budget_max, top_k)
         try:
-            products, evidence, decisions = await self._deep_search(
-                query, category, budget_max, top_k, intent_hint,
-                min_rating=min_rating, focus=focus)
+            # 给浅层保底预留时间，避免外层工具 8 秒熔断直接取消整个调用，
+            # 导致既没有深检索结果，也来不及执行本地商品库兜底。
+            products, evidence, decisions = await asyncio.wait_for(
+                self._deep_search(
+                    query, category, budget_max, top_k, intent_hint,
+                    min_rating=min_rating, focus=focus,
+                ),
+                timeout=54.0,
+            )
         except Exception as e:  # noqa: BLE001 — 管线异常回退浅层搜索（保底不空手）
             logger.warning(f"deep search degraded to shallow: {e}")
-            return await self._shallow(query, category, budget_max, top_k)
+            shallow = await self._shallow(query, category, budget_max, top_k)
+            if shallow.ok:
+                shallow.message = f"深度检索降级后，{shallow.message}"
+            self._write_shallow_state(ctx, shallow)
+            return shallow
         # 后置口碑守卫：多通道编排的 fallback/review 源不感知 rating_min（服务端过滤
         # 仅覆盖 text 通道），按商品真实评分再拦一道——无论哪个源泄漏都不把低分货给用户
         if min_rating is not None and products:
@@ -85,6 +97,8 @@ class SearchProductsTool(Tool):
             # 深管线零召回（如整句口语 query）→ 浅层子串匹配再兜一道
             shallow = await self._shallow(query, category, budget_max, top_k)
             if shallow.ok and (shallow.data or {}).get("products"):
+                shallow.message = f"深度检索零召回，{shallow.message}"
+                self._write_shallow_state(ctx, shallow)
                 return shallow
 
         # 写回主 state（存在时）：供最终 generate_stream 与前端商品卡消费；新结果置前去重
@@ -167,6 +181,22 @@ class SearchProductsTool(Tool):
             for p in products[:top_k]
         ]
         return ToolResult(data={"products": items}, message=f"找到 {len(items)} 个相关商品")
+
+    @staticmethod
+    def _write_shallow_state(ctx: ToolContext, result: ToolResult) -> None:
+        """Mirror shallow fallback products into the workflow/SSE state."""
+        if not result.ok:
+            return
+        fallback_products = list((result.data or {}).get("products") or [])
+        if not fallback_products:
+            return
+        st = getattr(ctx, "state", None)
+        if st is not None and hasattr(st, "retrieved_products"):
+            new_pids = {p.get("product_id") for p in fallback_products}
+            st.retrieved_products = fallback_products + [
+                p for p in (st.retrieved_products or [])
+                if p.get("product_id") not in new_pids
+            ]
 
 
 class GetProductDetailTool(Tool):

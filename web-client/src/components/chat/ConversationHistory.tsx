@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { History, MessageSquare, Trash2, Plus } from 'lucide-react'
 import { useChatStore } from '@/store/chatStore'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { LoadingBlock } from '@/components/ui/Spinner'
 import { relativeTime } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 interface ConversationHistoryProps {
   open: boolean
@@ -19,6 +20,7 @@ export function ConversationHistory({ open, onClose }: ConversationHistoryProps)
   const loadOne = useChatStore((s) => s.loadConversation)
   const del = useChatStore((s) => s.deleteConversation)
   const newConv = useChatStore((s) => s.newConversation)
+  const [deleteId, setDeleteId] = useState('')
 
   useEffect(() => {
     if (open) load()
@@ -62,6 +64,14 @@ export function ConversationHistory({ open, onClose }: ConversationHistoryProps)
                       ? 'border-brand-300 bg-brand-50 dark:bg-brand-500/15'
                       : 'border-[var(--line)] bg-[var(--glass-bg)] backdrop-blur hover:border-brand-200 hover:shadow-glow'
                   }`}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      void loadOne(c.conversation_id)
+                      onClose()
+                    }
+                  }}
                 >
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-300">
                     <MessageSquare size={16} />
@@ -77,9 +87,10 @@ export function ConversationHistory({ open, onClose }: ConversationHistoryProps)
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      del(c.conversation_id)
+                      setDeleteId(c.conversation_id)
                     }}
-                    className="rounded-lg p-1.5 text-ink-muted opacity-0 transition hover:bg-rose-500/10 hover:text-rose-500 group-hover:opacity-100"
+                    className="rounded-lg p-1.5 text-ink-muted opacity-0 transition hover:bg-rose-500/10 hover:text-rose-500 focus:opacity-100 group-hover:opacity-100"
+                    aria-label="删除对话"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -89,6 +100,7 @@ export function ConversationHistory({ open, onClose }: ConversationHistoryProps)
           )}
         </div>
       </div>
+      <ConfirmDialog open={!!deleteId} title="删除历史对话" description="删除后无法恢复，这个对话里的消息将不再显示。" onClose={() => setDeleteId('')} onConfirm={async () => { await del(deleteId); setDeleteId('') }} />
     </Modal>
   )
 }

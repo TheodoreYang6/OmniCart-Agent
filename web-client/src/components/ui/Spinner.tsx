@@ -8,6 +8,8 @@ export function Spinner({ size = 20, className }: { size?: number; className?: s
       height={size}
       viewBox="0 0 24 24"
       fill="none"
+      role="status"
+      aria-label="加载中"
     >
       <circle
         className="opacity-20"
@@ -39,7 +41,7 @@ export function LoadingBlock({ text }: { text?: string }) {
 /** 三点跳动（AI 思考中）。 */
 export function TypingDots() {
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex items-center gap-1" aria-hidden="true">
       {[0, 1, 2].map((i) => (
         <span
           key={i}

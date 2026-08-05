@@ -4,6 +4,7 @@ import { ArrowLeft, Sparkles, Trash2, Plus, Tag, Wallet } from 'lucide-react'
 import { api } from '@/api/client'
 import type { PreferenceEntry } from '@/api/types'
 import { LoadingBlock, Spinner } from '@/components/ui/Spinner'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Omi } from '@/components/brand/Omi'
 import { useAuthStore } from '@/store/authStore'
 import { toast } from '@/store/toastStore'
@@ -19,12 +20,14 @@ const EXAMPLES = [
 
 export function PreferencePage() {
   const navigate = useNavigate()
-  const effectiveUserId = useAuthStore((s) => s.userId || s.deviceUserId)
+  const effectiveUserId = useAuthStore((s) => s.userId || s.guestId)
 
   const [entries, setEntries] = useState<PreferenceEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<PreferenceEntry | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -79,12 +82,16 @@ export function PreferencePage() {
   }
 
   const remove = async (entry: PreferenceEntry) => {
+    setDeleting(true)
     setEntries((prev) => prev.filter((e) => e.entry_id !== entry.entry_id))
     try {
       await api.deletePreferenceEntry(entry.entry_id, effectiveUserId)
+      setDeleteTarget(null)
     } catch {
       toast.error('删除失败')
       load()
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -92,8 +99,9 @@ export function PreferencePage() {
     <div className="aurora-bg flex h-full flex-col">
       <header className="glass-strong z-10 flex items-center gap-2 border-b border-[var(--line)] px-3 py-3">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/profile')}
           className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition hover:bg-[var(--surface-variant)]"
+          aria-label="返回"
         >
           <ArrowLeft size={20} />
         </button>
@@ -101,7 +109,7 @@ export function PreferencePage() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-4 py-6">
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
           {/* Hero 区：把说明从输入框里解放出来，与开屏页同一套渐变标题语言 */}
           <div className="text-center">
             <h1 className="text-xl font-extrabold text-ink sm:text-2xl">
@@ -168,7 +176,7 @@ export function PreferencePage() {
               </p>
             </div>
           ) : (
-            <div className="space-y-2.5">
+            <div className="grid items-start gap-3 lg:grid-cols-2">
               {entries.map((e) => (
                 <div key={e.entry_id} className="glass rounded-2xl p-4 transition">
                   <div className="flex items-start justify-between gap-3">
@@ -199,8 +207,9 @@ export function PreferencePage() {
                     <div className="flex shrink-0 items-center gap-1.5">
                       <Toggle on={e.enabled} onClick={() => toggle(e)} />
                       <button
-                        onClick={() => remove(e)}
+                        onClick={() => setDeleteTarget(e)}
                         className="rounded-lg p-1.5 text-ink-muted transition hover:bg-rose-500/10 hover:text-rose-500"
+                        aria-label={`删除偏好：${e.raw_text}`}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -239,6 +248,7 @@ export function PreferencePage() {
           )}
         </div>
       </div>
+      <ConfirmDialog open={!!deleteTarget} title="删除购物偏好" description={`确定删除“${deleteTarget?.raw_text ?? ''}”吗？欧米之后将不再参考这条信息。`} pending={deleting} onClose={() => setDeleteTarget(null)} onConfirm={async () => { if (deleteTarget) await remove(deleteTarget) }} />
     </div>
   )
 }
@@ -272,6 +282,9 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
+      role="switch"
+      aria-checked={on}
+      aria-label={on ? '停用偏好' : '启用偏好'}
       className={cn(
         'relative h-6 w-11 rounded-full transition',
         on ? 'gradient-brand shadow-glow' : 'bg-[var(--field-border)]',

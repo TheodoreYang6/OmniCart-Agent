@@ -2,19 +2,22 @@
 
 import uuid
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.schemas.cart import CheckoutRequest, CheckoutResponse, DEMO_USER_ID
 from app.repositories.pg_cart_repo import get_cart_repo
+from app.core.identity import Actor, resolve_actor, require_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.post("/api/checkout")
-async def checkout(req: CheckoutRequest = CheckoutRequest()):
+async def checkout(req: CheckoutRequest = CheckoutRequest(), actor: Actor = Depends(resolve_actor)):
+    actor = require_user(actor)
+    user_id = actor.user_id
     cart_repo = get_cart_repo()
-    cart = cart_repo.get_cart(req.user_id or DEMO_USER_ID)
+    cart = cart_repo.get_cart(user_id)
     selected = [i for i in cart.items if i.selected and (not req.item_ids or i.cart_item_id in req.item_ids)]
 
     if not selected:
@@ -34,7 +37,7 @@ async def checkout(req: CheckoutRequest = CheckoutRequest()):
             async with factory() as session:
                 order = OrderModel(
                     order_id=order_id,
-                    user_id=req.user_id or DEMO_USER_ID,
+                    user_id=user_id,
                     items=[i.model_dump() for i in selected],
                     total_price=total,
                     status="pending",
@@ -47,11 +50,11 @@ async def checkout(req: CheckoutRequest = CheckoutRequest()):
         logger.warning(f"Order persist failed: {e}")
 
     # 结算后从购物车移除
-    cart_repo.batch_remove([i.cart_item_id for i in selected], req.user_id or DEMO_USER_ID)
+    cart_repo.batch_remove([i.cart_item_id for i in selected], user_id)
 
     return CheckoutResponse(
         order_id=order_id,
-        user_id=req.user_id or DEMO_USER_ID,
+        user_id=user_id,
         items=selected,
         total_price=total,
         status="pending",
@@ -60,10 +63,9 @@ async def checkout(req: CheckoutRequest = CheckoutRequest()):
 
 
 @router.get("/api/orders")
-async def list_orders(user_id: str = Query(default="")):
+async def list_orders(user_id: str = Query(default=""), actor: Actor = Depends(resolve_actor)):
     """获取用户订单列表"""
-    if not user_id:
-        return {"orders": [], "count": 0}
+    user_id = require_user(actor).user_id
 
     try:
         from app.core.database import get_session_sync

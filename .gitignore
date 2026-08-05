@@ -1,93 +1,120 @@
-# ===== 环境变量 & 密钥 =====
+# ===== Secrets and machine-local environment =====
+# Keep real credentials local. Commit only sanitized templates.
 .env
-*.env.local
-*.env.production
+.env.*
+!.env.example
+!.env.docker
+!**/.env.example
 
-# ===== Python =====
+# ===== Python build, test and virtual environments =====
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
-build/
 *.egg
 .eggs/
 *.whl
+dist/
+build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# ===== Virtual Environment =====
+.import_linter_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 venv/
 .venv/
 env/
-.env/
 
-# ===== IDE =====
+# ===== JavaScript / frontend generated output =====
+node_modules/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# ===== IDE and operating-system metadata =====
 .idea/
 .vscode/
+.qoder/
 *.iml
 *.swp
 *.swo
 *~
-
-# ===== Android =====
-android-client/.gradle/
-android-client/build/
-android-client/app/build/
-android-client/local.properties
-android-client/*.apk
-android-client/*.aab
-*.apk
-*.aab
-.gradle/
-
-# ===== OS =====
 .DS_Store
 Thumbs.db
 Desktop.ini
 
-# ===== Claude / AI Agent (internal files only) =====
-.claude/
-AGENTS.md
-claude-auto.bat
-
-# ===== Docs =====
-# docs/ 已改为入库：换机器接手时需要 ARCHITECTURE / CONSTITUTION / adr / specs
-# 作为上下文，因此不再排除。注意本仓库是公开的。
-
-# ===== Temp & Misc =====
-bug.txt
-snapshots/
-课题说明会*.pdf
-# 浏览器自动化留下的 Chrome 用户目录（含本机账号 ID / 登录态哈希 / 扩展密钥）
-.tmp_verify/
-# IDE 缓存
-.qoder/
-# 与已解压的 ecommerce_agent_dataset/ 内容重复，且 81MB 会拖慢 clone
-ecommerce_agent_dataset.zip
-
-# ===== Logs =====
-*.log
-logs/
-
-# ===== Database =====
-*.db
-*.sqlite3
-
-# ===== Uploads (generated at runtime) =====
-data/uploads/
-
-# ===== Security =====
+# ===== Android generated output and local signing material =====
+.gradle/
+android-client/.gradle/
+android-client/build/
+android-client/app/build/
+android-client/local.properties
+*.apk
+*.aab
 *.keystore
 *.jks
 *.p12
 
-# ===== Runtime Data =====
+# ===== Logs, caches and temporary verification artifacts =====
+*.log
+logs/
+tmp/
+.tmp_verify/
+snapshots/
+bug.txt
+
+# ===== Runtime databases, uploads, traces and generated indexes =====
+*.db
+*.sqlite3
 storage/
-.qdrant-initialized
+data/uploads/
 data/checkpoints/
 data/traces/
 data/eval_runs/
+data/rag_traces.jsonl
+data/audit_prompts.log
 data/audit_output.json
 data/baseline_compare.json
 backend/data/
+.qdrant-initialized
+qdrant/
+redis-data/
+postgres-data/
+runtime/
+
+# ===== Downloaded AI model weights and provider caches =====
+# Re-download these on a new machine; they are too large for normal Git hosting.
+models/
+.cache/
+**/.cache/huggingface/
+*.safetensors
+*.gguf
+*.onnx
+pytorch_model*.bin
+
+# ===== Large/redundant source archives and generated design intermediates =====
+ecommerce_agent_dataset.zip
+design/brand/*-chroma-*.png
+design/brand/*-qa.png
+design/brand/*-transparent-v2.png
+design/brand/*-transparent-v3.png
+web-client/public/brand/omi-perch-v3*
+
+# ===== Personal or machine-private documents =====
+*简历*.pdf
+*简历*.docx
+课题说明会*.pdf
+
+# ===== Local AI-agent instructions =====
+.claude/
+AGENTS.md
+claude-auto.bat
+
+# Project documentation, migrations, tests, lock files, datasets required by the
+# app, and final design assets are intentionally committed for cross-PC development.

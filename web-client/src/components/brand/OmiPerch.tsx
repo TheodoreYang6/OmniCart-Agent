@@ -19,27 +19,25 @@ import { cn } from '@/lib/utils'
  * 已有尾巴是烧在位图里的，无法单独旋转；要真的摆尾得把尾巴从素材里拆成
  * 独立图层并补画遮住的身体，不是叠一层 SVG 能解决的。
  *
- * 坐标全部来自对 public/brand/omi-perch.png (640x568) 的像素级采样，
+ * 坐标全部来自对 public/brand/omi-perch-v4-640.png (640x559) 的像素级采样，
  * 与 SVG viewBox 一一对应；换素材需重新测量。
  */
 
-/** 眼睛几何（viewBox 640x568 坐标系，实测值）
+/** 眼睛几何（viewBox 640x559 坐标系，实测值）
  *  pupil = PNG 里均匀黑瞳孔的外接椭圆（lum<40 连通域），略放大 1px 保证盖住；
  *  hl1 = PNG 原有主高光位置（shift=0 时同位覆盖，零痕迹）；hl2 = 副高光。 */
 const EYES = [
   {
-    // 左眼：眼睑椭圆 bbox x[188,243] y[219,259]，瞳孔 bbox x[198,235] y[217,246]
-    lid: { cx: 214.8, cy: 238.7, rx: 27.1, ry: 21.1 },
-    pupil: { cx: 216.5, cy: 231.5, rx: 19.5, ry: 15.5, fill: '#0B1119' },
-    hl1: { x: 226.9, y: 222.6, r: 5.6 },
-    hl2: { x: 208, y: 242, r: 2.4 },
+    lid: { cx: 211, cy: 240, rx: 30, ry: 25 },
+    pupil: { cx: 210, cy: 242, rx: 21, ry: 18, fill: '#0B1119' },
+    hl1: { x: 222, y: 229, r: 5.7 },
+    hl2: { x: 202.5, y: 249.5, r: 2.3 },
   },
   {
-    // 右眼：眼睑椭圆 bbox x[321,371] y[184,231]，瞳孔 bbox x[325,361] y[190,219]
-    lid: { cx: 345.4, cy: 207.6, rx: 25.1, ry: 24.1 },
-    pupil: { cx: 343, cy: 204.5, rx: 19, ry: 15.5, fill: '#0D131D' },
-    hl1: { x: 351.5, y: 192.5, r: 6.4 },
-    hl2: { x: 337.9, y: 215.8, r: 2.7 },
+    lid: { cx: 341, cy: 214, rx: 27, ry: 25 },
+    pupil: { cx: 341, cy: 215, rx: 20, ry: 18, fill: '#0D131D' },
+    hl1: { x: 352, y: 202, r: 5.8 },
+    hl2: { x: 334, y: 222, r: 2.4 },
   },
 ] as const
 
@@ -60,23 +58,56 @@ interface Heart {
   delay: number
 }
 
-export function OmiPerch({ className }: { className?: string }) {
+export function OmiPerch({
+  className,
+  interactive = true,
+}: {
+  className?: string
+  interactive?: boolean
+}) {
   const wrapRef = useRef<HTMLDivElement>(null)
-  const [shift, setShift] = useState({ x: 0, y: 0 })
+  const pupilRefs = useRef<Array<SVGGElement | null>>([])
+  const timerRefs = useRef<number[]>([])
   const [blinking, setBlinking] = useState(false)
   const [starry, setStarry] = useState(false)
   const [hover, setHover] = useState(false)
   const [pop, setPop] = useState(false)
   const [hearts, setHearts] = useState<Heart[]>([])
-  const reduced = useRef(false)
+  const [reduced, setReduced] = useState(false)
+  const [visible, setVisible] = useState(true)
+  const [finePointer, setFinePointer] = useState(false)
 
   useEffect(() => {
-    reduced.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const pointer = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const sync = () => {
+      setReduced(motion.matches)
+      setFinePointer(pointer.matches)
+    }
+    sync()
+    motion.addEventListener('change', sync)
+    pointer.addEventListener('change', sync)
+    return () => {
+      motion.removeEventListener('change', sync)
+      pointer.removeEventListener('change', sync)
+    }
   }, [])
+
+  useEffect(() => {
+    const node = wrapRef.current
+    if (!node || !('IntersectionObserver' in window)) return
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), {
+      rootMargin: '80px',
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => () => timerRefs.current.forEach(clearTimeout), [])
 
   // 眼神跟随：指针方向 → 瞳孔位移（rAF 节流，避免每次 mousemove 都触发渲染）
   useEffect(() => {
-    if (reduced.current) return
+    if (!interactive || reduced || !visible || !finePointer) return
     let raf = 0
     let pending: { x: number; y: number } | null = null
 
@@ -91,7 +122,9 @@ export function OmiPerch({ className }: { className?: string }) {
       const len = Math.hypot(dx, dy) || 1
       // 距离越近位移越小（贴到脸上时不至于眼球乱飘）
       const k = Math.min(1, len / 420)
-      setShift({ x: (dx / len) * MAX_SHIFT * k, y: (dy / len) * MAX_SHIFT * k })
+      const x = ((dx / len) * MAX_SHIFT * k).toFixed(2)
+      const y = ((dy / len) * MAX_SHIFT * k).toFixed(2)
+      pupilRefs.current.forEach((pupil) => pupil?.setAttribute('transform', `translate(${x} ${y})`))
     }
 
     const onMove = (e: MouseEvent) => {
@@ -103,11 +136,11 @@ export function OmiPerch({ className }: { className?: string }) {
       window.removeEventListener('mousemove', onMove)
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [finePointer, interactive, reduced, visible])
 
   // 随机眨眼（与头像系统同一套时序口径：3~6s 一次，120ms 闭合）
   useEffect(() => {
-    if (reduced.current) return
+    if (!interactive || reduced || !visible) return
     let alive = true
     const timers: number[] = []
     const loop = () => {
@@ -131,15 +164,21 @@ export function OmiPerch({ className }: { className?: string }) {
       alive = false
       timers.forEach(clearTimeout)
     }
-  }, [])
+  }, [interactive, reduced, visible])
 
   // 点击：弹一下 + 冒三颗爱心 + 瞬时切星星眼（1.2s 后回落）
   const onPoke = useCallback(() => {
-    if (reduced.current) return
+    if (!interactive) return
+    if (reduced) {
+      setStarry(true)
+      const timer = window.setTimeout(() => setStarry(false), STAR_MS)
+      timerRefs.current.push(timer)
+      return
+    }
     setPop(true)
     setStarry(true)
-    window.setTimeout(() => setPop(false), 620)
-    window.setTimeout(() => setStarry(false), STAR_MS)
+    timerRefs.current.push(window.setTimeout(() => setPop(false), 620))
+    timerRefs.current.push(window.setTimeout(() => setStarry(false), STAR_MS))
     const base = Date.now()
     setHearts((prev) => [
       ...prev,
@@ -150,10 +189,10 @@ export function OmiPerch({ className }: { className?: string }) {
         delay: i * 90,
       })),
     ])
-    window.setTimeout(() => {
+    timerRefs.current.push(window.setTimeout(() => {
       setHearts((prev) => prev.filter((h) => h.id < base))
-    }, 1400)
-  }, [])
+    }, 1400))
+  }, [interactive, reduced])
 
   return (
     <div
@@ -167,12 +206,19 @@ export function OmiPerch({ className }: { className?: string }) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => {
         setHover(false)
-        setShift({ x: 0, y: 0 })
+        pupilRefs.current.forEach((pupil) => pupil?.setAttribute('transform', 'translate(0 0)'))
       }}
       onClick={onPoke}
-      // 纯装饰与彩蛋：品牌信息已由旁边的标题文字传达，对屏幕阅读器隐藏，
-      // 也不进入 tab 序列（避免无意义的焦点干扰键盘用户）
-      aria-hidden="true"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onPoke()
+        }
+      }}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={interactive ? '和欧米互动' : undefined}
+      aria-hidden={interactive ? undefined : true}
     >
       <div
         className={cn(
@@ -183,16 +229,31 @@ export function OmiPerch({ className }: { className?: string }) {
       >
         {/* 呼吸层单独一层：与 lift/pop 的 transform 分开，否则同一元素上会互相覆盖 */}
         <div className="omi-perch-breathe relative">
-          <img
-            src="/brand/omi-perch.png"
-            alt=""
-            draggable={false}
-            className="relative block w-full"
-          />
+          <picture>
+            <source
+              type="image/avif"
+              srcSet="/brand/omi-perch-v4-320.avif 320w, /brand/omi-perch-v4-640.avif 640w"
+              sizes="(max-width: 640px) 176px, 256px"
+            />
+            <source
+              type="image/webp"
+              srcSet="/brand/omi-perch-v4-320.webp 320w, /brand/omi-perch-v4-640.webp 640w"
+              sizes="(max-width: 640px) 176px, 256px"
+            />
+            <img
+              src="/brand/omi-perch-v4.png"
+              alt=""
+              width="640"
+              height="559"
+              draggable={false}
+              fetchPriority="high"
+              className="relative block w-full"
+            />
+          </picture>
 
           {/* 可动部件覆盖层：与 PNG 同坐标系，绝对贴合（在 PNG 之上，盖住眼睛）*/}
           <svg
-            viewBox="0 0 640 568"
+            viewBox="0 0 640 559"
             className="pointer-events-none absolute inset-0 z-10 h-full w-full"
             aria-hidden
           >
@@ -201,8 +262,9 @@ export function OmiPerch({ className }: { className?: string }) {
                 {/* 瞳孔组：同色椭圆盖掉 PNG 的瞳孔与静态高光，整组平移做眼神跟随。
                     断言用：data-omi-pupil 上的 transform 会随 mousemove 变化。 */}
                 <g
+                  ref={(node) => { pupilRefs.current[i] = node }}
                   data-omi-pupil={i}
-                  transform={`translate(${shift.x.toFixed(2)} ${shift.y.toFixed(2)})`}
+                  transform="translate(0 0)"
                 >
                   <ellipse
                     cx={e.pupil.cx}

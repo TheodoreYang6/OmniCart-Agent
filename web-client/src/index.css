@@ -27,12 +27,12 @@
   --page-glow-2: rgba(37, 107, 255, 0.1);
 
   /* 玻璃拟态 */
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-bg-strong: rgba(255, 255, 255, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.6);
-  --glass-border-strong: rgba(255, 255, 255, 0.7);
-  --card-bg: rgba(255, 255, 255, 0.8);
-  --card-border: rgba(255, 255, 255, 0.6);
+  --glass-bg: rgba(255, 255, 255, 0.92);
+  --glass-bg-strong: rgba(255, 255, 255, 0.97);
+  --glass-border: rgba(148, 163, 184, 0.18);
+  --glass-border-strong: rgba(148, 163, 184, 0.24);
+  --card-bg: rgba(255, 255, 255, 0.94);
+  --card-border: rgba(148, 163, 184, 0.18);
 
   /* 极光光斑 */
   --aurora-1: rgba(37, 107, 255, 0.16);
@@ -85,11 +85,11 @@
   --page-glow-2: rgba(125, 211, 252, 0.08);
 
   /* Glassmorphism 2.0：深色半透磨砂层 */
-  --glass-bg: rgba(255, 255, 255, 0.06);
-  --glass-bg-strong: rgba(255, 255, 255, 0.09);
+  --glass-bg: rgba(28, 28, 42, 0.96);
+  --glass-bg-strong: rgba(32, 32, 48, 0.98);
   --glass-border: rgba(255, 255, 255, 0.12);
   --glass-border-strong: rgba(255, 255, 255, 0.16);
-  --card-bg: rgba(255, 255, 255, 0.05);
+  --card-bg: rgba(28, 28, 42, 0.96);
   --card-border: rgba(255, 255, 255, 0.1);
 
   --aurora-1: rgba(77, 139, 255, 0.22);
@@ -139,7 +139,6 @@ body {
     radial-gradient(1200px 500px at 85% -10%, var(--page-glow-1), transparent 60%),
     radial-gradient(900px 480px at -10% 20%, var(--page-glow-2), transparent 55%),
     var(--page-bg);
-  background-attachment: fixed;
   color: var(--ink);
   font-family: 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', Arial, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -190,12 +189,12 @@ body {
   /* —— AI 助手风地基（视觉重构 v2）—— */
   /* 玻璃拟态：内容卡 / 导航与输入条（更实），色值走主题变量 */
   .glass {
-    @apply rounded-2xl shadow-glass backdrop-blur-xl;
+    @apply rounded-2xl shadow-glass;
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
   }
   .glass-strong {
-    @apply shadow-glass backdrop-blur-xl;
+    @apply shadow-glass;
     background: var(--glass-bg-strong);
     border: 1px solid var(--glass-border-strong);
   }
@@ -203,7 +202,7 @@ body {
      半透玻璃叠在近黑页底上会让整块面板发灰起雾、文字对比度被拉低；
      大面板需要“实体展台”感，小卡片才继续用 .glass。 */
   .panel-solid {
-    @apply shadow-lift backdrop-blur-xl;
+    @apply shadow-lift;
     background: var(--panel-bg);
     border: 1px solid var(--panel-border);
   }
@@ -240,6 +239,28 @@ body {
        旋转不改形状，也无需 @property 注册，兼容性更好 */
     animation: omi-ring-spin 2.4s linear infinite;
   }
+  /* 移动端应用图标版欧米：透明猫咪主体叠在环境色底板上，自动适配明暗主题。 */
+  .omi-app-icon {
+    background:
+      radial-gradient(circle at 30% 20%, rgba(125, 211, 252, 0.28), transparent 45%),
+      color-mix(in srgb, var(--page-bg) 90%, var(--brand) 10%);
+    border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--line));
+    box-shadow:
+      0 8px 22px color-mix(in srgb, var(--brand) 13%, transparent),
+      inset 0 1px 0 color-mix(in srgb, white 54%, transparent);
+  }
+  .omi-app-icon::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.22), transparent 48%);
+    pointer-events: none;
+  }
+  .omi-app-icon-thinking {
+    border-color: color-mix(in srgb, var(--brand) 68%, #7dd3fc);
+    animation: omi-icon-pulse 1.8s ease-in-out infinite;
+  }
   /* 品牌渐变填充（蓝→天蓝，比旧深蓝渐变更“AI”） */
   .gradient-brand {
     background-image: linear-gradient(135deg, #256bff 0%, #4d8bff 55%, #7dd3fc 130%);
@@ -263,7 +284,8 @@ body {
     position: absolute;
     z-index: -1;
     border-radius: 9999px;
-    filter: blur(64px);
+    opacity: 0.72;
+    contain: paint;
     pointer-events: none;
   }
   .aurora-bg::before {
@@ -272,7 +294,6 @@ body {
     left: -120px;
     top: -140px;
     background: radial-gradient(circle, var(--aurora-1), transparent 65%);
-    animation: blob 14s ease-in-out infinite;
   }
   .aurora-bg::after {
     width: 380px;
@@ -280,17 +301,16 @@ body {
     right: -100px;
     bottom: -120px;
     background: radial-gradient(circle, var(--aurora-2), transparent 65%);
-    animation: blob 20s ease-in-out infinite reverse;
   }
 
   /* 卡片基础：升级为玻璃卡 + hover 抬升（存量 .card 全站自动生效） */
   .card {
-    @apply rounded-2xl shadow-card backdrop-blur-md transition-all duration-300;
+    @apply rounded-2xl shadow-card transition-shadow duration-200;
     background: var(--card-bg);
     border: 1px solid var(--card-border);
   }
   .card-hover {
-    @apply hover:-translate-y-0.5 hover:shadow-lift;
+    @apply hover:shadow-lift;
   }
 
   /* 主按钮：渐变 + 光晕 hover */
@@ -382,8 +402,7 @@ body {
     pointer-events: none;
     background: linear-gradient(to bottom, var(--spot-light), transparent 78%);
     clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
-    filter: blur(20px);
-    animation: spot-breathe 4.5s ease-in-out infinite;
+    opacity: 0.7;
   }
 
   /* 商品卡聚光 hover（P4）：光斑跟随鼠标（--mx/--my 由组件 onMouseMove 写入） */
@@ -536,6 +555,12 @@ body {
   }
 }
 
+:where(button, a, [role='button'], [role='link'], input, textarea:not(.composer-textarea), select):focus-visible,
+.focus-ring:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--brand-500, #256bff) 70%, white);
+  outline-offset: 2px;
+}
+
 /* ============================================================
    流光边框（P5）：聚焦时环形光束沿边框巡游一圈（Magic UI border-beam 思路）。
    @property 注册角度变量使 conic-gradient 可动画；不支持的浏览器退化为静态描边。
@@ -584,6 +609,15 @@ body {
     transform: rotate(360deg);
   }
 }
+@keyframes omi-icon-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}
 /* 头像说话态：取代原来生硬的 bounce-soft 上下弹，改柔和呼吸缩放 + 极小位移 */
 @keyframes omi-talk {
   0%,
@@ -612,6 +646,7 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .omi-ring-spin::before,
+  .omi-app-icon-thinking,
   .omi-talk {
     animation: none;
   }
@@ -641,7 +676,6 @@ body {
   }
 }
 .omi-perch-breathe {
-  animation: omi-perch-breathe 4s ease-in-out infinite;
   transform-origin: center bottom;
 }
 /* 点击：一次弹跳 + 轻微挤压（Q 弹感缓动），起落位对齐 hover 的 -4px */

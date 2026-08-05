@@ -14,6 +14,12 @@ import type {
   EvidenceItem,
   Product,
   TraceStepItem,
+  MessageStatus,
+  RecommendResponse,
+  RetrievalPlan,
+  ComparisonTableData,
+  ClarificationOption,
+  ChatAction,
 } from '@/api/types'
 import { getEffectiveUserId } from './authStore'
 import { shortId } from '@/lib/utils'
@@ -31,15 +37,16 @@ export interface ChatMessage {
   decisionResults: DecisionResult[]
   evidenceList: EvidenceItem[]
   traceSteps: TraceStepItem[]
-  retrievalPlan?: Record<string, unknown> | null
+  retrievalPlan?: RetrievalPlan | null
   sufficiencyReport?: Record<string, unknown> | null
   constraints?: Record<string, unknown> | null
   harnessReport?: Record<string, unknown> | null
   targetProductAnalysis?: Record<string, unknown> | null
-  comparisonTable?: Record<string, unknown> | null
+  comparisonTable?: ComparisonTableData | null
   alternativeProducts?: Array<Record<string, unknown>> | null
-  clarificationOptions?: Array<Record<string, unknown>> | null
-  actions?: Array<Record<string, unknown>> | null
+  clarificationOptions?: ClarificationOption[] | null
+  actions?: ChatAction[] | null
+  status?: MessageStatus
   imageUrl?: string | null
   isVoice?: boolean
 }
@@ -71,6 +78,7 @@ interface ChatState {
 
   // 内部
   _abort: (() => void) | null
+  _requestId: number
 
   send: (query: string) => Promise<void>
   askAgent: (productId: string, title: string) => Promise<void>
@@ -102,6 +110,7 @@ function newMsg(role: Role, text = '', extra: Partial<ChatMessage> = {}): ChatMe
     decisionResults: [],
     evidenceList: [],
     traceSteps: [],
+    status: 'complete',
     ...extra,
   }
 }
@@ -109,28 +118,29 @@ function newMsg(role: Role, text = '', extra: Partial<ChatMessage> = {}): ChatMe
 /** 从 SSE result JSON 提取组装 assistant 消息字段。 */
 function assistantFromResult(
   text: string,
-  r: Record<string, unknown> | null,
+  r: RecommendResponse | null,
 ): Partial<ChatMessage> {
-  const g = <T,>(k: string, dflt: T): T => (r && r[k] !== undefined ? (r[k] as T) : dflt)
   return {
     text,
-    products: g<Product[]>('products', []),
-    decisionResults: g<DecisionResult[]>('decision_results', []),
-    evidenceList: g<EvidenceItem[]>('evidence_list', []),
-    traceSteps: g<TraceStepItem[]>('trace_steps', []),
-    retrievalPlan: g('retrieval_plan', null) as Record<string, unknown> | null,
-    sufficiencyReport: g('sufficiency_report', null) as Record<string, unknown> | null,
-    constraints: g('constraints', null) as Record<string, unknown> | null,
-    harnessReport: g('harness_report', null) as Record<string, unknown> | null,
-    targetProductAnalysis: g('target_product_analysis', null) as Record<string, unknown> | null,
-    comparisonTable: g('comparison_table', null) as Record<string, unknown> | null,
-    alternativeProducts: g('alternative_products', null) as Array<Record<string, unknown>> | null,
-    clarificationOptions: g('clarification_options', null) as Array<Record<string, unknown>> | null,
-    actions: g('actions', null) as Array<Record<string, unknown>> | null,
+    products: r?.products ?? [],
+    decisionResults: r?.decision_results ?? [],
+    evidenceList: r?.evidence_list ?? [],
+    traceSteps: r?.trace_steps ?? [],
+    retrievalPlan: (r?.retrieval_plan as RetrievalPlan | null | undefined) ?? null,
+    sufficiencyReport: r?.sufficiency_report ?? null,
+    constraints: r?.constraints ?? null,
+    harnessReport: r?.harness_report ?? null,
+    targetProductAnalysis: r?.target_product_analysis ?? null,
+    comparisonTable: (r?.comparison_table as ComparisonTableData | null | undefined) ?? null,
+    alternativeProducts: r?.alternative_products ?? null,
+    clarificationOptions: (r?.clarification_options as ClarificationOption[] | null | undefined) ?? null,
+    actions: (r?.actions as ChatAction[] | null | undefined) ?? null,
+    status: 'complete',
   }
 }
 
 let audioEl: HTMLAudioElement | null = null
+let audioUrl: string | null = null
 
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: shortId(),
@@ -151,6 +161,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   isLoadingHistory: false,
   _abort: null,
+  _requestId: 0,
 
   setFastMode: (v) => set({ fastMode: v, ...(v ? { deepThink: false } : {}) }),
   setDeepThink: (v) => set({ deepThink: v, ...(v ? { fastMode: false } : {}) }), // 与极速互斥
@@ -169,6 +180,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   newConversation: () => {
     get()._abort?.()
+    const state = get()
+    if (state.pendingImagePreview) URL.revokeObjectURL(state.pendingImagePreview)
+    state.messages.forEach((message) => {
+      if (message.imageUrl?.startsWith('blob:')) URL.revokeObjectURL(message.imageUrl)
+    })
+    if (audioEl) audioEl.pause()
+    if (audioUrl) URL.revokeObjectURL(audioUrl)
+    audioEl = null
+    audioUrl = null
     set({
       sessionId: shortId(),
       conversationId: '',
@@ -180,12 +200,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
       chatScrollTop: null,
       pendingImageFile: null,
       pendingImagePreview: null,
+      _abort: null,
+      _requestId: state._requestId + 1,
+      voicePlaying: false,
     })
   },
 
   stop: () => {
-    get()._abort?.()
-    set({ isStreaming: false, phase: 'idle', _abort: null })
+    const state = get()
+    state._abort?.()
+    const stoppedMessage = state.streamingText
+      ? newMsg('assistant', state.streamingText, { status: 'stopped' })
+      : null
+    set({
+      isStreaming: false,
+      streamingText: '',
+      phase: 'idle',
+      _abort: null,
+      _requestId: state._requestId + 1,
+      messages: stoppedMessage ? [...state.messages, stoppedMessage] : state.messages,
+    })
   },
 
   send: async (query) => {
@@ -194,6 +228,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!q && !imageFile) return
 
     const finalQuery = q || '请帮我分析这张图片里的商品'
+    get()._abort?.()
+    const requestId = get()._requestId + 1
 
     // 先上传图片（如有）
     let imageUrl: string | null = null
@@ -218,10 +254,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       phase: 'searching',
       pendingImageFile: null,
       pendingImagePreview: null,
+      _requestId: requestId,
     }))
 
     let fullText = ''
-    let resultData: Record<string, unknown> | null = null
+    let resultData: RecommendResponse | null = null
 
     const { abort, done } = connectStream(
       {
@@ -235,24 +272,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
       {
         onToken: (t) => {
+          if (get()._requestId !== requestId) return
           fullText += t
           set({ streamingText: fullText, phase: 'talking' })
         },
         // 后端 status 中间态（如“欧米正在挑选好物…”）刷新加载文案
-        onStatus: (text) => set({ loadingMessage: text }),
+        onStatus: (text) => {
+          if (get()._requestId === requestId) set({ loadingMessage: text })
+        },
         onResult: (r) => {
           resultData = r
         },
-        onError: (m) => set({ error: m }),
+        onError: (m) => {
+          if (get()._requestId === requestId) set({ error: m })
+        },
       },
     )
     set({ _abort: abort })
 
     await done
 
-    const rd = resultData as Record<string, unknown> | null
-    const answer = fullText || (rd?.answer as string) || '抱歉，暂时无法回答您的问题。'
-    const convId = (rd?.conversation_id as string) || ''
+    if (get()._requestId !== requestId) return
+
+    const rd = resultData as RecommendResponse | null
+    const answer = fullText || rd?.answer || ''
+    const convId = rd?.conversation_id || ''
+    if (!answer) {
+      set({ isStreaming: false, streamingText: '', phase: 'idle', _abort: null })
+      return
+    }
     const assistantMsg = newMsg('assistant', answer, assistantFromResult(answer, rd))
 
     set((s) => ({
@@ -266,6 +314,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   askAgent: async (productId, title) => {
+    get()._abort?.()
+    const requestId = get()._requestId + 1
     const query = `帮我分析一下「${title}」`
     const userMsg = newMsg('user', query)
     set((s) => ({
@@ -275,10 +325,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       error: null,
       loadingMessage: `欧米正在分析「${title.slice(0, 15)}」…`,
       phase: 'analyzing',
+      _requestId: requestId,
     }))
 
     let fullText = ''
-    let resultData: Record<string, unknown> | null = null
+    let resultData: RecommendResponse | null = null
 
     const { abort, done } = connectStream(
       {
@@ -293,22 +344,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
       {
         onToken: (t) => {
+          if (get()._requestId !== requestId) return
           fullText += t
           set({ streamingText: fullText, phase: 'talking' })
         },
-        onStatus: (text) => set({ loadingMessage: text }),
+        onStatus: (text) => {
+          if (get()._requestId === requestId) set({ loadingMessage: text })
+        },
         onResult: (r) => {
           resultData = r
         },
-        onError: (m) => set({ error: m }),
+        onError: (m) => {
+          if (get()._requestId === requestId) set({ error: m })
+        },
       },
     )
     set({ _abort: abort })
     await done
 
-    const rd = resultData as Record<string, unknown> | null
-    const answer = fullText || (rd?.answer as string) || '抱歉，暂时无法回答您的问题。'
-    const convId = (rd?.conversation_id as string) || ''
+    if (get()._requestId !== requestId) return
+
+    const rd = resultData as RecommendResponse | null
+    const answer = fullText || rd?.answer || ''
+    const convId = rd?.conversation_id || ''
+    if (!answer) {
+      set({ isStreaming: false, streamingText: '', phase: 'idle', _abort: null })
+      return
+    }
     const assistantMsg = newMsg('assistant', answer, assistantFromResult(answer, rd))
     set((s) => ({
       isStreaming: false,
@@ -333,6 +395,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   loadConversation: async (conversationId) => {
+    get()._abort?.()
+    const requestId = get()._requestId + 1
+    set({ _requestId: requestId, isStreaming: false, streamingText: '', _abort: null })
     try {
       const res = await api.getConversationMessages(conversationId)
       const productsMap = res.products ?? {}
@@ -354,7 +419,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           imageUrl: m.image_url ? resolveImageUrl(m.image_url) : null,
         })
       })
-      set({ conversationId, messages: msgs, error: null })
+      if (get()._requestId === requestId) set({ conversationId, messages: msgs, error: null })
     } catch (e) {
       set({ error: e instanceof Error ? e.message : '加载对话失败' })
     }
@@ -399,14 +464,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (audioEl) {
         audioEl.pause()
       }
+      if (audioUrl) URL.revokeObjectURL(audioUrl)
+      audioUrl = url
       audioEl = new Audio(url)
       audioEl.onended = () => {
         set({ voicePlaying: false })
         URL.revokeObjectURL(url)
+        if (audioUrl === url) audioUrl = null
       }
       audioEl.onerror = () => {
         set({ voicePlaying: false })
         URL.revokeObjectURL(url)
+        if (audioUrl === url) audioUrl = null
       }
       await audioEl.play()
     } catch {

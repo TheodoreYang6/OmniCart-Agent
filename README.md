@@ -7,8 +7,8 @@
 <p align="center">
   <strong>基于 RAG 的多模态电商智能导购 AI Agent</strong>
   <br/>
-  字节跳动 Agent 挑战赛参赛作品
 </p>
+
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python" alt="Python" />

@@ -1,8 +1,9 @@
 import { Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { ComparisonTableData } from '@/api/types'
 
 interface ComparisonTableProps {
-  table: Record<string, unknown>
+  table: ComparisonTableData
   analysis?: Record<string, unknown> | null
 }
 
@@ -11,9 +12,9 @@ interface ComparisonTableProps {
  * { dimensions: string[], target_values: string[], alternative_values: string[][] }
  */
 export function ComparisonTable({ table, analysis }: ComparisonTableProps) {
-  const dimensions = (table.dimensions as string[]) ?? []
-  const targetValues = (table.target_values as string[]) ?? []
-  const altValues = (table.alternative_values as string[][]) ?? []
+  const dimensions = table.dimensions ?? []
+  const targetValues = table.target_values ?? []
+  const altValues = table.alternative_values ?? []
   if (!dimensions.length) return null
 
   const targetTitle = String(analysis?.title ?? '目标商品')

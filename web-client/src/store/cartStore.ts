@@ -12,10 +12,13 @@ import { getEffectiveUserId } from './authStore'
 interface CartState {
   items: CartItem[]
   isLoading: boolean
+  hasLoaded: boolean
   error: string | null
   checkoutMessage: string | null
   sessionId: string
   conversationId: string
+  pendingIds: string[]
+  isSelectAllPending: boolean
 
   selectedCount: () => number
   totalPrice: () => number
@@ -32,6 +35,30 @@ interface CartState {
   checkout: () => Promise<string | null>
   dismissCheckoutMessage: () => void
   clearError: () => void
+  reset: () => void
+}
+
+const mutationVersions = new Map<string, number>()
+const mutationChains = new Map<string, Promise<void>>()
+let cartLoadPromise: Promise<void> | null = null
+let cartLoadGeneration = 0
+let selectAllVersion = 0
+const beginMutation = (id: string) => {
+  const version = (mutationVersions.get(id) ?? 0) + 1
+  mutationVersions.set(id, version)
+  return version
+}
+const isCurrentMutation = (id: string, version: number) => mutationVersions.get(id) === version
+const enqueueItemMutation = (id: string, operation: () => Promise<unknown>): Promise<void> => {
+  const previous = mutationChains.get(id) ?? Promise.resolve()
+  const current = previous
+    .catch(() => undefined)
+    .then(async () => { await operation() })
+    .finally(() => {
+      if (mutationChains.get(id) === current) mutationChains.delete(id)
+    })
+  mutationChains.set(id, current)
+  return current
 }
 
 export const useCartStore = create<CartState>((set, get) => {
@@ -44,10 +71,13 @@ export const useCartStore = create<CartState>((set, get) => {
   return {
     items: [],
     isLoading: false,
+    hasLoaded: false,
     error: null,
     checkoutMessage: null,
     sessionId: '',
     conversationId: '',
+    pendingIds: [],
+    isSelectAllPending: false,
 
     selectedCount: () => get().items.filter((i) => i.selected).length,
     totalPrice: () =>
@@ -63,19 +93,43 @@ export const useCartStore = create<CartState>((set, get) => {
     setContext: (sessionId, conversationId) => set({ sessionId, conversationId }),
 
     loadCart: async () => {
+      if (cartLoadPromise) return cartLoadPromise
+
+      const generation = cartLoadGeneration
       set({ isLoading: true, error: null })
-      try {
-        const res = await api.getCart(ctx())
-        set({ isLoading: false, items: res.items ?? [] })
-      } catch (e) {
-        set({ isLoading: false, error: e instanceof Error ? e.message : '加载购物车失败' })
-      }
+      cartLoadPromise = (async () => {
+        try {
+          const res = await api.getCart(ctx())
+          if (generation === cartLoadGeneration) {
+            set({ isLoading: false, hasLoaded: true, items: res.items ?? [] })
+          }
+        } catch (e) {
+          if (generation === cartLoadGeneration) {
+            set({
+              isLoading: false,
+              hasLoaded: true,
+              error: e instanceof Error ? e.message : '加载购物车失败',
+            })
+          }
+        } finally {
+          if (generation === cartLoadGeneration) cartLoadPromise = null
+        }
+      })()
+      return cartLoadPromise
     },
 
     addToCart: async (productId, skuId = null, quantity = 1) => {
       try {
-        await api.addToCart({ product_id: productId, sku_id: skuId, quantity }, ctx())
-        await get().loadCart()
+        const item = await api.addToCart({ product_id: productId, sku_id: skuId, quantity }, ctx())
+        set((state) => {
+          const exists = state.items.some((current) => current.cart_item_id === item.cart_item_id)
+          return {
+            hasLoaded: true,
+            items: exists
+              ? state.items.map((current) => current.cart_item_id === item.cart_item_id ? item : current)
+              : [...state.items, item],
+          }
+        })
         return true
       } catch (e) {
         set({ error: e instanceof Error ? e.message : '加购失败' })
@@ -87,54 +141,97 @@ export const useCartStore = create<CartState>((set, get) => {
       const target = get().items.find((i) => i.cart_item_id === id)
       if (!target) return
       const next = !target.selected
+      const version = beginMutation(id)
       set((s) => ({
         items: s.items.map((i) => (i.cart_item_id === id ? { ...i, selected: next } : i)),
+        pendingIds: Array.from(new Set([...s.pendingIds, id])),
       }))
       try {
-        await api.updateCartItem(id, { selected: next }, ctx())
+        await enqueueItemMutation(id, () => api.updateCartItem(id, { selected: next }, ctx()))
+        if (isCurrentMutation(id, version)) {
+          set((s) => ({ pendingIds: s.pendingIds.filter((itemId) => itemId !== id) }))
+        }
       } catch (e) {
-        // 回滚
-        set((s) => ({
-          items: s.items.map((i) => (i.cart_item_id === id ? { ...i, selected: !next } : i)),
-          error: e instanceof Error ? e.message : '操作失败',
-        }))
+        if (isCurrentMutation(id, version)) {
+          set((s) => ({
+            items: s.items.map((i) => (i.cart_item_id === id ? { ...i, selected: target.selected } : i)),
+            pendingIds: s.pendingIds.filter((itemId) => itemId !== id),
+            error: e instanceof Error ? e.message : '操作失败',
+          }))
+        }
       }
     },
 
     toggleSelectAll: async () => {
       const next = !get().allSelected()
-      set((s) => ({ items: s.items.map((i) => ({ ...i, selected: next })) }))
+      const version = ++selectAllVersion
+      const previous = new Map(get().items.map((item) => [item.cart_item_id, item.selected]))
+      set((s) => ({
+        items: s.items.map((i) => ({ ...i, selected: next })),
+        isSelectAllPending: true,
+      }))
       try {
         await api.selectAllCart(next, ctx())
+        if (selectAllVersion === version) set({ isSelectAllPending: false })
       } catch (e) {
-        set({ error: e instanceof Error ? e.message : '操作失败' })
-        await get().loadCart()
+        if (selectAllVersion === version) {
+          set((state) => ({
+            items: state.items.map((item) => (
+              item.selected === next && previous.has(item.cart_item_id)
+                ? { ...item, selected: previous.get(item.cart_item_id) ?? item.selected }
+                : item
+            )),
+            isSelectAllPending: false,
+            error: e instanceof Error ? e.message : '操作失败',
+          }))
+        }
       }
     },
 
     setQuantity: async (id, quantity) => {
-      if (quantity < 1) return
+      quantity = Math.max(1, Math.min(99, quantity))
       const prev = get().items.find((i) => i.cart_item_id === id)?.quantity ?? 1
+      const version = beginMutation(id)
       set((s) => ({
         items: s.items.map((i) => (i.cart_item_id === id ? { ...i, quantity } : i)),
+        pendingIds: Array.from(new Set([...s.pendingIds, id])),
       }))
       try {
-        await api.updateCartItem(id, { quantity }, ctx())
+        await enqueueItemMutation(id, () => api.updateCartItem(id, { quantity }, ctx()))
+        if (isCurrentMutation(id, version)) {
+          set((s) => ({ pendingIds: s.pendingIds.filter((itemId) => itemId !== id) }))
+        }
       } catch (e) {
-        set((s) => ({
-          items: s.items.map((i) => (i.cart_item_id === id ? { ...i, quantity: prev } : i)),
-          error: e instanceof Error ? e.message : '操作失败',
-        }))
+        if (isCurrentMutation(id, version)) {
+          set((s) => ({
+            items: s.items.map((i) => (i.cart_item_id === id ? { ...i, quantity: prev } : i)),
+            pendingIds: s.pendingIds.filter((itemId) => itemId !== id),
+            error: e instanceof Error ? e.message : '操作失败',
+          }))
+        }
       }
     },
 
     removeItem: async (id) => {
-      const snapshot = get().items
-      set((s) => ({ items: s.items.filter((i) => i.cart_item_id !== id) }))
+      const index = get().items.findIndex((item) => item.cart_item_id === id)
+      const removed = get().items[index]
+      if (!removed) return
+      set((s) => ({
+        items: s.items.filter((i) => i.cart_item_id !== id),
+        pendingIds: Array.from(new Set([...s.pendingIds, id])),
+      }))
       try {
-        await api.removeCartItem(id, ctx())
+        await enqueueItemMutation(id, () => api.removeCartItem(id, ctx()))
+        set((state) => ({ pendingIds: state.pendingIds.filter((itemId) => itemId !== id) }))
       } catch (e) {
-        set({ items: snapshot, error: e instanceof Error ? e.message : '删除失败' })
+        set((state) => {
+          if (state.items.some((item) => item.cart_item_id === id)) {
+            return { pendingIds: state.pendingIds.filter((itemId) => itemId !== id), error: e instanceof Error ? e.message : '删除失败' }
+          }
+          const items = [...state.items]
+          items.splice(Math.min(index, items.length), 0, removed)
+          return { items, pendingIds: state.pendingIds.filter((itemId) => itemId !== id), error: e instanceof Error ? e.message : '删除失败' }
+        })
       }
     },
 
@@ -163,5 +260,13 @@ export const useCartStore = create<CartState>((set, get) => {
 
     dismissCheckoutMessage: () => set({ checkoutMessage: null }),
     clearError: () => set({ error: null }),
+    reset: () => {
+      mutationVersions.clear()
+      mutationChains.clear()
+      selectAllVersion += 1
+      cartLoadGeneration += 1
+      cartLoadPromise = null
+      set({ items: [], isLoading: false, hasLoaded: false, error: null, checkoutMessage: null, pendingIds: [], isSelectAllPending: false })
+    },
   }
 })

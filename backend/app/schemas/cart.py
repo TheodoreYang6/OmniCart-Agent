@@ -22,11 +22,11 @@ class CartItem(BaseModel):
 class CartItemCreate(BaseModel):
     product_id: str
     sku_id: str | None = None
-    quantity: int = 1
+    quantity: int = Field(1, ge=1, le=99)
 
 
 class CartItemUpdate(BaseModel):
-    quantity: int | None = None
+    quantity: int | None = Field(default=None, ge=1, le=99)
     selected: bool | None = None
 
 

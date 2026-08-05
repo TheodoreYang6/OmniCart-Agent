@@ -1,7 +1,7 @@
 """Conversation & ConversationMessage Pydantic schemas."""
 
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConversationCreate(BaseModel):
@@ -17,6 +17,8 @@ class ConversationUpdate(BaseModel):
 
 
 class ConversationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     conversation_id: str
     user_id: str
     session_id: str
@@ -27,10 +29,6 @@ class ConversationOut(BaseModel):
     context_snapshot: dict = Field(default_factory=dict)  # Memory Lite: 购物任务上下文
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
-
 
 class MessageCreate(BaseModel):
     conversation_id: str
@@ -46,6 +44,8 @@ class MessageCreate(BaseModel):
 
 
 class MessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     message_id: str
     conversation_id: str
     user_id: str
@@ -58,6 +58,3 @@ class MessageOut(BaseModel):
     memory_refs: list = Field(default_factory=list)
     created_at: datetime | None = None
     metadata: dict = Field(default_factory=dict)
-
-    class Config:
-        from_attributes = True

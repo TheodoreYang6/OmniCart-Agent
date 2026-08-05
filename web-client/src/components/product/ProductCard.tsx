@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react'
+import { useId, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { Plus, Star } from 'lucide-react'
 import type { DecisionResult, Product } from '@/api/types'
 import { ProductImage } from '@/components/ui/ProductImage'
@@ -49,7 +49,7 @@ function ScoreRing({ score, level }: { score: number; level?: string }) {
   const r = 9
   const c = 2 * Math.PI * r
   const [c1, c2] = RING_COLORS[level ?? ''] ?? RING_COLORS.recommended
-  const gid = `sg-${(level ?? 'recommended').replace(/[^a-z_]/g, '')}`
+  const gid = `${useId().replace(/:/g, '')}-score-gradient`
   return (
     <span className="relative inline-flex h-7 w-7 items-center justify-center">
       <svg width="28" height="28" viewBox="0 0 28 28" className="-rotate-90">
@@ -98,7 +98,8 @@ export function ProductCard({
   onAddToCart,
   onAskAgent,
 }: ProductCardProps) {
-  const price = decision ? product.price : product.price
+  const price = product.price
+  const [adding, setAdding] = useState(false)
   const score = decision?.display_score ?? 0
   const level = decision?.recommendation_level ?? ''
   const ls = levelStyle(level)
@@ -124,6 +125,12 @@ export function ProductCard({
       )}
       onClick={onClick}
       onMouseMove={handleSpotMove}
+      role={onClick ? 'link' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? `查看商品：${product.title}` : undefined}
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+        if (onClick && event.key === 'Enter') onClick()
+      }}
     >
       <div className="relative overflow-hidden">
         <ProductImage
@@ -213,18 +220,23 @@ export function ProductCard({
                 }}
                 className="flex items-center gap-1 rounded-lg border border-brand-200 bg-[var(--glass-bg)] px-2 py-1.5 text-xs font-medium text-brand-600 backdrop-blur transition hover:bg-brand-500/10 hover:shadow-glow"
                 title="问欧米"
+                aria-label={`问欧米关于 ${product.title}`}
               >
                 <Omi size={16} /> 问欧米
               </button>
             )}
             {onAddToCart && (
               <button
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation()
-                  onAddToCart()
+                  if (adding) return
+                  setAdding(true)
+                  try { await onAddToCart() } finally { setAdding(false) }
                 }}
+                disabled={adding}
                 className="gradient-brand flex h-8 w-8 items-center justify-center rounded-full text-white shadow-glow transition hover:shadow-glow-lg active:scale-90"
                 title="加入购物车"
+                aria-label={`将 ${product.title} 加入购物车`}
               >
                 <Plus size={16} />
               </button>

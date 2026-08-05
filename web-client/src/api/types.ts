@@ -216,6 +216,19 @@ export interface AuthResponse {
   phone?: string
   avatar_url?: string
   error?: string | null
+  cart_merged_count?: number
+}
+
+export interface GuestResponse {
+  guest_id: string
+  guest_token: string
+  expires_at: number
+}
+
+export interface ApiErrorPayload {
+  detail?: string | { msg?: string }[]
+  code?: string
+  message?: string
 }
 
 // ---- 购物车 ----
@@ -427,4 +440,35 @@ export interface HealthResponse {
   status: string
   service: string
   version: string
+  postgres?: { status: string } | string
+  qdrant?: { status: string } | string
+  redis?: { status: string } | string
 }
+
+export interface ChatAction {
+  type: 'address_form' | 'sku_option' | 'quick_reply' | string
+  label: string
+  product_id?: string
+  sku_id?: string
+}
+
+export interface ClarificationOption {
+  label: string
+  value?: string
+  dim?: string
+}
+
+export interface ComparisonTableData {
+  dimensions: string[]
+  target_values: string[]
+  alternative_values: string[][]
+}
+
+export interface RetrievalPlan {
+  channels?: string[]
+  category?: string | null
+  sub_category?: string | null
+  query_variants?: string[]
+}
+
+export type MessageStatus = 'complete' | 'streaming' | 'stopped' | 'error'

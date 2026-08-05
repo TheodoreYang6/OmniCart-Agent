@@ -6,10 +6,11 @@
 """
 
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.schemas.cart import CartItemCreate, CartItemUpdate, DEMO_USER_ID
 from app.repositories.pg_cart_repo import get_cart_repo
+from app.core.identity import Actor, actor_or_legacy, resolve_actor
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -18,7 +19,9 @@ router = APIRouter()
 @router.get("/api/cart")
 async def get_cart(user_id: str = DEMO_USER_ID,
                    session_id: str = Query(default=""),
-                   conversation_id: str = Query(default="")):
+                   conversation_id: str = Query(default=""),
+                   actor: Actor = Depends(resolve_actor)):
+    user_id = actor_or_legacy(actor, user_id).user_id
     repo = get_cart_repo()
     cart = repo.get_cart(user_id)
     return {
@@ -33,7 +36,9 @@ async def get_cart(user_id: str = DEMO_USER_ID,
 
 @router.post("/api/cart/items")
 async def add_to_cart(item: CartItemCreate, user_id: str = DEMO_USER_ID,
-                      session_id: str = Query(default=""), conversation_id: str = Query(default="")):
+                      session_id: str = Query(default=""), conversation_id: str = Query(default=""),
+                      actor: Actor = Depends(resolve_actor)):
+    user_id = actor_or_legacy(actor, user_id).user_id
     from app.repositories.product_repo import get_product_repo
     repo = get_product_repo()
     product = repo.get_by_id(item.product_id)
@@ -72,7 +77,9 @@ async def add_to_cart(item: CartItemCreate, user_id: str = DEMO_USER_ID,
 
 @router.put("/api/cart/items/{cart_item_id}")
 async def update_cart_item(cart_item_id: str, update: CartItemUpdate, user_id: str = DEMO_USER_ID,
-                            session_id: str = Query(default=""), conversation_id: str = Query(default="")):
+                            session_id: str = Query(default=""), conversation_id: str = Query(default=""),
+                            actor: Actor = Depends(resolve_actor)):
+    user_id = actor_or_legacy(actor, user_id).user_id
     cart_repo = get_cart_repo()
     item = cart_repo.update_item(cart_item_id, update, user_id)
     if item is None:
@@ -82,7 +89,9 @@ async def update_cart_item(cart_item_id: str, update: CartItemUpdate, user_id: s
 
 @router.delete("/api/cart/items/{cart_item_id}")
 async def remove_cart_item(cart_item_id: str, user_id: str = DEMO_USER_ID,
-                           session_id: str = Query(default=""), conversation_id: str = Query(default="")):
+                           session_id: str = Query(default=""), conversation_id: str = Query(default=""),
+                           actor: Actor = Depends(resolve_actor)):
+    user_id = actor_or_legacy(actor, user_id).user_id
     cart_repo = get_cart_repo()
     ok = cart_repo.remove_item(cart_item_id, user_id)
     return {"ok": ok}
@@ -90,7 +99,9 @@ async def remove_cart_item(cart_item_id: str, user_id: str = DEMO_USER_ID,
 
 @router.post("/api/cart/select-all")
 async def select_all(selected: bool = True, user_id: str = DEMO_USER_ID,
-                     session_id: str = Query(default=""), conversation_id: str = Query(default="")):
+                     session_id: str = Query(default=""), conversation_id: str = Query(default=""),
+                     actor: Actor = Depends(resolve_actor)):
+    user_id = actor_or_legacy(actor, user_id).user_id
     cart_repo = get_cart_repo()
     cart_repo.select_all(selected, user_id)
     return {"ok": True, "selected": selected}
@@ -99,7 +110,9 @@ async def select_all(selected: bool = True, user_id: str = DEMO_USER_ID,
 @router.delete("/api/cart/clear")
 async def clear_cart(user_id: str = DEMO_USER_ID,
                      session_id: str = Query(default=""),
-                     conversation_id: str = Query(default="")):
+                     conversation_id: str = Query(default=""),
+                     actor: Actor = Depends(resolve_actor)):
+    user_id = actor_or_legacy(actor, user_id).user_id
     cart_repo = get_cart_repo()
     cart_repo.clear_cart(user_id)
     return {"ok": True, "session_id": session_id, "conversation_id": conversation_id}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import { resolveImageUrl } from '@/config'
 import { cn } from '@/lib/utils'
@@ -16,16 +16,23 @@ export function ProductImage({ src, alt = '', className, rounded = 'rounded-xl' 
   const [error, setError] = useState(false)
   const url = resolveImageUrl(src)
 
+  useEffect(() => {
+    setLoaded(false)
+    setError(false)
+  }, [url])
+
   if (!url || error) {
     return (
       <div
+        role="img"
+        aria-label={alt ? `${alt}图片不可用` : '图片不可用'}
         className={cn(
           'flex items-center justify-center bg-[var(--product-tile)] text-ink-muted',
           rounded,
           className,
         )}
       >
-        <ImageOff size={28} />
+        <ImageOff size={28} aria-hidden="true" />
       </div>
     )
   }
@@ -37,6 +44,7 @@ export function ProductImage({ src, alt = '', className, rounded = 'rounded-xl' 
         src={url}
         alt={alt}
         loading="lazy"
+        decoding="async"
         onLoad={() => setLoaded(true)}
         onError={() => setError(true)}
         className={cn(

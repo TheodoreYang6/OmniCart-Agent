@@ -120,6 +120,25 @@ class PgUserRepository:
             "avatar_url": user.avatar_url or "",
         }
 
+    def revoke_token(self, token: str) -> bool:
+        factory = get_session_sync()
+        if factory is None or not token:
+            return False
+
+        async def _revoke():
+            async with factory() as session:
+                result = await session.execute(
+                    select(UserModel).where(UserModel.token == token).limit(1)
+                )
+                user = result.scalars().first()
+                if not user:
+                    return False
+                user.token = ""
+                await session.commit()
+                return True
+
+        return bool(run_async(_revoke()))
+
     def get_by_id(self, user_id: str) -> Optional[dict]:
         factory = get_session_sync()
         if factory is None:
@@ -194,6 +213,15 @@ class MemUserRepository:
             "email": user.get("email", ""), "phone": user.get("phone", ""),
             "avatar_url": user.get("avatar_url", ""),
         }
+
+    def revoke_token(self, token: str) -> bool:
+        username = self._by_token.pop(token, None)
+        if not username:
+            return False
+        user = self._users.get(username)
+        if user:
+            user["token"] = ""
+        return True
 
     def get_by_id(self, user_id: str) -> Optional[dict]:
         username = self._by_id.get(user_id)

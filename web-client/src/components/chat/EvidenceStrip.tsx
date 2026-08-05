@@ -26,7 +26,7 @@ const SOURCE_LABEL: Record<string, string> = {
 function confidenceTone(c: number) {
   if (c >= 0.75) return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
   if (c >= 0.5) return 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
-  return 'bg-[var(--surface-variant)] text-ink-muted dark:bg-[var(--surface-sunken)]0/15 dark:text-ink-muted'
+  return 'bg-[var(--surface-variant)] text-ink-muted dark:bg-[var(--surface-sunken)] dark:text-ink-muted'
 }
 
 export function EvidenceStrip({ items }: { items: EvidenceItem[] }) {

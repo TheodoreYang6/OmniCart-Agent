@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   MessageCircleHeart,
@@ -6,11 +6,12 @@ import {
   ShoppingCart,
   User,
 } from 'lucide-react'
-import { Omi } from '@/components/brand/Omi'
+import { OmiAppIcon } from '@/components/brand/OmiAppIcon'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { useAuthStore } from '@/store/authStore'
 import { useCartStore } from '@/store/cartStore'
-import { cn, shortId } from '@/lib/utils'
+import { useChatStore } from '@/store/chatStore'
+import { cn } from '@/lib/utils'
 import { AGENT_NAME, APP_NAME } from '@/config'
 
 interface NavItem {
@@ -35,21 +36,25 @@ const NAV: NavItem[] = [
 export function AppLayout() {
   const location = useLocation()
   const username = useAuthStore((s) => s.username)
-  const isLoggedIn = useAuthStore((s) => s.token.length > 0)
-  const effectiveUserId = useAuthStore((s) => (s.userId || s.deviceUserId))
+  const isLoggedIn = useAuthStore((s) => s.isLoggedIn())
+  const effectiveUserId = useAuthStore((s) => s.userId || s.guestId)
+  const initialized = useAuthStore((s) => s.initialized)
   const cartCount = useCartStore((s) => s.items.reduce((sum, i) => sum + i.quantity, 0))
   const loadCart = useCartStore((s) => s.loadCart)
   const setContext = useCartStore((s) => s.setContext)
-
-  // 共享 sessionId：随用户切换重新生成（对齐安卓 MainScreen.sharedSessionId）
-  const sessionId = useMemo(() => shortId(), [effectiveUserId])
+  const sessionId = useChatStore((s) => s.sessionId)
 
   useEffect(() => {
     setContext(sessionId, '')
-    loadCart()
-  }, [sessionId, effectiveUserId, setContext, loadCart])
+  }, [sessionId, setContext])
+
+  useEffect(() => {
+    if (initialized && effectiveUserId) void loadCart()
+  }, [effectiveUserId, initialized, loadCart])
 
   const isChat = location.pathname.startsWith('/chat')
+  const rootTabs = ['/chat', '/shop', '/cart', '/profile']
+  const isRootTab = rootTabs.includes(location.pathname)
 
   return (
     <div className="flex h-[100dvh] w-full overflow-hidden">
@@ -58,9 +63,7 @@ export function AppLayout() {
         {/* 品牌区：ThemeToggle 已下移至底部，释出约 66px 给文案，
             副标语不再被 truncate 切成「购物智...」 */}
         <div className="flex items-center gap-3 px-5 py-5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--glass-bg-strong)] shadow-glow ring-1 ring-[var(--glass-border-strong)]">
-            <Omi size={36} />
-          </div>
+          <OmiAppIcon size={44} />
           <div className="min-w-0">
             <p className="gradient-text text-[17px] font-extrabold leading-none">{APP_NAME}</p>
             <p className="mt-1.5 whitespace-nowrap text-xs text-ink-muted">
@@ -134,11 +137,9 @@ export function AppLayout() {
       {/* 主内容区 */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* 移动端顶部栏（聊天页有自己的头部，避免重复） */}
-        {!isChat && (
+        {!isChat && isRootTab && (
           <header className="glass-strong z-10 flex items-center gap-2 border-b border-[var(--line)] px-4 py-3 lg:hidden">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--glass-bg-strong)] ring-1 ring-[var(--glass-border-strong)]">
-              <Omi size={30} />
-            </div>
+            <OmiAppIcon size={36} />
             <span className="gradient-text font-extrabold">{APP_NAME}</span>
             <ThemeToggle className="ml-auto" />
           </header>
@@ -149,7 +150,7 @@ export function AppLayout() {
         </main>
 
         {/* 移动端底部 Tab：玻璃悬浮条 */}
-        <nav className="glass-strong z-10 flex shrink-0 items-stretch border-t border-[var(--line)] pb-[env(safe-area-inset-bottom)] lg:hidden">
+        {isRootTab && <nav className="glass-strong z-10 flex shrink-0 items-stretch border-t border-[var(--line)] pb-[env(safe-area-inset-bottom)] lg:hidden" aria-label="主要导航">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
@@ -181,7 +182,7 @@ export function AppLayout() {
               )}
             </NavLink>
           ))}
-        </nav>
+        </nav>}
       </div>
     </div>
   )

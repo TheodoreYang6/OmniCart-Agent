@@ -123,7 +123,10 @@ export function ProductSpotlight({
       aria-modal="true"
     >
       {/* 背景虚化层（--scrim 随主题：深色下显著加深，让面板真正浮起来）*/}
-      <div
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="关闭商品分析"
         className="absolute inset-0 bg-[var(--scrim)] backdrop-blur-md animate-fade-in"
         onClick={onClose}
       />

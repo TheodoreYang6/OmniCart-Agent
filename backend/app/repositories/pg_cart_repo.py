@@ -143,6 +143,40 @@ class PgCartRepository:
             await session.commit()
         return True
 
+    async def amerge_cart(self, source_user_id: str, target_user_id: str) -> int:
+        """Merge a guest cart into a user cart in one transaction."""
+        if not source_user_id or source_user_id == target_user_id:
+            return 0
+        factory = get_session_sync()
+        if factory is None:
+            return 0
+        async with factory() as session:
+            result = await session.execute(
+                select(CartItemModel).where(
+                    CartItemModel.user_id.in_([source_user_id, target_user_id])
+                ).order_by(CartItemModel.created_at.asc())
+            )
+            rows = list(result.scalars().all())
+            target_by_key = {
+                (row.product_id, row.sku_id or ""): row
+                for row in rows if row.user_id == target_user_id
+            }
+            merged_count = 0
+            for row in (item for item in rows if item.user_id == source_user_id):
+                key = (row.product_id, row.sku_id or "")
+                existing = target_by_key.get(key)
+                if existing:
+                    existing.quantity = min(99, max(1, existing.quantity) + max(1, row.quantity))
+                    existing.selected = existing.selected or row.selected
+                    await session.delete(row)
+                else:
+                    row.user_id = target_user_id
+                    row.quantity = min(99, max(1, row.quantity))
+                    target_by_key[key] = row
+                merged_count += 1
+            await session.commit()
+            return merged_count
+
     # ---- 同步接口 ----
 
     def get_cart(self, user_id: str = DEMO_USER_ID) -> Cart:
@@ -168,6 +202,9 @@ class PgCartRepository:
 
     def clear_cart(self, user_id: str = DEMO_USER_ID) -> bool:
         return run_async(self.aclear_cart(user_id))
+
+    def merge_cart(self, source_user_id: str, target_user_id: str) -> int:
+        return run_async(self.amerge_cart(source_user_id, target_user_id))
 
     # ---- 内部 ----
 
@@ -248,6 +285,25 @@ class MemCartRepository:
     def clear_cart(self, user_id: str = DEMO_USER_ID) -> bool:
         self._carts[user_id] = Cart(user_id=user_id)
         return True
+
+    def merge_cart(self, source_user_id: str, target_user_id: str) -> int:
+        source = self._get_or_create(source_user_id)
+        target = self._get_or_create(target_user_id)
+        by_key = {(item.product_id, item.sku_id or ""): item for item in target.items}
+        for item in source.items:
+            key = (item.product_id, item.sku_id or "")
+            if key in by_key:
+                current = by_key[key]
+                current.quantity = min(99, current.quantity + item.quantity)
+                current.selected = current.selected or item.selected
+            else:
+                item.user_id = target_user_id
+                item.quantity = min(99, max(1, item.quantity))
+                target.items.append(item)
+                by_key[key] = item
+        merged = len(source.items)
+        self._carts[source_user_id] = Cart(user_id=source_user_id)
+        return merged
 
 
 # ---- 工厂 ----

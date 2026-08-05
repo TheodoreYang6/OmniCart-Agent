@@ -4,6 +4,7 @@ import { ArrowLeft, MapPin, Pencil, Plus, Trash2, Check } from 'lucide-react'
 import { api } from '@/api/client'
 import type { Address, AddressCreateRequest } from '@/api/types'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { LoadingBlock } from '@/components/ui/Spinner'
 import { useAuthStore } from '@/store/authStore'
@@ -21,7 +22,7 @@ const EMPTY_FORM: AddressCreateRequest = {
 
 export function AddressPage() {
   const navigate = useNavigate()
-  const effectiveUserId = useAuthStore((s) => s.userId || s.deviceUserId)
+  const effectiveUserId = useAuthStore((s) => s.userId || s.guestId)
 
   const [list, setList] = useState<Address[]>([])
   const [loading, setLoading] = useState(true)
@@ -29,6 +30,8 @@ export function AddressPage() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<AddressCreateRequest>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Address | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -95,12 +98,16 @@ export function AddressPage() {
   }
 
   const remove = async (a: Address) => {
+    setDeleting(true)
     try {
       await api.deleteAddress(a.address_id, effectiveUserId)
       setList((prev) => prev.filter((x) => x.address_id !== a.address_id))
       toast.success('已删除')
+      setDeleteTarget(null)
     } catch {
       toast.error('删除失败')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -117,8 +124,9 @@ export function AddressPage() {
     <div className="aurora-bg flex h-full flex-col">
       <header className="glass-strong z-10 flex items-center gap-2 border-b border-[var(--line)] px-3 py-3">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/profile')}
           className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition hover:bg-[var(--surface-variant)]"
+          aria-label="返回"
         >
           <ArrowLeft size={20} />
         </button>
@@ -129,7 +137,7 @@ export function AddressPage() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-4 py-4">
+        <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
           {loading ? (
             <LoadingBlock text="加载地址…" />
           ) : list.length === 0 ? (
@@ -144,7 +152,7 @@ export function AddressPage() {
               }
             />
           ) : (
-            <div className="space-y-2.5">
+            <div className="grid items-start gap-3 lg:grid-cols-2">
               {list.map((a) => (
                 <div
                   key={a.address_id}
@@ -171,12 +179,14 @@ export function AddressPage() {
                       <button
                         onClick={() => openEdit(a)}
                         className="rounded-lg p-1.5 text-ink-muted transition hover:bg-[var(--surface-variant)] hover:text-brand-500"
+                        aria-label={`编辑 ${a.name} 的地址`}
                       >
                         <Pencil size={16} />
                       </button>
                       <button
-                        onClick={() => remove(a)}
+                        onClick={() => setDeleteTarget(a)}
                         className="rounded-lg p-1.5 text-ink-muted transition hover:bg-rose-500/10 hover:text-rose-500"
+                        aria-label={`删除 ${a.name} 的地址`}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -259,6 +269,14 @@ export function AddressPage() {
           </button>
         </div>
       </Modal>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="删除收货地址"
+        description={`确定删除“${deleteTarget?.name ?? ''}”的地址吗？此操作无法撤销。`}
+        pending={deleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => { if (deleteTarget) await remove(deleteTarget) }}
+      />
     </div>
   )
 }

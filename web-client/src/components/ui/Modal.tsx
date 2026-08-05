@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -27,14 +27,40 @@ export function Modal({
   className,
   hideClose,
 }: ModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const previousFocus = document.activeElement as HTMLElement | null
+    const previousOverflow = document.body.style.overflow
+    const panel = panelRef.current
+    const focusable = () => Array.from(panel?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? [])
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      if (!items.length) {
+        event.preventDefault()
+        panel?.focus()
+        return
+      }
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus()
+      }
+    }
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
+    requestAnimationFrame(() => (focusable()[0] ?? panel)?.focus())
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
+      document.body.style.overflow = previousOverflow
+      previousFocus?.focus()
     }
   }, [open, onClose])
 
@@ -59,11 +85,20 @@ export function Modal({
 
   return createPortal(
     <div className={cn('fixed inset-0 z-[90] flex p-0 sm:p-4', panelPos)}>
-      <div
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="关闭对话框"
         className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-fade-in"
         onClick={onClose}
       />
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : '对话框'}
+        tabIndex={-1}
         className={cn(
           'relative z-10 flex max-h-[92vh] flex-col overflow-hidden bg-[var(--surface)] shadow-float',
           panelShape,
@@ -73,7 +108,7 @@ export function Modal({
       >
         {(title || !hideClose) && (
           <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-3.5">
-            <h3 className="text-base font-semibold text-ink">{title}</h3>
+            <h3 id={titleId} className="text-base font-semibold text-ink">{title}</h3>
             {!hideClose && (
               <button
                 onClick={onClose}

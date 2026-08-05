@@ -20,6 +20,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _configure_utf8_stdio() -> None:
+    """Avoid Windows/PyCharm consoles failing on Unicode status symbols."""
+    if os.name != "nt":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
+_configure_utf8_stdio()
+
 PROJECT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = PROJECT_DIR / "backend"
 FRONTEND_DIR = PROJECT_DIR / "web-client"
@@ -224,7 +240,8 @@ def main():
     if (FRONTEND_DIR / "package.json").exists():
         if (FRONTEND_DIR / "node_modules").is_dir():
             frontend = _spawn(
-                ["npx", "vite", "--port", FRONTEND_PORT],
+                ["npx.cmd" if os.name == "nt" else "npx",
+                 "vite", "--port", FRONTEND_PORT],
                 cwd=FRONTEND_DIR, tag="前端",
             )
         else:
