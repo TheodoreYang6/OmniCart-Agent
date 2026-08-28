@@ -49,6 +49,85 @@ def _normalize_image_url(product_id: str, image_path: str) -> str:
     return f"/api/products/{product_id}/image"
 
 
+def _safe_spotlight_summary(product, query: str) -> str:
+    """为商品聚光页生成一份只依赖商品档案的简短说明。
+
+    此接口过去又调用了一次自由生成模型，既绕开了推荐链路的 Guard，也可能
+    和聊天中的结论不一致。聚光页本质是商品详情的补充说明，应该优先保证
+    可追溯与稳定，而不是把营销长文二次扩写成新的性能承诺。
+    """
+    title = " ".join(str(product.title or "").split())
+    brand = str(product.brand or "").strip()
+    if brand and title.startswith(brand):
+        title = title[len(brand):].lstrip(" -·")
+    for marker in ("（", "("):
+        if marker in title:
+            title = title.split(marker, 1)[0].rstrip()
+    title = title[:32].rstrip("，、。；; ") or "这件商品"
+    rk = product.rag_knowledge
+    reviews = list(rk.user_reviews or []) if rk else []
+    faq_count = len(rk.official_faq or []) if rk else 0
+    specs: list[str] = []
+    for sku in product.skus or []:
+        for value in (sku.properties or {}).values():
+            value = str(value).strip()
+            if value and value not in specs:
+                specs.append(value)
+    spec_text = "、".join(specs[:5]) or "以详情页规格为准"
+    sentences = [f"{brand}{title}，当前价格¥{float(product.base_price):g}，可用规格包括{spec_text}。"]
+    if query and any(word in query.lower() for word in ("海边", "户外", "暴晒", "下水", "出汗")):
+        sentences.append("如果用于户外，请按详情页说明使用；长时间日晒、出汗或下水后应及时补充防护。")
+    if faq_count:
+        sentences.append(f"商品资料中有{faq_count}条官方问答，可继续核对使用方式与规格差异。")
+    if reviews:
+        avg = sum(review.rating for review in reviews) / len(reviews)
+        sentences.append(f"现有{len(reviews)}条用户评价，平均{avg:.1f}/5；样本量有限，建议结合自己的使用场景判断。")
+    else:
+        sentences.append("目前用户评价较少，购买前建议重点确认适配性、规格和售后规则。")
+    return "".join(sentences)
+
+
+def _spotlight_fact_pack(product) -> str:
+    """Create the only LLM-visible dossier for a product spotlight analysis."""
+    lines = [
+        f"商品：{product.brand} {product.title}",
+        f"品类：{product.category}/{product.sub_category}",
+        f"基础价格：¥{float(product.base_price):g}",
+    ]
+    sku_lines: list[str] = []
+    for sku in product.skus or []:
+        attrs = "、".join(f"{key}:{value}" for key, value in (sku.properties or {}).items())
+        if attrs:
+            sku_lines.append(f"{attrs}（¥{float(sku.price or product.base_price):g}）")
+    if sku_lines:
+        lines.append("可售规格：" + "；".join(sku_lines[:4]))
+
+    knowledge = product.rag_knowledge
+    if not knowledge:
+        return "\n".join(lines + ["官方问答：无", "用户评价：无"])
+
+    faqs = list(knowledge.official_faq or [])
+    if faqs:
+        faq_text = "；".join(
+            f"问：{str(item.question)[:72]} 答：{str(item.answer)[:110]}"
+            for item in faqs[:3]
+        )
+        lines.append("官方问答：" + faq_text)
+    else:
+        lines.append("官方问答：无")
+
+    reviews = list(knowledge.user_reviews or [])
+    if reviews:
+        average = sum(float(item.rating or 0) for item in reviews) / len(reviews)
+        snippets = "；".join(
+            f"{float(item.rating or 0):g}/5：{str(item.content)[:100]}" for item in reviews[:3]
+        )
+        lines.append(f"用户评价：{len(reviews)} 条，均分 {average:.1f}/5；{snippets}")
+    else:
+        lines.append("用户评价：无")
+    return "\n".join(lines)
+
+
 @router.get("/api/products/{product_id}/image")
 async def get_product_image(product_id: str):
     """商品图片服务 — 从本地数据集读取并返回。"""
@@ -174,19 +253,14 @@ async def get_product(product_id: str):
     }
 
 
-# ---- Spotlight AI 小总结（spec §3.2）----
+# ---- Spotlight 商品档案摘要（spec §3.2）----
 
 _SUMMARY_TTL = 3600  # 同商品+同 query 缓存 1h，命中直接回放
 
 
 @router.post("/api/products/{product_id}/ai-summary")
 async def product_ai_summary(product_id: str, body: dict | None = None):
-    """商品 AI 小总结（SSE 流式）——Spotlight 面板异步加载。
-
-    结合会话上下文（用户最近 query）生成 80-120 字选购向总结：
-    贴合需求点讲、正向促单、诚实提及主要注意点一条。
-    Redis 缓存 (pid, query 归一 hash) TTL 1h；命中时按块快速回放保打字机观感。
-    """
+    """Evidence-bound LLM supplement for the product spotlight panel (SSE)."""
     import asyncio
     import hashlib
     import json as _json
@@ -194,7 +268,6 @@ async def product_ai_summary(product_id: str, body: dict | None = None):
     from fastapi.responses import StreamingResponse
 
     from app.core.redis_client import get_redis
-    from app.model_gateway.gateway import get_model_gateway
 
     if _is_pg:
         p = await _repo._aget_by_id(product_id)
@@ -205,7 +278,9 @@ async def product_ai_summary(product_id: str, body: dict | None = None):
 
     query = ((body or {}).get("query") or "").strip()[:120]
     qh = hashlib.md5(query.encode()).hexdigest()[:12]
-    cache_key = f"ai_summary:v1:{product_id}:{qh}"
+    # New version is model-written from a controlled dossier; never reuse the
+    # old deterministic-template cache under the same product/query key.
+    cache_key = f"ai_summary:v4:{product_id}:{qh}"
 
     def _sse(text: str) -> str:
         return f"data: {_json.dumps({'text': text}, ensure_ascii=False)}\n\n"
@@ -225,37 +300,32 @@ async def product_ai_summary(product_id: str, body: dict | None = None):
             except Exception:
                 pass
 
-        rk = p.rag_knowledge
-        reviews = rk.user_reviews if rk else []
-        good = sum(1 for r in reviews if r.rating >= 4)
-        neg = [r.content[:40] for r in reviews if r.rating <= 2][:1]
-        faq = [f"{f.question[:30]}：{f.answer[:50]}" for f in (rk.official_faq if rk else [])[:2]]
-        sku_str = " / ".join(
-            " ".join(f"{v}" for v in (s.properties or {}).values()) for s in p.skus[:3])
-
-        prompt = (
-            f"你是购物智能体欧米。用户正在看这个商品，请给出 80-120 字的选购小总结。\n"
-            f"{'用户需求：' + query if query else ''}\n"
-            f"商品：{p.brand} {p.title} ¥{p.base_price}\n"
-            f"规格：{sku_str}\n"
-            f"评价：{len(reviews)} 条，{good} 条好评" + (f"；典型差评：{neg[0]}" if neg else "") + "\n"
-            f"FAQ：{'；'.join(faq)}\n"
-            "要求：①紧贴用户需求讲亮点（有需求时）②语气亲切促单③诚实提一条主要注意点"
-            "④不编造信息，不说'可能''大概'⑤直接输出正文不加标题"
-        )
-
         full = ""
         try:
-            gateway = get_model_gateway()
-            async for tok in gateway.chat_stream("chat_generation", prompt):
-                full += tok
-                yield _sse(tok)
+            from app.core.config import RESPONSE_LLM_TIMEOUT
+            from app.model_gateway.gateway import get_model_gateway
+            from app.prompts.agent_prompts import (
+                PRODUCT_SPOTLIGHT_ANALYSIS_SYSTEM,
+                build_product_spotlight_analysis_prompt,
+            )
+
+            prompt = build_product_spotlight_analysis_prompt(_spotlight_fact_pack(p), query)
+            full = (await asyncio.wait_for(
+                get_model_gateway().chat("chat_generation", prompt, PRODUCT_SPOTLIGHT_ANALYSIS_SYSTEM),
+                timeout=RESPONSE_LLM_TIMEOUT,
+            )).strip()
+            # The LLM is presentation only. Keep the panel compact and prevent
+            # stray formatting from making this a second, incompatible UI path.
+            full = full.replace("*", "").replace("#", "").strip()[:360]
+            if len(full) < 30:
+                full = ""
         except Exception:
-            if not full:
-                fallback = (f"{p.brand} {p.title}，¥{p.base_price}。"
-                            f"{len(reviews)} 条评价中 {good} 条好评，口碑在线～")
-                full = fallback
-                yield _sse(fallback)
+            full = ""
+        if not full:
+            full = _safe_spotlight_summary(p, query)
+        for i in range(0, len(full), 12):
+            yield _sse(full[i : i + 12])
+            await asyncio.sleep(0.01)
         if full and redis is not None:
             try:
                 await redis.set(cache_key, full, ex=_SUMMARY_TTL)

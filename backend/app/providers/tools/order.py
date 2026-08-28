@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import logging
-import uuid as _uuid
 
 from app.framework.tools.protocols import Tool, ToolContext, ToolResult, ToolSpec
 
@@ -43,34 +42,14 @@ class OrderPreviewTool(Tool):
         items = items or []
         if not items:
             return ToolResult(ok=False, message="请先去浏览商品、加入购物车，或者点「问欧米」分析后再说「下单」哦～")
-        total = sum(it.get("price", 0) * it.get("quantity", 1) for it in items)
-        item_lines = []
-        for idx, it in enumerate(items, 1):
-            b = it.get("brand", "")
-            t = it.get("title", "")[:50]
-            q = it.get("quantity", 1)
-            p = it.get("price", 0)
-            item_lines.append(f"  {idx}. {b} {t}  x{q}  ¥{p * q:.0f}")
-        items_text = "\n".join(item_lines)
-        addr_str = (
-            f"📍 {address.get('name', '')}  {address.get('phone', '')}\n"
-            f"   {address.get('province', '')}{address.get('city', '')}"
-            f"{address.get('district', '')} {address.get('detail', '')}"
-        ) if address else "📍 未设置收货地址"
-        text = (
-            f"📦 订单确认\n\n"
-            f"{items_text}\n\n"
-            f"💰 合计：¥{total:.0f}\n"
-            f"{addr_str}\n\n"
-            + ("确认下单吗？" if address else "⚠️ 请先设置收货地址～")
+        from app.services.checkout_service import order_preview_card
+
+        shop_card, message, actions, _total = order_preview_card(items, address)
+        return ToolResult(
+            message=message,
+            actions=actions,
+            data={"pending_order_items": items, "shop_card": shop_card, "needs_llm_summary": True},
         )
-        actions = (
-            [{"type": "quick_reply", "label": "确认下单"},
-             {"type": "address_form", "label": "修改地址"}]
-            if address else
-            [{"type": "address_form", "label": "填写收货地址"}]
-        )
-        return ToolResult(message=text, actions=actions, data={"pending_order_items": items})
 
 
 class OrderSubmitTool(Tool):
@@ -91,58 +70,31 @@ class OrderSubmitTool(Tool):
         items = items or []
         if not items:
             return ToolResult(ok=False, message="没有找到要下单的商品～")
-        addr = address or {}
-        total = sum(it.get("price", 0) * it.get("quantity", 1) for it in items)
-        oid = f"ORD-{_uuid.uuid4().hex[:8].upper()}"
+        from app.services.checkout_service import order_created_card, order_total, persist_order
 
-        # 持久化订单（best-effort：无 PG 时优雅降级）
+        total = order_total(items)
         try:
-            from datetime import datetime, timezone
+            order_id = await persist_order(ctx.user_id, items, total)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("order.submit persist failed: %s", exc, exc_info=True)
+            return ToolResult(ok=False, message="订单提交失败，请稍后再试")
 
-            from app.core.database import get_session_sync
-            from app.models.order import OrderModel
+        shop_card, message = order_created_card(order_id, items, total)
 
-            factory = get_session_sync()
-            async with factory() as session:
-                order = OrderModel(
-                    order_id=oid, user_id=ctx.user_id, items=items,
-                    total_price=total, status="pending",
-                    created_at=datetime.now(timezone.utc),
-                )
-                session.add(order)
-                await session.commit()
-            logger.info(f"Order persisted: {oid}")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Order persist failed ({oid}): {e}")
-
-        item_lines = []
-        for it in items:
-            b = it.get("brand", "")
-            t = it.get("title", "")[:50]
-            q = it.get("quantity", 1)
-            p = it.get("price", 0)
-            item_lines.append(f"  {b} {t} x{q}  ¥{p * q:.0f}")
-        items_text = "\n".join(item_lines)
-        text = (
-            f"🎉 下单成功！\n\n"
-            f"📋 订单号：{oid}\n"
-            f"🛒 共{len(items)}件：\n{items_text}\n"
-            f"💰 实付：¥{total:.0f}\n"
-            f"📍 {addr.get('name', '')} {addr.get('phone', '')}\n"
-            f"   {addr.get('province', '')}{addr.get('city', '')}"
-            f"{addr.get('district', '')} {addr.get('detail', '')}\n"
-            f"⏱️ 预计2-3天送达\n\n"
-            f"感谢购买！还有什么需要帮忙的吗？"
-        )
         # Phase 3 A2A：发布 order.created 产物（registry 自动落黑板，供未来订阅方消费）
         from app.schemas.a2a import Artifact
 
         artifact = Artifact(
-            artifact_id=f"A-{oid}", artifact_type="order.created",
+            artifact_id=f"A-{order_id}", artifact_type="order.created",
             producer_agent="tool:order.submit",
-            content={"order_id": oid, "total": total, "item_count": len(items)},
+            content={"order_id": order_id, "total": total, "item_count": len(items)},
         )
-        return ToolResult(message=text, data={"order_id": oid}, artifacts=[artifact])
+        return ToolResult(
+            message=message,
+            data={"order_id": order_id, "shop_card": shop_card, "needs_llm_summary": True},
+            artifacts=[artifact],
+            actions=[{"type": "quick_reply", "label": "查看订单", "route": "orders"}],
+        )
 
 
 # ================================================================

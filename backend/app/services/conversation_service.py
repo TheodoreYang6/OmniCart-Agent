@@ -11,6 +11,7 @@
 内存缓存仅作为 PG 的读缓存, 不是独立数据源。
 """
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -38,6 +39,8 @@ class ConversationService:
         self._repo = get_conversation_repo()
         # 内存缓存: cid → context_snapshot dict (PG 的读缓存, 不是独立数据源)
         self._snapshot_cache: dict[str, dict] = {}
+        # 同一会话的投影提交必须串行。否则 SSE 收尾的后台任务会把下一轮状态覆盖掉。
+        self._context_locks: dict[str, asyncio.Lock] = {}
         self._last_cleanup = time.time()
 
     # ================================================================
@@ -145,7 +148,7 @@ class ConversationService:
     # ================================================================
 
     async def get_context_snapshot(self, conversation_id: str) -> dict:
-        """一次读取全部短期上下文。先查缓存，缓存未命中则读 PG。
+        """读取兼容投影；新会话优先使用 versioned checkpoint。
 
         Returns:
             {
@@ -162,8 +165,21 @@ class ConversationService:
 
         conv = await self._repo.aget(conversation_id)
         snapshot = dict(conv.context_snapshot) if conv and conv.context_snapshot else {}
+        try:
+            checkpoint = await self._repo.aget_active_checkpoint(conversation_id)
+            if checkpoint:
+                projected = dict(checkpoint.shopping_state or {})
+                projected["conversation_summary"] = checkpoint.summary or ""
+                projected["current_turn"] = projected.get("constraints", {})
+                snapshot = {**snapshot, **projected}
+        except Exception:
+            pass
         self._snapshot_cache[conversation_id] = snapshot
         return snapshot
+
+    async def aget_context_projection(self, conversation_id: str) -> dict:
+        """供 Router/FollowUp 使用的单一会话投影，隐藏 snapshot 的存储细节。"""
+        return await self.get_context_snapshot(conversation_id)
 
     def get_context_snapshot_sync(self, conversation_id: str) -> dict:
         """同步版 — 仅查 PG (无缓存), 供 FollowUpEngine 等同步调用方使用。"""
@@ -271,6 +287,100 @@ class ConversationService:
         snapshot.update(snapshot_update)
         self._snapshot_cache[conversation_id] = snapshot
         await self._persist_snapshot(conversation_id, snapshot)
+
+    async def apersist_answer_context(self, *, conversation_id: str, state, answer: str) -> None:
+        """提交一份 versioned checkpoint，并同步维护旧 snapshot 的只读兼容投影。"""
+        if not conversation_id:
+            return
+        lock = self._context_locks.setdefault(conversation_id, asyncio.Lock())
+        async with lock:
+            try:
+                conv = await self._repo.aget(conversation_id)
+                if not conv:
+                    return
+                messages = await self._repo.alist_messages(conversation_id, limit=10)
+                last_message_id = messages[-1].message_id if messages else None
+                products = []
+                by_id = {p.get("product_id"): p for p in (state.retrieved_products or []) if p.get("product_id")}
+                for pid in (state.primary_product_ids or [])[:3]:
+                    p = by_id.get(pid, {})
+                    if p:
+                        products.append({
+                            "product_id": pid, "title": str(p.get("title", ""))[:60],
+                            "brand": p.get("brand", ""), "price": p.get("price", 0),
+                        })
+                c = getattr(state, "constraints", None)
+                constraints = {
+                    key: value for key, value in {
+                        "category": getattr(c, "category", None),
+                        "sub_category": getattr(c, "sub_category", None),
+                        "budget_max": getattr(c, "budget_max", None),
+                        "budget_min": getattr(c, "budget_min", None),
+                        "scenario": getattr(c, "scenario", None),
+                        "must_tags": getattr(c, "must_tags", None),
+                        "exclude_tags": getattr(c, "exclude_tags", None),
+                    }.items() if value not in (None, "", [], 0)
+                }
+                focus = {}
+                if getattr(state, "focus_product_id", ""):
+                    focus = {"product_id": state.focus_product_id}
+                shopping_state = {
+                    "topic": getattr(state, "intent", "") or "recommend",
+                    "active_goal": str(getattr(state, "user_query", ""))[:240],
+                    "constraints": constraints,
+                    "focus_product": focus,
+                    "last_products": products,
+                    "pending_question": self._question_from_answer(answer),
+                    "selected_product_ids": list(getattr(state, "primary_product_ids", []) or [])[:3],
+                }
+                summary = self._build_shopping_summary(shopping_state, answer)
+                checkpoint = await self._repo.acommit_checkpoint(
+                    conversation_id,
+                    expected_revision=int(getattr(conv, "context_revision", 0) or 0),
+                    summary=summary,
+                    shopping_state=shopping_state,
+                    source_through_message_id=last_message_id,
+                    retained_message_ids=[m.message_id for m in messages[-4:]],
+                    token_count=max(1, len(summary) // 2),
+                )
+                if checkpoint is None:
+                    # Another request committed first.  Never overwrite it with stale state.
+                    return
+                compat = {
+                    "conversation_summary": summary,
+                    "last_query": shopping_state["active_goal"],
+                    "last_products": products,
+                    "pending_question": shopping_state["pending_question"],
+                    "constraints": constraints,
+                    "current_turn": constraints,
+                    "focus_product": focus,
+                }
+                self._snapshot_cache[conversation_id] = compat
+                await self._persist_snapshot(conversation_id, compat)
+            except Exception as exc:  # migration may not yet be applied during a rolling deploy
+                logger.debug("context checkpoint persist skipped: %s", exc)
+
+    @staticmethod
+    def _question_from_answer(answer: str) -> str | None:
+        text = (answer or "").strip()
+        if "？" not in text and "?" not in text:
+            return None
+        tail = max(text.rfind("？"), text.rfind("?"))
+        start = max(text.rfind("。", 0, tail), text.rfind("！", 0, tail), text.rfind("\n", 0, tail)) + 1
+        question = text[start : tail + 1].strip()
+        return question[:180] or None
+
+    @staticmethod
+    def _build_shopping_summary(shopping_state: dict, answer: str) -> str:
+        parts = [f"当前目标：{shopping_state.get('active_goal', '')}"]
+        if shopping_state.get("constraints"):
+            parts.append("约束：" + str(shopping_state["constraints"]))
+        if shopping_state.get("last_products"):
+            labels = [f"{p.get('brand', '')} {p.get('title', '')}".strip() for p in shopping_state["last_products"]]
+            parts.append("已推荐：" + "；".join(labels))
+        if shopping_state.get("pending_question"):
+            parts.append("待确认：" + shopping_state["pending_question"])
+        return "\n".join(parts)[:1600]
 
     def update_context_snapshot(self, conversation_id: str, snapshot_update: dict) -> None:
         conv = self._repo.get(conversation_id)

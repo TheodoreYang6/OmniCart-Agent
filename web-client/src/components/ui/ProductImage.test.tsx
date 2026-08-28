@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from '@testing-library/react'
+import { fireEvent, render, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ProductImage } from './ProductImage'
 
@@ -19,5 +19,15 @@ describe('ProductImage', () => {
     expect(view.getByRole('img', { name: '坏图图片不可用' })).toBeVisible()
     view.rerender(<ProductImage src="" alt="空图" />)
     expect(view.getByRole('img', { name: '空图图片不可用' })).toBeVisible()
+  })
+
+  it('retries the stable product image endpoint when the supplied URL fails', async () => {
+    const view = render(<ProductImage src="https://obsolete.example/image.jpg" productId="p1" alt="商品" />)
+    const screen = within(view.container)
+    fireEvent.error(screen.getByAltText('商品'))
+
+    await waitFor(() => expect(screen.getByAltText('商品')).toHaveAttribute('src', '/api/products/p1/image'))
+    fireEvent.error(screen.getByAltText('商品'))
+    expect(screen.getByRole('img', { name: '商品图片不可用' })).toBeVisible()
   })
 })

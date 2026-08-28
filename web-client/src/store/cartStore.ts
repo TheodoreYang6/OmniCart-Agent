@@ -6,8 +6,8 @@
  */
 import { create } from 'zustand'
 import { api } from '@/api/client'
-import type { CartItem } from '@/api/types'
-import { getEffectiveUserId } from './authStore'
+import type { CartItem, CheckoutPreviewResponse, CheckoutSubmitResponse } from '@/api/types'
+import { getEffectiveUserId, useAuthStore } from './authStore'
 
 interface CartState {
   items: CartItem[]
@@ -33,6 +33,8 @@ interface CartState {
   setQuantity: (id: string, quantity: number) => Promise<void>
   removeItem: (id: string) => Promise<void>
   checkout: () => Promise<string | null>
+  previewCheckout: () => Promise<CheckoutPreviewResponse | null>
+  submitCheckout: () => Promise<CheckoutSubmitResponse | null>
   dismissCheckoutMessage: () => void
   clearError: () => void
   reset: () => void
@@ -67,6 +69,14 @@ export const useCartStore = create<CartState>((set, get) => {
     session_id: get().sessionId,
     conversation_id: get().conversationId,
   })
+  const requireLogin = (action: string) => {
+    if (useAuthStore.getState().isLoggedIn()) return true
+    set({ error: `登录后即可${action}` })
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('omnicart:login-required', { detail: { action } }))
+    }
+    return false
+  }
 
   return {
     items: [],
@@ -93,6 +103,10 @@ export const useCartStore = create<CartState>((set, get) => {
     setContext: (sessionId, conversationId) => set({ sessionId, conversationId }),
 
     loadCart: async () => {
+      if (!requireLogin("查看购物车")) {
+        set({ isLoading: false, hasLoaded: true, items: [] })
+        return
+      }
       if (cartLoadPromise) return cartLoadPromise
 
       const generation = cartLoadGeneration
@@ -119,8 +133,13 @@ export const useCartStore = create<CartState>((set, get) => {
     },
 
     addToCart: async (productId, skuId = null, quantity = 1) => {
+      if (!requireLogin("加入购物车")) return false
       try {
         const item = await api.addToCart({ product_id: productId, sku_id: skuId, quantity }, ctx())
+        if (!item || typeof item.cart_item_id !== 'string' || !item.cart_item_id) {
+          set({ error: '加购失败' })
+          return false
+        }
         set((state) => {
           const exists = state.items.some((current) => current.cart_item_id === item.cart_item_id)
           return {
@@ -138,6 +157,7 @@ export const useCartStore = create<CartState>((set, get) => {
     },
 
     toggleItem: async (id) => {
+      if (!requireLogin("管理购物车")) return
       const target = get().items.find((i) => i.cart_item_id === id)
       if (!target) return
       const next = !target.selected
@@ -163,6 +183,7 @@ export const useCartStore = create<CartState>((set, get) => {
     },
 
     toggleSelectAll: async () => {
+      if (!requireLogin("管理购物车")) return
       const next = !get().allSelected()
       const version = ++selectAllVersion
       const previous = new Map(get().items.map((item) => [item.cart_item_id, item.selected]))
@@ -189,6 +210,7 @@ export const useCartStore = create<CartState>((set, get) => {
     },
 
     setQuantity: async (id, quantity) => {
+      if (!requireLogin("管理购物车")) return
       quantity = Math.max(1, Math.min(99, quantity))
       const prev = get().items.find((i) => i.cart_item_id === id)?.quantity ?? 1
       const version = beginMutation(id)
@@ -213,6 +235,7 @@ export const useCartStore = create<CartState>((set, get) => {
     },
 
     removeItem: async (id) => {
+      if (!requireLogin("管理购物车")) return
       const index = get().items.findIndex((item) => item.cart_item_id === id)
       const removed = get().items[index]
       if (!removed) return
@@ -236,6 +259,7 @@ export const useCartStore = create<CartState>((set, get) => {
     },
 
     checkout: async () => {
+      if (!requireLogin("结算")) return null
       const selectedIds = get()
         .items.filter((i) => i.selected)
         .map((i) => i.cart_item_id)
@@ -252,6 +276,49 @@ export const useCartStore = create<CartState>((set, get) => {
           checkoutMessage: res.message,
         }))
         return res.message
+      } catch (e) {
+        set({ error: e instanceof Error ? e.message : '结算失败' })
+        return null
+      }
+    },
+
+    previewCheckout: async () => {
+      if (!requireLogin("结算")) return null
+      const selectedIds = get()
+        .items.filter((i) => i.selected)
+        .map((i) => i.cart_item_id)
+      if (selectedIds.length === 0) return null
+      try {
+        return await api.checkoutPreview({
+          user_id: getEffectiveUserId(),
+          item_ids: selectedIds,
+          session_id: get().sessionId,
+          conversation_id: get().conversationId,
+        })
+      } catch (e) {
+        set({ error: e instanceof Error ? e.message : '获取结算信息失败' })
+        return null
+      }
+    },
+
+    submitCheckout: async () => {
+      if (!requireLogin("结算")) return null
+      const selectedIds = get()
+        .items.filter((i) => i.selected)
+        .map((i) => i.cart_item_id)
+      if (selectedIds.length === 0) return null
+      try {
+        const res = await api.checkoutSubmit({
+          user_id: getEffectiveUserId(),
+          item_ids: selectedIds,
+          session_id: get().sessionId,
+          conversation_id: get().conversationId,
+        })
+        set((s) => ({
+          items: s.items.filter((i) => !i.selected),
+          checkoutMessage: res.answer || res.message,
+        }))
+        return res
       } catch (e) {
         set({ error: e instanceof Error ? e.message : '结算失败' })
         return null

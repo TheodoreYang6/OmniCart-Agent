@@ -2,7 +2,7 @@
 
 收敛自 ``graph._node_reranker`` 的内联逻辑（spec §三），行为逐字节保持：
 1. 用商品文本 + rag_knowledge + 证据片段拼 rerank 文档；
-2. 调 gateway.rerank 得排序分，按 ``0.68 + 0.38*score`` 校准写回 ``reranker_score``；
+2. 调 gateway.rerank 得原始相关度并保留；另生成仅用于排序稳定性的 ``reranker_score``；
 3. 按校准分降序重排；
 4. **视觉精确匹配商品锁定 0.99**（视觉置顶钩子）。
 
@@ -55,11 +55,17 @@ class RerankFusion:
         ranked = await self._rerank_cached(query, documents,
                                            [str(p.get("product_id", "")) for p in products])
 
-        # 校准: Reranker 排序分(0~1) → 商业可读分
-        index_map = {r["index"]: 0.68 + 0.38 * r["relevance_score"] for r in ranked}
+        # ``reranker_score`` 历史上带有很高的展示基线（甚至可超过 1），只能用于
+        # 稳定排序；决策评分必须读取未经抬升的 ``relevance_score``，否则弱相关候选
+        # 也会被当成高度匹配。
+        raw_relevance = {
+            r["index"]: max(0.0, min(1.0, float(r["relevance_score"])))
+            for r in ranked
+        }
+        index_map = {idx: 0.68 + 0.38 * score for idx, score in raw_relevance.items()}
         for idx, p in enumerate(products):
             p["reranker_score"] = index_map.get(idx, 0.0)
-            p["relevance_score"] = p["reranker_score"]
+            p["relevance_score"] = raw_relevance.get(idx, 0.0)
 
         # V6.1 噪声带量化 + 稳定排序：cross-encoder 对同质候选（同品牌同品类多款）
         # 的分差常在噪声量级，直接按原始分排会无据换序打乱召回序（评测实证

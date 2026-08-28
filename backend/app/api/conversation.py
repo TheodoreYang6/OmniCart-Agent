@@ -90,7 +90,10 @@ async def list_messages(
                         "product_id": p.product_id, "title": p.title,
                         "brand": p.brand, "price": p.base_price,
                         "category": p.category,
-                        "image_urls": [prod_repo.resolve_image_url(pid)] if p.image_path else [],
+                        # 历史消息会跨索引版本和商品数据补全周期读取；不能因为
+                        # image_path 当时为空就让卡片永久失图。产品图片 API 会自行
+                        # 决定原图或统一占位，是历史卡片唯一稳定入口。
+                        "image_urls": [f"/api/products/{p.product_id}/image"],
                     }
         except Exception:
             pass

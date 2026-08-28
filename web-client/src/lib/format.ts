@@ -3,12 +3,12 @@
  */
 
 export const LEVEL_CN: Record<string, string> = {
-  strong_recommend: '强烈推荐',
-  recommended: '值得入手',
-  worth_considering: '优质之选',
-  cautious: '谨慎考虑',
-  insufficient_evidence: '证据不足',
-  not_recommended: '不推荐',
+  strong_recommend: '高度匹配',
+  recommended: '适合考虑',
+  worth_considering: '有条件匹配',
+  cautious: '需留意',
+  insufficient_evidence: '信息有限',
+  not_recommended: '暂不建议',
 }
 
 export interface LevelStyle {
@@ -73,47 +73,6 @@ export function levelStyle(level: string): LevelStyle {
         dot: 'bg-slate-400 dark:bg-slate-300',
       }
   }
-}
-
-/** 评分颜色 (0-10)。深色下提两个亮度档——600 挡在近黑底上对比度不足（尤其 brand-600 #1A54E8）。 */
-export function scoreColor(score: number): string {
-  if (score >= 8) return 'text-emerald-600 dark:text-emerald-400'
-  if (score >= 6) return 'text-brand-600 dark:text-brand-300'
-  if (score >= 4) return 'text-amber-600 dark:text-amber-300'
-  return 'text-rose-600 dark:text-rose-400'
-}
-
-/**
- * 评分颜色——用于压在恒深药丸上的场景（如商品图角标）。
- *
- * 商品图底恒为浅色（--product-tile），因此角标用恒深药丸 + 恒亮字，
- * 不能跟随主题翻转：否则深色主题下字色被提亮，反而在浅底上对比度下降。
- */
-export function scoreColorOnScrim(score: number): string {
-  if (score >= 8) return 'text-emerald-300'
-  if (score >= 6) return 'text-sky-300'
-  if (score >= 4) return 'text-amber-300'
-  return 'text-rose-300'
-}
-
-/** component_scores 键名 → 中文标签。 */
-export const COMPONENT_LABELS: Record<string, string> = {
-  relevance: '相关度',
-  scenario_fit: '场景契合',
-  budget_fit: '预算契合',
-  spec_quality: '规格品质',
-  spec_match: '规格匹配',
-  user_sat: '用户口碑',
-  user_satisfaction: '用户口碑',
-  value_score: '性价比',
-  review_confidence: '评价可信',
-  risk_penalty: '风险扣分',
-  visual_match: '视觉匹配',
-  brand_trust: '品牌信任',
-}
-
-export function componentLabel(key: string): string {
-  return COMPONENT_LABELS[key] ?? key
 }
 
 /** 数据集品类 → emoji 图标。 */

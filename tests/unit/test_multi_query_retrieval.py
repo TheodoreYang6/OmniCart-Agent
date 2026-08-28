@@ -5,6 +5,12 @@ import pytest
 from app.schemas.workflow import SubQuery, WorkflowState
 
 
+@pytest.fixture(autouse=True)
+def _exercise_legacy_group_merger(monkeypatch):
+    """本文件专测旧 group-merger；V9 的受控批次另由 ToolRuntime 单测覆盖。"""
+    monkeypatch.setattr("app.core.config.USE_V9_CHUNK_RETRIEVAL", False)
+
+
 def _state(sub_queries):
     st = WorkflowState(user_query="上衣裤子鞋搭一套", intent="bundle", user_id="u1")
     st.retrieval_plan.sub_queries = sub_queries

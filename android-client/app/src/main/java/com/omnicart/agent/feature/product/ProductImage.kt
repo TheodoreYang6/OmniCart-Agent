@@ -1,5 +1,6 @@
 package com.omnicart.agent.feature.product
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -32,11 +33,12 @@ import com.omnicart.agent.core.theme.PriceRed
 fun ProductImage(
     imageUrl: String?,
     contentDescription: String?,
+    productId: String = "",
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 12.dp,
     contentScale: ContentScale = ContentScale.Crop,
 ) {
-    val resolved = resolveUrl(imageUrl)
+    val resolved = resolveUrl(imageUrl, productId)
     SubcomposeAsyncImage(
         model = resolved,
         contentDescription = contentDescription,
@@ -107,7 +109,26 @@ fun StarRating(rating: Double, reviewCount: Int = 0, modifier: Modifier = Modifi
     }
 }
 
-private fun resolveUrl(path: String?): String? {
-    if (path.isNullOrBlank()) return null
-    return if (path.startsWith("http")) path else AppConfig.BASE_URL.trimEnd('/') + "/" + path.trimStart('/')
+/**
+ * Product data may come from older cached responses which still contain a
+ * dataset-relative `image_path`.  Prefer the stable product-image API whenever
+ * we know the product id, while continuing to support absolute and API URLs.
+ */
+private fun resolveUrl(path: String?, productId: String): String? {
+    val baseUrl = AppConfig.BASE_URL.trimEnd('/')
+    // SSE/历史缓存可能来自不同版本：有 product_id 时，图片 API 是唯一稳定来源。
+    // 不应因 image_urls 漏字段就放弃请求，否则会直接落到“暂无图片”占位。
+    if (path.isNullOrBlank()) {
+        return productId.takeIf { it.isNotBlank() }
+            ?.let { "$baseUrl/api/products/${Uri.encode(it)}/image" }
+    }
+    if (path.startsWith("http://") || path.startsWith("https://")) return path
+
+    if (path.startsWith("/api/") || path.startsWith("api/")) {
+        return "$baseUrl/${path.trimStart('/')}"
+    }
+    if (productId.isNotBlank()) {
+        return "$baseUrl/api/products/${Uri.encode(productId)}/image"
+    }
+    return "$baseUrl/${path.trimStart('/')}"
 }

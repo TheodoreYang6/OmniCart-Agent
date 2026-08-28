@@ -17,7 +17,9 @@ import type {
   MessageStatus,
   RecommendResponse,
   RetrievalPlan,
-  ComparisonTableData,
+  Comparison,
+  FocusAnalysis,
+  ShopCard,
   ClarificationOption,
   ChatAction,
 } from '@/api/types'
@@ -41,14 +43,16 @@ export interface ChatMessage {
   sufficiencyReport?: Record<string, unknown> | null
   constraints?: Record<string, unknown> | null
   harnessReport?: Record<string, unknown> | null
-  targetProductAnalysis?: Record<string, unknown> | null
-  comparisonTable?: ComparisonTableData | null
-  alternativeProducts?: Array<Record<string, unknown>> | null
+  focusAnalysis?: FocusAnalysis | null
+  comparison?: Comparison | null
+  shopCard?: ShopCard | null
   clarificationOptions?: ClarificationOption[] | null
   actions?: ChatAction[] | null
   status?: MessageStatus
   imageUrl?: string | null
   isVoice?: boolean
+  productResolution?: Record<string, unknown> | null
+  visualResult?: Record<string, unknown> | null
 }
 
 interface ChatState {
@@ -59,8 +63,9 @@ interface ChatState {
   isStreaming: boolean
   phase: MascotPhase
   loadingMessage: string
+  /** Event-v1 payloads received before final result; shown instead of waiting. */
+  streamingPreview: Partial<RecommendResponse> | null
   error: string | null
-  fastMode: boolean
   deepThink: boolean // 深度思考：OmniAgent ReAct Loop（LLM 自主调工具，更慢但更彻底）
 
   // 输入区图片
@@ -81,9 +86,8 @@ interface ChatState {
   _requestId: number
 
   send: (query: string) => Promise<void>
-  askAgent: (productId: string, title: string) => Promise<void>
+  askAgent: (productId: string, title: string, compare?: boolean) => Promise<void>
   stop: () => void
-  setFastMode: (v: boolean) => void
   setDeepThink: (v: boolean) => void
   setPendingImage: (file: File | null) => void
   clearError: () => void
@@ -119,6 +123,7 @@ function newMsg(role: Role, text = '', extra: Partial<ChatMessage> = {}): ChatMe
 function assistantFromResult(
   text: string,
   r: RecommendResponse | null,
+  hasUploadedImage = false,
 ): Partial<ChatMessage> {
   return {
     text,
@@ -130,11 +135,16 @@ function assistantFromResult(
     sufficiencyReport: r?.sufficiency_report ?? null,
     constraints: r?.constraints ?? null,
     harnessReport: r?.harness_report ?? null,
-    targetProductAnalysis: r?.target_product_analysis ?? null,
-    comparisonTable: (r?.comparison_table as ComparisonTableData | null | undefined) ?? null,
-    alternativeProducts: r?.alternative_products ?? null,
+    focusAnalysis: r?.focus_analysis ?? null,
+    comparison: r?.comparison ?? null,
+    shopCard: r?.shop_card ?? null,
     clarificationOptions: (r?.clarification_options as ClarificationOption[] | null | undefined) ?? null,
     actions: (r?.actions as ChatAction[] | null | undefined) ?? null,
+    productResolution: (r?.product_resolution as Record<string, unknown> | null | undefined) ?? null,
+    // A visual recognition badge belongs only to the assistant reply that
+    // follows an actual user upload.  This client-side guard also protects old
+    // cached/backend responses that accidentally contain a stale visual field.
+    visualResult: hasUploadedImage ? (r?.visual_result ?? null) : null,
     status: 'complete',
   }
 }
@@ -150,8 +160,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   phase: 'idle',
   loadingMessage: '',
+  streamingPreview: null,
   error: null,
-  fastMode: false,
   deepThink: false,
   pendingImageFile: null,
   pendingImagePreview: null,
@@ -163,8 +173,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   _abort: null,
   _requestId: 0,
 
-  setFastMode: (v) => set({ fastMode: v, ...(v ? { deepThink: false } : {}) }),
-  setDeepThink: (v) => set({ deepThink: v, ...(v ? { fastMode: false } : {}) }), // 与极速互斥
+  setDeepThink: (v) => set({ deepThink: v }),
   clearError: () => set({ error: null }),
   chatScrollTop: null,
   setChatScrollTop: (v) => set({ chatScrollTop: v }),
@@ -251,6 +260,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingText: '',
       error: null,
       loadingMessage: '欧米正在帮你找商品…',
+      streamingPreview: null,
       phase: 'searching',
       pendingImageFile: null,
       pendingImagePreview: null,
@@ -267,7 +277,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversation_id: get().conversationId,
         message: finalQuery,
         image_url: imageUrl,
-        fast_mode: get().fastMode,
         deep_think: get().deepThink,
       },
       {
@@ -279,6 +288,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // 后端 status 中间态（如“欧米正在挑选好物…”）刷新加载文案
         onStatus: (text) => {
           if (get()._requestId === requestId) set({ loadingMessage: text })
+        },
+        onEvent: (type, payload) => {
+          if (get()._requestId !== requestId || !payload || typeof payload !== 'object') return
+          const data = payload as Record<string, unknown>
+          if (type === 'recommendations') {
+            set({ streamingPreview: data as Partial<RecommendResponse> })
+          } else if (type === 'visual_result' || type === 'focus_analysis' || type === 'comparison') {
+            set((state) => ({
+              streamingPreview: {
+                ...(state.streamingPreview ?? {}),
+                ...(type === 'visual_result'
+                  ? {
+                      visual_result: data.visual_result as Record<string, unknown> | null | undefined,
+                      product_resolution: data.product_resolution as Record<string, unknown> | null | undefined,
+                    }
+                  : { [type]: data }),
+              },
+            }))
+          }
         },
         onResult: (r) => {
           resultData = r
@@ -301,11 +329,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ isStreaming: false, streamingText: '', phase: 'idle', _abort: null })
       return
     }
-    const assistantMsg = newMsg('assistant', answer, assistantFromResult(answer, rd))
+    const assistantMsg = newMsg('assistant', answer, assistantFromResult(answer, rd, Boolean(imageUrl)))
 
     set((s) => ({
       isStreaming: false,
       streamingText: '',
+      streamingPreview: null,
       phase: 'idle',
       _abort: null,
       messages: [...s.messages, assistantMsg],
@@ -313,17 +342,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
   },
 
-  askAgent: async (productId, title) => {
+  askAgent: async (productId, title, compare = false) => {
     get()._abort?.()
     const requestId = get()._requestId + 1
-    const query = `帮我分析一下「${title}」`
+    const query = compare
+      ? `请把「${title}」与同类商品横向对比，说明主要差异、分别适合谁，以及我该怎么选。`
+      : `帮我分析一下「${title}」`
     const userMsg = newMsg('user', query)
     set((s) => ({
       messages: [...s.messages, userMsg],
       isStreaming: true,
       streamingText: '',
       error: null,
-      loadingMessage: `欧米正在分析「${title.slice(0, 15)}」…`,
+      loadingMessage: compare
+        ? `欧米正在为你横向比较「${title.slice(0, 15)}」…`
+        : `欧米正在分析「${title.slice(0, 15)}」…`,
+      streamingPreview: null,
       phase: 'analyzing',
       _requestId: requestId,
     }))
@@ -337,10 +371,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         user_id: getEffectiveUserId(),
         conversation_id: get().conversationId,
         message: query,
-        mode: 'product_focused_analysis',
+        mode: compare ? 'same_category_comparison' : 'product_focused_analysis',
         target_product_id: productId,
-        allow_same_category_comparison: true,
-        fast_mode: get().fastMode,
+        // “问欧米”同样应尊重用户已开启的深度思考开关。此前这个入口漏传，
+        // 即使界面显示已开启也永远走普通单品路径。
+        deep_think: get().deepThink,
+        // 单品分析默认不混入同类；用户点选“横向对比”时才明确授权扩展范围。
+        allow_same_category_comparison: compare,
       },
       {
         onToken: (t) => {
@@ -350,6 +387,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         onStatus: (text) => {
           if (get()._requestId === requestId) set({ loadingMessage: text })
+        },
+        onEvent: (type, payload) => {
+          if (get()._requestId !== requestId || !payload || typeof payload !== 'object') return
+          const data = payload as Record<string, unknown>
+          if (type === 'recommendations') set({ streamingPreview: data as Partial<RecommendResponse> })
+          else if (type === 'visual_result' || type === 'focus_analysis' || type === 'comparison') {
+            set((state) => ({ streamingPreview: {
+              ...(state.streamingPreview ?? {}),
+              ...(type === 'visual_result'
+                ? {
+                    visual_result: data.visual_result as Record<string, unknown> | null | undefined,
+                    product_resolution: data.product_resolution as Record<string, unknown> | null | undefined,
+                  }
+                : { [type]: data }),
+            } }))
+          }
         },
         onResult: (r) => {
           resultData = r
@@ -371,10 +424,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ isStreaming: false, streamingText: '', phase: 'idle', _abort: null })
       return
     }
-    const assistantMsg = newMsg('assistant', answer, assistantFromResult(answer, rd))
+    const assistantMsg = newMsg('assistant', answer, assistantFromResult(answer, rd, false))
     set((s) => ({
       isStreaming: false,
       streamingText: '',
+      streamingPreview: null,
       phase: 'idle',
       _abort: null,
       messages: [...s.messages, assistantMsg],

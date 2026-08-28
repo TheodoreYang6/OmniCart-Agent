@@ -11,6 +11,22 @@ data class RecommendResponse(
     val answer: String = "",
     @SerializedName("products")
     val products: List<Product> = emptyList(),
+    @SerializedName("primary_products")
+    val primaryProducts: List<Product> = emptyList(),
+    @SerializedName("alternative_products")
+    val recommendationAlternatives: List<Product> = emptyList(),
+    @SerializedName("recommendation_brief")
+    val recommendationBrief: List<Map<String, Any?>> = emptyList(),
+    @SerializedName("product_resolution")
+    val productResolution: Map<String, Any?>? = null,
+    @SerializedName("retrieval_scope")
+    val retrievalScope: String = "broad",
+    @SerializedName("resolved_product_ids")
+    val resolvedProductIds: List<String> = emptyList(),
+    @SerializedName("product_dossier")
+    val productDossier: Map<String, Any?>? = null,
+    @SerializedName("retrieval_groups")
+    val retrievalGroups: List<RetrievalGroup> = emptyList(),
     @SerializedName("decision_results")
     val decisionResults: List<DecisionResult> = emptyList(),
     @SerializedName("evidence_list")
@@ -37,10 +53,17 @@ data class RecommendResponse(
     val memoryTrace: Map<String, Any?>? = null,
     @SerializedName("target_product_analysis")
     val targetProductAnalysis: Map<String, Any?>? = null,
-    @SerializedName("alternative_products")
-    val alternativeProducts: List<Map<String, Any?>>? = null,
+    @SerializedName("analysis_alternatives")
+    val analysisAlternatives: List<Map<String, Any?>>? = null,
     @SerializedName("comparison_table")
     val comparisonTable: Map<String, Any?>? = null,
+    /** Canonical v1 same-category comparison payload. */
+    @SerializedName("comparison")
+    val comparison: Map<String, Any?>? = null,
+    @SerializedName("focus_analysis")
+    val focusAnalysis: Map<String, Any?>? = null,
+    @SerializedName("shop_card")
+    val shopCard: Map<String, Any?>? = null,
     @SerializedName("cross_category")
     val crossCategory: List<Map<String, Any?>>? = null,
     @SerializedName("timing")
@@ -55,6 +78,15 @@ data class RecommendResponse(
     val shopAction: Boolean = false,
     @SerializedName("actions")
     val actions: List<Map<String, Any?>>? = null,
+)
+
+data class RetrievalGroup(
+    @SerializedName("group_id") val groupId: String = "",
+    @SerializedName("role") val role: String = "",
+    @SerializedName("query") val query: String = "",
+    @SerializedName("product_ids") val productIds: List<String> = emptyList(),
+    @SerializedName("status") val status: String = "pending",
+    @SerializedName("missing_reason") val missingReason: String = "",
 )
 
 data class EvidenceItem(

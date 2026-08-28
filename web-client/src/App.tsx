@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { ToastHost } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
@@ -42,6 +42,7 @@ function AppLifecycle() {
   const initialize = useAuthStore((state) => state.initialize)
   const expireSession = useAuthStore((state) => state.expireSession)
   const location = useLocation()
+  const navigate = useNavigate()
 
   useEffect(() => { void initialize() }, [initialize])
   useEffect(() => {
@@ -52,6 +53,13 @@ function AppLifecycle() {
     window.addEventListener('omnicart:unauthorized', handleUnauthorized)
     return () => window.removeEventListener('omnicart:unauthorized', handleUnauthorized)
   }, [expireSession, initialize])
+  useEffect(() => {
+    const goLogin = () => {
+      if (location.pathname !== '/login') navigate('/login', { state: { from: location.pathname } })
+    }
+    window.addEventListener('omnicart:login-required', goLogin)
+    return () => window.removeEventListener('omnicart:login-required', goLogin)
+  }, [location.pathname, navigate])
   useEffect(() => {
     const labels: Record<string, string> = {
       '/chat': '与欧米聊天', '/shop': '好物广场', '/cart': '购物车',
@@ -95,7 +103,7 @@ export default function App() {
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/shop" element={<ShopPage />} />
             <Route path="/product/:productId" element={<ProductDetailPage />} />
-            <Route path="/cart" element={<CartPage />} />
+            <Route path="/cart" element={<ProtectedRoute><CartPage /></ProtectedRoute>} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
             <Route path="/address" element={<ProtectedRoute><AddressPage /></ProtectedRoute>} />

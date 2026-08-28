@@ -6,11 +6,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.material.icons.Icons
@@ -25,8 +24,6 @@ import com.omnicart.agent.core.network.ApiClient
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -50,13 +47,16 @@ data class BottomTab(val route: String, val label: String, val icon: ImageVector
 
 val tabs = listOf(
     BottomTab("shop", "商品", Icons.Filled.Storefront),
-    BottomTab("chat", "小O", Icons.AutoMirrored.Filled.Chat),
+    BottomTab("chat", "欧米", Icons.AutoMirrored.Filled.Chat),
     BottomTab("cart", "购物车", Icons.Filled.ShoppingCart),
     BottomTab("profile", "我的", Icons.Filled.Person),
 )
 
 @Composable
-fun MainScreen() {
+fun MainScreen(
+    isDarkTheme: Boolean,
+    onDarkThemeChange: (Boolean) -> Unit,
+) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -75,21 +75,20 @@ fun MainScreen() {
         AuthManager.init(context)
     }
 
-    // 隐藏底部 Tab：特定页面 或 键盘弹起时（>100dp 阈值防抖，避免动画期间频繁重绘）
-    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
-    val keyboardOpen by remember(imeBottom) { derivedStateOf { imeBottom > 100 } }
-    val hideBottomBar = keyboardOpen || currentDestination?.route in listOf("login", "address", "address_select", "preference", "product_detail/{productId}")
+    // 键盘出现时，Scaffold 整体共用同一组 IME inset：输入栏与四个 Tab 会一起平滑上移。
+    val hideBottomBar = currentDestination?.route in listOf("login", "address", "address_select", "preference", "product_detail/{productId}")
 
     // 问问小O状态
     var askDouzaiProductId by remember { mutableStateOf("") }
     var askDouzaiTitle by remember { mutableStateOf("") }
 
     Scaffold(
+        modifier = Modifier.imePadding(),
         bottomBar = {
             if (!hideBottomBar) {
                 NavigationBar(
-                    tonalElevation = 8.dp,
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                     modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars),
                 ) {
                     tabs.forEach { tab ->
@@ -97,6 +96,12 @@ fun MainScreen() {
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
+                                // 推荐、识图、语音可游客使用；购物车与订单属于账户数据。
+                                // 在导航层拦截，避免先进入页面再收到一串 401。
+                                if (tab.route == "cart" && !AuthManager.isLoggedIn) {
+                                    navController.navigate("login")
+                                    return@NavigationBarItem
+                                }
                                 if (tab.route == "cart") cartRefreshKey++
                                 navController.navigate(tab.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -203,6 +208,7 @@ fun MainScreen() {
                 ProfileScreen(
                     isLoggedIn = authState.isLoggedIn,
                     username = authState.username,
+                    isDarkTheme = isDarkTheme,
                     memories = memories,
                     isLoadingMemories = isLoadingMemories,
                     onLoginClick = { navController.navigate("login") },
@@ -212,6 +218,7 @@ fun MainScreen() {
                     onOrdersClick = { navController.navigate("orders") },
                     onLoadMemories = loadMemories,
                     onDeleteMemory = deleteMemory,
+                    onDarkThemeChange = onDarkThemeChange,
                 )
             }
             composable("login") {

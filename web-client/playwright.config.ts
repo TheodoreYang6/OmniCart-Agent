@@ -6,7 +6,9 @@ export default defineConfig({
   workers: 4,
   use: { baseURL: 'http://127.0.0.1:4173', trace: 'retain-on-failure' },
   webServer: {
-    command: 'npm.cmd run preview -- --host 127.0.0.1 --port 4173',
+    // 用 npm 而不是 npm.cmd：npm.cmd 仅 Windows 存在，macOS/Linux 上会 command not found。
+    // webServer 命令走 shell，Windows 下裸 npm 同样能解析到 npm.cmd，两边都能跑。
+    command: 'npm run preview -- --host 127.0.0.1 --port 4173',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: true,
   },

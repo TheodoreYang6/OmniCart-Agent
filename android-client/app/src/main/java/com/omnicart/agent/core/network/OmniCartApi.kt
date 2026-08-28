@@ -252,12 +252,6 @@ interface OmniCartApi {
         @Body request: TTSRequest,
     ): retrofit2.Response<okhttp3.ResponseBody>
 
-    @Multipart
-    @POST("api/voice/chat/v2")
-    suspend fun voiceChat(
-        @Part audio: MultipartBody.Part,
-        @Part("query") query: okhttp3.RequestBody,
-    ): VoiceChatResponse
 }
 
 // ---- Voice ----
@@ -270,6 +264,9 @@ data class TTSRequest(
 data class TranscribeResponse(
     val text: String = "",
     val fallback: Boolean = false,
+    @com.google.gson.annotations.SerializedName("detected_mime") val detectedMime: String = "",
+    @com.google.gson.annotations.SerializedName("duration_ms") val durationMs: Long? = null,
+    val model: String = "",
 )
 
 // ---- Voice ----

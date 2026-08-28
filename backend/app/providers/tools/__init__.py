@@ -40,7 +40,9 @@ def builtin(repo: Any = None) -> list:
     from app.providers.tools.shopping import (
         CheckInventoryTool,
         CompareProductsTool,
+        DisplayProductsTool,
         GetProductDetailTool,
+        ProductDossierTool,
         SearchProductsTool,
     )
 
@@ -62,7 +64,9 @@ def builtin(repo: Any = None) -> list:
         OrderPayTool(),
         # 购物核心（只读）
         SearchProductsTool(),
+        DisplayProductsTool(),
         GetProductDetailTool(),
+        ProductDossierTool(),
         CompareProductsTool(),
         CheckInventoryTool(),
         # 偏好（Phase 6-B3）：save / list / delete

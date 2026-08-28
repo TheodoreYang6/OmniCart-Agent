@@ -56,6 +56,10 @@ class CartViewModel : ViewModel() {
     private val userId: String get() = AuthManager.effectiveUserId
 
     fun loadCart() {
+        if (!AuthManager.isLoggedIn) {
+            _uiState.update { it.copy(isLoading = false, items = emptyList(), error = "登录后即可查看和管理购物车") }
+            return
+        }
         _uiState.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
             try {
@@ -77,6 +81,7 @@ class CartViewModel : ViewModel() {
     }
 
     fun toggleItem(id: String) {
+        if (!AuthManager.isLoggedIn) return
         val item = _uiState.value.items.find { it.id == id } ?: return
         _uiState.update { state ->
             state.copy(items = state.items.map { if (it.id == id) it.copy(selected = !it.selected) else it })
@@ -93,6 +98,7 @@ class CartViewModel : ViewModel() {
     }
 
     fun toggleSelectAll() {
+        if (!AuthManager.isLoggedIn) return
         val newVal = !_uiState.value.allSelected
         _uiState.update { state ->
             state.copy(items = state.items.map { it.copy(selected = newVal) }, allSelected = newVal)
@@ -109,6 +115,7 @@ class CartViewModel : ViewModel() {
     }
 
     fun increaseQty(id: String) {
+        if (!AuthManager.isLoggedIn) return
         val item = _uiState.value.items.find { it.id == id } ?: return
         val newQty = item.quantity + 1
         _uiState.update { state ->
@@ -126,6 +133,7 @@ class CartViewModel : ViewModel() {
     }
 
     fun decreaseQty(id: String) {
+        if (!AuthManager.isLoggedIn) return
         val item = _uiState.value.items.find { it.id == id } ?: return
         if (item.quantity <= 1) return
         val newQty = item.quantity - 1
@@ -144,6 +152,7 @@ class CartViewModel : ViewModel() {
     }
 
     fun removeItem(id: String) {
+        if (!AuthManager.isLoggedIn) return
         _uiState.update { state -> state.copy(items = state.items.filter { it.id != id }) }
         updateStats()
         viewModelScope.launch {
@@ -156,6 +165,10 @@ class CartViewModel : ViewModel() {
     }
 
     fun checkout() {
+        if (!AuthManager.isLoggedIn) {
+            _uiState.update { it.copy(error = "登录后即可结算") }
+            return
+        }
         val selectedIds = _uiState.value.items.filter { it.selected }.map { it.id }
         if (selectedIds.isEmpty()) return
         viewModelScope.launch {

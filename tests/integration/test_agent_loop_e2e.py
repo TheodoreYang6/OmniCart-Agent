@@ -18,7 +18,7 @@ async def _run_loop(msg: str, deep_think: bool = False):
 
 
 async def test_loop_e2e_mock_search_round():
-    """MOCK 脚本：首轮发 shopping.search（真实深管线执行）→ 次轮结论收口。"""
+    """首轮受控 shopping.search 后直接收敛；SSE 层再基于结果生成自然语言。"""
     events, state = await _run_loop("推荐一款蓝牙耳机")
     kinds = [e["type"] for e in events]
     assert kinds[0] == "status" and kinds[-1] == "done"
@@ -26,8 +26,10 @@ async def test_loop_e2e_mock_search_round():
     # 深检索结果写回 state（供 SSE 层 generate_stream 与前端商品卡）
     assert state.retrieved_products
     assert state.skill_executions and state.skill_executions[0]["skill_name"] == "shopping.search"
-    # MOCK 结论进 context_prompt
-    assert "[欧米的分析结论" in state.context_prompt
+    # 受控运行时不再为了生成结论开启第二个 LLM 决策回合；工具记录只留在
+    # 请求级账本，最终 AnswerContext 读取已收敛商品/证据，避免工具转录泄漏。
+    assert not state.context_prompt
+    assert not state.answer_draft
 
 
 async def test_loop_e2e_non_product_query_ends_fast():

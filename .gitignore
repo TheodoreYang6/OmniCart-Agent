@@ -91,6 +91,10 @@ runtime/
 # ===== Downloaded AI model weights and provider caches =====
 # Re-download these on a new machine; they are too large for normal Git hosting.
 models/
+# Product ORM source lives under backend/app/models; keep downloaded model weights
+# ignored while allowing newly added ORM modules to be versioned.
+!backend/app/models/
+!backend/app/models/product_identity.py
 .cache/
 **/.cache/huggingface/
 *.safetensors
@@ -106,14 +110,7 @@ design/brand/*-transparent-v2.png
 design/brand/*-transparent-v3.png
 web-client/public/brand/omi-perch-v3*
 
-# ===== Personal or machine-private documents =====
-*简历*.pdf
-*简历*.docx
-课题说明会*.pdf
-
 # ===== Local AI-agent instructions =====
-.claude/
-AGENTS.md
 claude-auto.bat
 
 # Project documentation, migrations, tests, lock files, datasets required by the

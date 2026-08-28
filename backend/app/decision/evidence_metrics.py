@@ -219,15 +219,23 @@ class EvidenceScoringHelper:
     ) -> tuple[float, str]:
         """计算 RAG 相关度 (不依赖 LLM)。
 
-        优先级: reranker_score > retrieval_score > chunk_score > keyword_fallback
+        优先级: relevance_score(原始精排相关度) > reranker_score(旧排序分) > retrieval_score
         注意: RRF排序分(0.01-0.02)会被 normalize_relevance_score 过滤为0, 自动降级。
         """
-        # 1. reranker score
-        rr = product_item.get("reranker_score") or product_item.get("relevance_score")
+        # 1. 原始 reranker 相关度。reranker_score 是排序校准分，历史版本可能 > 1，
+        # 不能优先用它作为“匹配程度”。
+        rr = product_item.get("relevance_score")
         if rr is not None and rr > 0:
             norm = normalize_relevance_score(rr)
             if norm > 0:
-                return norm, "reranker_score"
+                return norm, "reranker_relevance"
+
+        # 兼容旧检索结果：没有原始分时才读取排序分。
+        rank_score = product_item.get("reranker_score")
+        if rank_score is not None and rank_score > 0:
+            norm = normalize_relevance_score(rank_score)
+            if norm > 0:
+                return norm, "legacy_reranker_rank"
 
         # 2. evidence profile 中的 max_rerank
         if profile.max_rerank_score > 0:

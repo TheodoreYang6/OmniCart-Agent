@@ -22,6 +22,9 @@ data class ChatMessage(
     val role: MessageRole,
     val text: String = "",
     val products: List<Product> = emptyList(),
+    val recommendationAlternatives: List<Product> = emptyList(),
+    val productResolution: Map<String, Any?>? = null,
+    val visualResult: Map<String, Any?>? = null,
     val decisionResults: List<DecisionResult> = emptyList(),
     val evidenceList: List<EvidenceItem> = emptyList(),
     val traceSteps: List<TraceStepItem> = emptyList(),
@@ -34,11 +37,22 @@ data class ChatMessage(
     // 问问小O对比数据
     val targetProductAnalysis: Map<String, Any?>? = null,
     val comparisonTable: Map<String, Any?>? = null,
-    val alternativeProducts: List<Map<String, Any?>>? = null,
+    val comparison: Map<String, Any?>? = null,
+    /** Canonical single-product analysis payload emitted by the current SSE contract. */
+    val focusAnalysis: Map<String, Any?>? = null,
+    /** Structured shopping action card and follow-up actions; retained with the message. */
+    val shopCard: Map<String, Any?>? = null,
+    val actions: List<Map<String, Any?>> = emptyList(),
+    val needsClarification: Boolean = false,
+    val clarificationQuestion: String = "",
+    val clarificationOptions: List<Map<String, Any?>> = emptyList(),
+    val analysisAlternatives: List<Map<String, Any?>>? = null,
     val crossCategory: List<Map<String, Any?>>? = null,
 ) {
     val hasProducts: Boolean get() = products.isNotEmpty()
-    val hasComparison: Boolean get() = targetProductAnalysis != null || comparisonTable != null
+    val hasComparison: Boolean get() = comparisonTable != null || comparison != null
+    val resolvedFocusAnalysis: Map<String, Any?>?
+        get() = focusAnalysis ?: targetProductAnalysis
 }
 
 data class ChatUiState(
@@ -67,6 +81,14 @@ data class ChatUiState(
     // 打字机流式
     val isStreamingText: Boolean = false,
     val streamingText: String = "",
+    // 推荐简报会在文字前抵达：用于先展示首选卡和友好进度。
+    val streamingPrimaryProducts: List<Product> = emptyList(),
+    val streamingAlternatives: List<Product> = emptyList(),
+    val streamingDecisionResults: List<DecisionResult> = emptyList(),
+    val recommendationStage: String = "",
+    val streamingResolutionLabel: String = "",
+    val streamingVisualResult: Map<String, Any?>? = null,
+    val streamingVisualResolution: Map<String, Any?>? = null,
     // 约束引导
     val guideOptions: List<ConstraintOption> = emptyList(),
     val lockedCategory: String = "",
@@ -83,8 +105,8 @@ data class ChatUiState(
     val isLoadingConversation: Boolean = false,
     // 长期偏好
     val profileEnabled: Boolean = false,
-    // 快速回答
-    val fastMode: Boolean = false,
+    // 深度思考：欧米会先规划，再多轮检索、比较与校验。
+    val deepThink: Boolean = false,
 ) {
     val lastUserMessage: ChatMessage?
         get() = messages.lastOrNull { it.role == MessageRole.User }

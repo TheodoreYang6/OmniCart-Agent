@@ -36,12 +36,21 @@ object ApiClient {
             .build()
     }
 
-    val api: OmniCartApi by lazy {
-        Retrofit.Builder()
-            .baseUrl(AppConfig.BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(OmniCartApi::class.java)
-    }
+    private var cachedApi: OmniCartApi? = null
+    private var cachedBaseUrl: String = ""
+
+    val api: OmniCartApi
+        get() {
+            val url = AppConfig.BASE_URL
+            if (cachedApi == null || cachedBaseUrl != url) {
+                cachedApi = Retrofit.Builder()
+                    .baseUrl(url)
+                    .client(okHttpClient)
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build()
+                    .create(OmniCartApi::class.java)
+                cachedBaseUrl = url
+            }
+            return cachedApi!!
+        }
 }

@@ -1,10 +1,10 @@
-"""V4 Decision Scoring — RAG 证据驱动，LLM 不再参与默认评分。
+"""V5 Decision Scoring — 匹配排序与证据可信度分离。
 
 Design principles:
-- relevance 来自 RAG 检索/重排分数 (rag_relevance), 不再依赖 LLM
-- 保留原有 6 维规则评分作为 safety bounds
-- 新增 evidence_confidence 控制最终分数的可信度上限
-- user_sat 不再被评论数量加成抬高
+- relevance 来自原始 RAG 精排分数，不把“排序校准分”当真实相关度
+- 预算、评价、场景只在用户提出或数据确实存在时才有主要权重
+- final_score 是候选的内部匹配排序分；evidence_confidence 独立决定证据状态
+- 缺少证据只标注“信息有限”，不会把高匹配候选伪装成 4.5 分的“不推荐”
 - risk_penalty 绑定 evidence_ids
 
 Formula:
@@ -98,7 +98,7 @@ class DecisionScoring:
         preferred_brands = preferred_brands or []
         sub_cat = product.sub_category or ""
 
-        # Relevance: 优先用 force_rag_relevance
+        # Relevance: 优先用原始 RAG 精排相关度。
         if force_rag_relevance is not None and force_rag_relevance > 0:
             relevance = force_rag_relevance
         elif llm_relevance > 0:
@@ -164,17 +164,28 @@ class DecisionScoring:
         preference_bonus = min(preference_bonus, 0.10)
         avoid_penalty = min(avoid_penalty, 0.10)
 
-        raw = (
-            0.45 * relevance
-            + 0.20 * budget_fit
-            + 0.12 * user_sat
-            + 0.10 * value_sc
-            + 0.08 * spec_q
-            + 0.05 * scenario_fit
-            + preference_bonus
-            - risk_penalty
-            - avoid_penalty
+        # 没有预算/场景/评价数据时，旧算法仍给这些维度几乎满分，导致无关商品也
+        # 常落在 7~9 分。现在按“该信号是否真的存在”动态归一化权重。
+        has_reviews = bool(product.rag_knowledge and product.rag_knowledge.user_reviews)
+        has_budget = bool(budget_max and budget_max > 0)
+        has_scenario = bool(scenario or scenario_keywords)
+        weights = {
+            "relevance": 0.58,
+            "budget_fit": 0.18 if has_budget else 0.04,
+            "user_sat": 0.12 if has_reviews else 0.02,
+            "value_score": 0.05,
+            "spec_quality": 0.06,
+            "scenario_fit": 0.08 if has_scenario else 0.02,
+        }
+        weighted_sum = (
+            weights["relevance"] * relevance
+            + weights["budget_fit"] * budget_fit
+            + weights["user_sat"] * user_sat
+            + weights["value_score"] * value_sc
+            + weights["spec_quality"] * spec_q
+            + weights["scenario_fit"] * scenario_fit
         )
+        raw = weighted_sum / sum(weights.values()) + preference_bonus - risk_penalty - avoid_penalty
         final_score = max(0.0, min(1.0, raw))
 
         # Evidence confidence cap
@@ -184,8 +195,6 @@ class DecisionScoring:
             hard_constraint_failed=False,
             global_evidence_sufficient=global_evidence_sufficient,
         )
-        final_score = self._apply_confidence_cap(final_score, rec_level)
-
         display_score = round(final_score * 10, 1)
 
         breakdown = ScoreBreakdown(
@@ -201,17 +210,17 @@ class DecisionScoring:
         # Build component_scores — structured dict for frontend display
         support = support_evidence_ids or []
         component_scores = {
-            "relevance": {"score": round(relevance, 4), "weight": 0.45,
+            "relevance": {"score": round(relevance, 4), "weight": weights["relevance"],
                           "method": relevance_source, "evidence_ids": support[:3]},
-            "budget_fit": {"score": round(budget_fit, 4), "weight": 0.20,
+            "budget_fit": {"score": round(budget_fit, 4), "weight": weights["budget_fit"],
                            "method": "structured_price_rule", "evidence_ids": []},
-            "user_sat": {"score": round(user_sat, 4), "weight": 0.12,
+            "user_sat": {"score": round(user_sat, 4), "weight": weights["user_sat"],
                          "method": "review_rating_avg_v4", "evidence_ids": []},
-            "value_score": {"score": round(value_sc, 4), "weight": 0.10,
+            "value_score": {"score": round(value_sc, 4), "weight": weights["value_score"],
                             "method": "subcategory_price_benchmark", "evidence_ids": []},
-            "spec_quality": {"score": round(spec_q, 4), "weight": 0.08,
+            "spec_quality": {"score": round(spec_q, 4), "weight": weights["spec_quality"],
                              "method": "spec_signal_match", "evidence_ids": []},
-            "scenario_fit": {"score": round(scenario_fit, 4), "weight": 0.05,
+            "scenario_fit": {"score": round(scenario_fit, 4), "weight": weights["scenario_fit"],
                              "method": "scenario_keyword_match", "evidence_ids": []},
             "risk_penalty": {"score": round(risk_penalty, 4), "weight": None,
                              "method": "negative_review_and_low_rating",
@@ -259,7 +268,7 @@ class DecisionScoring:
             llm_relevance=llm_relevance,
             llm_reasoning=llm_reasoning,
             llm_verdict=llm_verdict,
-            score_version="evidence_scoring_v1",
+            score_version="evidence_scoring_v2",
             evidence_confidence=round(ev_conf, 4),
             component_scores=component_scores,
             support_evidence_ids=support,
@@ -268,6 +277,8 @@ class DecisionScoring:
             scoring_debug={
                 "relevance_source": relevance_source,
                 "force_rag_relevance": force_rag_relevance,
+                "ranking_score_before_modifiers": round(weighted_sum / sum(weights.values()), 4),
+                "active_weights": weights,
             },
         )
 
@@ -291,14 +302,13 @@ class DecisionScoring:
             return "recommended"
         if final_score >= 0.55:
             return "cautious"
-        return "not_recommended"
+        # “不推荐”只用于硬约束失败；分低只是当前需求下匹配较弱。
+        return "cautious"
 
     @staticmethod
     def _apply_confidence_cap(final_score: float, recommendation_level: str) -> float:
-        if recommendation_level == "not_recommended":
-            return min(final_score, 0.45)
-        if recommendation_level == "insufficient_evidence":
-            return min(final_score, 0.50)
+        # V5: final_score 是排序分而非证据分。不能因资料少就改写匹配程度；
+        # 资料不足由 recommendation_level/evidence_confidence 单独交付给用户。
         if recommendation_level == "cautious":
             return min(final_score, 0.80)
         return final_score
@@ -335,42 +345,49 @@ class DecisionScoring:
     def _calc_keyword_match(self, product: Product, query: str, keyword_score: float) -> float:
         """语义相关度 — 从检索分数映射到商业可读的 0-1 区间。
 
-        自动检测分数类型:
-        - 余弦相似度 (0~1): 应用校准曲线 0.68 + 0.38*score (压缩区间拉宽)
-        - 旧关键词命中数 (>1): 使用对数曲线映射
-        - 无分数 (≤0): 基线 0.62 + 子品类匹配加成
+        自动检测分数类型。这里的结果是“需求匹配信号”，不是促销用展示分：
+        - 0~1 的原始语义相关度不再用高基线抬升
+        - 无检索分数时只使用文本重合的保守兜底
         """
         import math
+        lexical = self._calc_lexical_overlap(product, query)
         if keyword_score <= 0:
-            kw_norm = 0.62
+            return lexical
         elif keyword_score < 1.0:
-            # 余弦相似度 / Reranker 分数: 校准到商业可读区间
-            # score=0.45→0.85, score=0.55→0.89, score=0.70→0.95, score=0.85→0.98
-            kw_norm = min(1.0, 0.68 + 0.38 * keyword_score)
+            # 原始余弦/重排分：保留差异，少量词面重合只能作为补充。
+            kw_norm = min(1.0, 0.15 + 0.85 * keyword_score)
         else:
             # 旧格式关键词命中数 (>1): 对数映射
-            kw_norm = min(1.0, 0.62 + 0.28 * math.log10(max(1, keyword_score)))
+            kw_norm = min(1.0, 0.35 + 0.22 * math.log10(max(1, keyword_score)))
 
-        # Sub-category keyword match bonus (CJK-aware)
-        sub_bonus = 0.0
-        if product.sub_category:
-            sub_lower = product.sub_category.lower()
-            query_lower = query.lower()
-            has_cjk = any('一' <= c <= '鿿' for c in query_lower)
-            if has_cjk:
-                seen = set()
-                for i in range(len(query_lower) - 1):
-                    bigram = query_lower[i:i+2]
-                    if bigram not in seen and bigram in sub_lower:
-                        seen.add(bigram)
-                        sub_bonus += 0.10
-            else:
-                for kw in query_lower.split():
-                    if len(kw) >= 2 and kw in sub_lower:
-                        sub_bonus += 0.10
-        sub_bonus = min(0.20, sub_bonus)
+        return min(1.0, 0.85 * kw_norm + 0.15 * lexical)
 
-        return min(1.0, kw_norm + sub_bonus)
+    @staticmethod
+    def _calc_lexical_overlap(product: Product, query: str) -> float:
+        """无向量信号时的保守词面兜底，避免所有候选被默认抬到高分。"""
+        query_lower = (query or "").lower().strip()
+        if not query_lower:
+            return 0.30
+        product_text = " ".join(filter(None, [
+            product.title, product.brand, product.category, product.sub_category,
+            getattr(product.rag_knowledge, "marketing_description", "") if product.rag_knowledge else "",
+        ])).lower()
+        if not product_text:
+            return 0.25
+
+        if any("一" <= c <= "鿿" for c in query_lower):
+            grams = {query_lower[i:i + 2] for i in range(len(query_lower) - 1)
+                     if query_lower[i:i + 2].strip()}
+            if not grams:
+                return 0.30
+            hits = sum(1 for gram in grams if gram in product_text)
+            return min(0.80, 0.25 + 0.55 * hits / len(grams))
+
+        terms = {term for term in query_lower.split() if len(term) >= 2}
+        if not terms:
+            return 0.30
+        hits = sum(1 for term in terms if term in product_text)
+        return min(0.80, 0.25 + 0.55 * hits / len(terms))
 
     # ============================================================
     # Dimension 2: Budget Fit (0.22) — 价格合适度

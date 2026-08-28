@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
-import { ArrowUp, BrainCircuit, ImagePlus, Mic, Square, X, Zap } from 'lucide-react'
+import { ArrowUp, BrainCircuit, ImagePlus, Mic, Square, X } from 'lucide-react'
 import { useChatStore } from '@/store/chatStore'
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder'
 import { toast } from '@/store/toastStore'
@@ -18,8 +18,6 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const composingRef = useRef(false)
   const compositionEndedAtRef = useRef(0)
 
-  const fastMode = useChatStore((s) => s.fastMode)
-  const setFastMode = useChatStore((s) => s.setFastMode)
   const deepThink = useChatStore((s) => s.deepThink)
   const setDeepThink = useChatStore((s) => s.setDeepThink)
   const pendingPreview = useChatStore((s) => s.pendingImagePreview)
@@ -214,20 +212,6 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         {/* 底部工具行 */}
         <div className="mt-2 flex items-center justify-between px-1">
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setFastMode(!fastMode)}
-              className={cn(
-                'flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-all duration-200',
-                fastMode
-                  ? 'bg-gradient-to-r from-amber-400 to-orange-400 text-white shadow-[0_2px_10px_rgba(251,191,36,0.4)]'
-                  : 'text-ink-muted hover:bg-[var(--glass-bg-strong)] hover:text-ink-soft',
-              )}
-              title="快速模式：跳过部分推理，更快回复"
-              aria-pressed={fastMode}
-            >
-              <Zap size={13} className={fastMode ? 'fill-white' : ''} />
-              极速回答{fastMode ? '·开' : ''}
-            </button>
             <button
               onClick={() => setDeepThink(!deepThink)}
               className={cn(

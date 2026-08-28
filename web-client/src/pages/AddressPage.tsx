@@ -1,29 +1,21 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, MapPin, Pencil, Plus, Trash2, Check } from 'lucide-react'
+import { ArrowLeft, Check, House, MapPin, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { api } from '@/api/client'
 import type { Address, AddressCreateRequest } from '@/api/types'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { LoadingBlock } from '@/components/ui/Spinner'
+import { AddressForm } from '@/components/address/AddressForm'
 import { useAuthStore } from '@/store/authStore'
 import { toast } from '@/store/toastStore'
 
-const EMPTY_FORM: AddressCreateRequest = {
-  name: '',
-  phone: '',
-  province: '',
-  city: '',
-  district: '',
-  detail: '',
-  is_default: false,
-}
+const EMPTY_FORM: AddressCreateRequest = { name: '', phone: '', province: '', city: '', district: '', detail: '', is_default: false }
 
 export function AddressPage() {
   const navigate = useNavigate()
   const effectiveUserId = useAuthStore((s) => s.userId || s.guestId)
-
   const [list, setList] = useState<Address[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Address | null>(null)
@@ -35,248 +27,76 @@ export function AddressPage() {
 
   const load = async () => {
     setLoading(true)
-    try {
-      const res = await api.getAddresses(effectiveUserId)
-      setList(res.addresses ?? [])
-    } catch {
-      toast.error('加载地址失败')
-    } finally {
-      setLoading(false)
-    }
+    try { setList((await api.getAddresses(effectiveUserId)).addresses ?? []) } catch { toast.error('加载地址失败，请稍后重试') } finally { setLoading(false) }
   }
-
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void load() // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveUserId])
 
-  const openCreate = () => {
-    setEditing(null)
-    setForm(EMPTY_FORM)
+  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowForm(true) }
+  const openEdit = (address: Address) => {
+    setEditing(address)
+    setForm({ name: address.name, phone: address.phone, province: address.province, city: address.city, district: address.district, detail: address.detail, is_default: address.is_default })
     setShowForm(true)
   }
-
-  const openEdit = (a: Address) => {
-    setEditing(a)
-    setForm({
-      name: a.name,
-      phone: a.phone,
-      province: a.province,
-      city: a.city,
-      district: a.district,
-      detail: a.detail,
-      is_default: a.is_default,
-    })
-    setShowForm(true)
-  }
-
   const save = async () => {
-    if (!form.name.trim() || !form.phone.trim()) {
-      toast.error('请填写收货人和手机号')
-      return
-    }
-    if (!form.detail?.trim()) {
-      toast.error('请填写详细地址')
-      return
-    }
+    if (!form.name.trim() || !form.phone.trim()) { toast.error('请填写收货人和手机号'); return }
+    if (![form.province, form.city, form.district, form.detail].every((item) => item?.trim())) { toast.error('请补全所在地区和详细地址'); return }
     setSaving(true)
     try {
-      if (editing) {
-        await api.updateAddress(editing.address_id, form, effectiveUserId)
-        toast.success('地址已更新')
-      } else {
-        await api.createAddress(form, effectiveUserId)
-        toast.success('地址已添加')
-      }
-      setShowForm(false)
-      await load()
-    } catch {
-      toast.error('保存失败')
-    } finally {
-      setSaving(false)
-    }
+      if (editing) { await api.updateAddress(editing.address_id, form, effectiveUserId); toast.success('地址已更新') } else { await api.createAddress(form, effectiveUserId); toast.success('地址已添加') }
+      setShowForm(false); await load()
+    } catch { toast.error('保存失败，请稍后重试') } finally { setSaving(false) }
   }
-
-  const remove = async (a: Address) => {
+  const remove = async (address: Address) => {
     setDeleting(true)
-    try {
-      await api.deleteAddress(a.address_id, effectiveUserId)
-      setList((prev) => prev.filter((x) => x.address_id !== a.address_id))
-      toast.success('已删除')
-      setDeleteTarget(null)
-    } catch {
-      toast.error('删除失败')
-    } finally {
-      setDeleting(false)
-    }
+    try { await api.deleteAddress(address.address_id, effectiveUserId); setList((previous) => previous.filter((item) => item.address_id !== address.address_id)); toast.success('地址已删除'); setDeleteTarget(null) } catch { toast.error('删除失败，请稍后重试') } finally { setDeleting(false) }
   }
-
-  const setDefault = async (a: Address) => {
-    try {
-      await api.updateAddress(a.address_id, { is_default: true }, effectiveUserId)
-      await load()
-    } catch {
-      toast.error('操作失败')
-    }
+  const setDefault = async (address: Address) => {
+    try { await api.updateAddress(address.address_id, { is_default: true }, effectiveUserId); await load(); toast.success('已设为默认地址') } catch { toast.error('操作失败，请稍后重试') }
   }
 
   return (
     <div className="aurora-bg flex h-full flex-col">
       <header className="glass-strong z-10 flex items-center gap-2 border-b border-[var(--line)] px-3 py-3">
-        <button
-          onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/profile')}
-          className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition hover:bg-[var(--surface-variant)]"
-          aria-label="返回"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <span className="flex-1 font-medium text-ink">收货地址</span>
-        <button onClick={openCreate} className="btn-primary px-3 py-1.5 text-sm">
-          <Plus size={16} /> 新增
-        </button>
+        <button onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/profile')} className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition hover:bg-[var(--surface-variant)]" aria-label="返回"><ArrowLeft size={20} /></button>
+        <span className="flex-1 font-semibold text-ink">收货地址</span>
+        <button onClick={openCreate} className="btn-primary px-3 py-1.5 text-sm"><Plus size={16} /> 新增地址</button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
-          {loading ? (
-            <LoadingBlock text="加载地址…" />
-          ) : list.length === 0 ? (
-            <EmptyState
-              icon={<MapPin size={26} />}
-              title="还没有收货地址"
-              description="添加地址后，下单更便捷"
-              action={
-                <button onClick={openCreate} className="btn-primary mt-2">
-                  <Plus size={18} /> 添加地址
-                </button>
-              }
-            />
+        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:py-8">
+          <section className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-500">Delivery address</p><h1 className="mt-1 text-2xl font-bold tracking-tight text-ink">把心仪好物送到你手上</h1><p className="mt-1 text-sm text-ink-muted">默认地址会在结算时优先使用，可随时修改。</p></div>
+            {!loading && list.length > 0 && <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-sm text-ink-soft"><MapPin size={15} className="text-brand-500" />已保存 {list.length} 个地址</span>}
+          </section>
+
+          {loading ? <LoadingBlock text="正在加载你的地址…" /> : list.length === 0 ? (
+            <EmptyState icon={<MapPin size={28} />} title="还没有收货地址" description="提前添加一个地址，选好商品就能更快下单。" action={<button onClick={openCreate} className="btn-primary mt-2"><Plus size={18} /> 添加地址</button>} />
           ) : (
-            <div className="grid items-start gap-3 lg:grid-cols-2">
-              {list.map((a) => (
-                <div
-                  key={a.address_id}
-                  className="glass card-hover p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              {list.map((address) => (
+                <article key={address.address_id} className="glass group relative overflow-hidden border border-[var(--card-border)] p-5 shadow-lift transition hover:-translate-y-0.5 hover:shadow-float">
+                  {address.is_default && <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand-500 to-sky-400" />}
+                  <div className="flex gap-3">
+                    <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${address.is_default ? 'bg-brand-500 text-white shadow-glow' : 'bg-[var(--surface-variant)] text-brand-500'}`}><House size={19} /></span>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-ink">{a.name}</span>
-                        <span className="text-sm text-ink-muted">{a.phone}</span>
-                        {a.is_default && (
-                          <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
-                            默认
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-1 text-sm leading-relaxed text-ink-soft">
-                        {a.province}
-                        {a.city}
-                        {a.district} {a.detail}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 gap-1">
-                      <button
-                        onClick={() => openEdit(a)}
-                        className="rounded-lg p-1.5 text-ink-muted transition hover:bg-[var(--surface-variant)] hover:text-brand-500"
-                        aria-label={`编辑 ${a.name} 的地址`}
-                      >
-                        <Pencil size={16} />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(a)}
-                        className="rounded-lg p-1.5 text-ink-muted transition hover:bg-rose-500/10 hover:text-rose-500"
-                        aria-label={`删除 ${a.name} 的地址`}
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><strong className="text-base text-ink">{address.name}</strong><span className="text-sm text-ink-muted">{address.phone}</span>{address.is_default && <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[11px] font-semibold text-brand-600 dark:text-brand-300">默认地址</span>}</div>
+                      <p className="mt-2 text-sm leading-6 text-ink-soft">{address.province} {address.city} {address.district}<br />{address.detail}</p>
                     </div>
                   </div>
-                  {!a.is_default && (
-                    <button
-                      onClick={() => setDefault(a)}
-                      className="mt-2 flex items-center gap-1 text-xs text-ink-muted transition hover:text-brand-500"
-                    >
-                      <Check size={13} /> 设为默认
-                    </button>
-                  )}
-                </div>
+                  <div className="mt-5 flex items-center justify-between border-t border-[var(--line)] pt-3.5">
+                    {address.is_default ? <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-300"><ShieldCheck size={15} />结算时优先使用</span> : <button onClick={() => setDefault(address)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 transition hover:text-brand-500"><Check size={15} />设为默认地址</button>}
+                    <div className="flex items-center gap-1"><button onClick={() => openEdit(address)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-ink-soft transition hover:bg-[var(--surface-variant)] hover:text-brand-600"><Pencil size={14} />编辑</button><button onClick={() => setDeleteTarget(address)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-ink-muted transition hover:bg-rose-500/10 hover:text-rose-500"><Trash2 size={14} />删除</button></div>
+                  </div>
+                </article>
               ))}
             </div>
           )}
-        </div>
+        </main>
       </div>
 
-      {/* 表单 */}
-      <Modal
-        open={showForm}
-        onClose={() => setShowForm(false)}
-        title={editing ? '编辑地址' : '新增地址'}
-        variant="bottom"
-      >
-        <div className="space-y-3 p-5">
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              className="input-field"
-              placeholder="收货人"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-            <input
-              className="input-field"
-              placeholder="手机号"
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <input
-              className="input-field"
-              placeholder="省"
-              value={form.province}
-              onChange={(e) => setForm({ ...form, province: e.target.value })}
-            />
-            <input
-              className="input-field"
-              placeholder="市"
-              value={form.city}
-              onChange={(e) => setForm({ ...form, city: e.target.value })}
-            />
-            <input
-              className="input-field"
-              placeholder="区/县"
-              value={form.district}
-              onChange={(e) => setForm({ ...form, district: e.target.value })}
-            />
-          </div>
-          <textarea
-            className="input-field min-h-[72px] resize-none"
-            placeholder="详细地址（街道、门牌号等）"
-            value={form.detail}
-            onChange={(e) => setForm({ ...form, detail: e.target.value })}
-          />
-          <label className="flex items-center gap-2 text-sm text-ink-soft">
-            <input
-              type="checkbox"
-              checked={form.is_default}
-              onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
-              className="h-4 w-4 accent-brand-500"
-            />
-            设为默认地址
-          </label>
-          <button onClick={save} disabled={saving} className="btn-primary w-full py-3">
-            {saving ? '保存中…' : '保存'}
-          </button>
-        </div>
-      </Modal>
-      <ConfirmDialog
-        open={!!deleteTarget}
-        title="删除收货地址"
-        description={`确定删除“${deleteTarget?.name ?? ''}”的地址吗？此操作无法撤销。`}
-        pending={deleting}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={async () => { if (deleteTarget) await remove(deleteTarget) }}
-      />
+      <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? '编辑收货地址' : '新增收货地址'} variant="bottom"><div className="p-5"><AddressForm value={form} onChange={setForm} saving={saving} onSubmit={save} submitLabel={editing ? '保存修改' : '保存地址'} /></div></Modal>
+      <ConfirmDialog open={!!deleteTarget} title="删除收货地址" description={`确定删除“${deleteTarget?.name ?? ''}”的地址吗？此操作无法撤销。`} pending={deleting} onClose={() => setDeleteTarget(null)} onConfirm={async () => { if (deleteTarget) await remove(deleteTarget) }} />
     </div>
   )
 }

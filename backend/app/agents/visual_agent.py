@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from io import BytesIO
 from pathlib import Path
 
 from app.model_gateway.gateway import get_model_gateway
@@ -12,32 +13,30 @@ from app.core.config import REDIS_CACHE_TTL_VISUAL
 
 _UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "uploads"
 
-PROMPT_SYSTEM = """你是电商商品识别助手。根据图片准确识别商品，从以下商品库支持的类别中选择最匹配的：
-
-数码电子：真无线耳机、智能手机、平板电脑、笔记本电脑、移动电源、充电器/数据线
-美妆护肤：精华、面霜、防晒、化妆水、眼霜、面膜、粉底液、蜜粉、唇釉、眉笔、洁面、卸妆
-服饰运动：跑步鞋、篮球鞋、徒步鞋、短袖T恤、速干T恤、卫衣、运动长裤、运动短裤、户外裤、瑜伽裤、背包、帽子
-食品饮料：咖啡、牛奶、酸奶、碳酸饮料、功能饮料、茶饮、方便食品、坚果/零食、调味品
-
-如果图片中的商品不在以上类别中，confidence 应设为 0.3 以下。"""
+PROMPT_SYSTEM = """你是欧米的商品视觉实体提取器，不负责推荐，也不能猜测看不见的信息。
+只根据包装、Logo、型号、规格和图片中的文字提取可核验线索。商品库目录大类只能是：
+数码电子、美妆护肤、服饰运动、食品饮料、家居用品、母婴用品、运动户外、个护清洁。
+细类可写商品本身的具体类型。型号、价格、功效若无法从图片确认必须为空；不要把相似外观当作同一商品。"""
 
 PROMPT_USER = """请识别这张商品图片，只返回 JSON：
 
 {
-  "product_name": "商品完整名称",
-  "brand": "品牌名",
-  "category": "从支持类别中选择最接近的（如：真无线耳机/精华/跑步鞋/咖啡/智能手机/面霜 等）",
-  "sub_category": "更细的子类（如：降噪耳机/抗老精华/缓震跑鞋/速溶咖啡 等）",
-  "specs": "规格（如30ml、250ml、L码、28L 等）",
-  "highlights": ["特征标签（如：降噪、保湿、透气、0糖 等）"],
+  "product_name": "可见的商品名称；不确定留空",
+  "brand": "可见品牌；不确定留空",
+  "product_line": "可见产品线；不确定留空",
+  "model": "可见型号；不确定留空",
+  "category": "目录大类，只能是八个大类之一；不确定留空",
+  "sub_category": "商品细类，如防晒、跑步鞋、咖啡；不确定留空",
+  "specs": "可见规格，如30ml、250ml、L码；不确定留空",
+  "visible_text": ["图片中能辨认的关键文字，最多6条"],
+  "highlights": ["仅由图片确认的特征，最多4条"],
   "confidence": 0.0到1.0
 }
 
 规则：
-- 仔细观察图片中的文字、logo、包装、形状来判断品类
-- 电子产品的数据线/充电头/接口、护肤品的瓶身质地、服饰的面料纹理都是重要线索
-- 不在支持类别内的商品（鼠标、键盘、家电、家具等）→ confidence 设为 0.2-0.3
-- 图片模糊或无法辨认时 confidence < 0.3"""
+- 文字、Logo、型号和规格优先于外观；不允许推测价格、成分、疗效或型号
+- 图片模糊、遮挡或只能判断大类时，具体字段留空且 confidence < 0.5
+- 只输出 JSON，不要 Markdown。"""
 
 
 class VisualAgent:
@@ -63,7 +62,8 @@ class VisualAgent:
             ".webp": "image/webp", ".gif": "image/gif",
         }.get(ext, "image/png")
 
-        # 缓存键：图片内容 + 用户问题 + 模型名（换模型/改prompt自动失效旧缓存）
+        image_bytes, content_type, quality = self._prepare_image(image_bytes, content_type)
+        # 缓存键：处理后的内容 + 用户问题 + 模型和 Prompt 版本（换模型/改 prompt 自动失效）
         model = self._gateway.get_capability_config("visual_understanding").get("model", "qwen-vl-plus")
         img_hash = hashlib.md5(image_bytes).hexdigest()[:12]
         prompt_hash = hashlib.md5(PROMPT_USER.encode()).hexdigest()[:8]
@@ -86,6 +86,7 @@ class VisualAgent:
 
             result = self._parse_json(raw)
             result.raw_response = raw
+            result.image_quality = quality
             return result
 
         return await cached(
@@ -93,6 +94,24 @@ class VisualAgent:
             serializer=lambda v: json.dumps(v.model_dump(), ensure_ascii=False),
             deserializer=lambda s: VisualResult(**json.loads(s)),
         )
+
+    @staticmethod
+    def _prepare_image(image_bytes: bytes, content_type: str) -> tuple[bytes, str, str]:
+        """修正 EXIF、截取 GIF 首帧并限制发送尺寸；Pillow 缺失时安全原样退回。"""
+        try:
+            from PIL import Image, ImageOps
+
+            with Image.open(BytesIO(image_bytes)) as source:
+                source.seek(0)
+                image = ImageOps.exif_transpose(source).convert("RGB")
+                width, height = image.size
+                quality = "good" if min(width, height) >= 480 else ("usable" if min(width, height) >= 240 else "poor")
+                image.thumbnail((1600, 1600))
+                output = BytesIO()
+                image.save(output, format="JPEG", quality=88, optimize=True)
+                return output.getvalue(), "image/jpeg", quality
+        except Exception:
+            return image_bytes, content_type, "unknown"
 
     def _parse_json(self, raw: str) -> VisualResult:
         # 尝试提取 JSON（可能被 markdown 代码块包裹）
@@ -109,7 +128,8 @@ class VisualAgent:
         evidence_list = []
         text_fields = {
             "product_name": "product_name", "brand": "brand",
-            "category": "category", "specs": "specs",
+            "product_line": "product_line", "model": "model",
+            "category": "category", "sub_category": "sub_category", "specs": "specs",
             "capacity": "capacity", "power": "power",
         }
         for key, field_name in text_fields.items():
@@ -145,17 +165,31 @@ class VisualAgent:
         if isinstance(specs, list):
             specs = "，".join(str(s) for s in specs)
 
+        visible_text = data.get("visible_text")
+        if not isinstance(visible_text, list):
+            visible_text = []
+
+        confidence = data.get("confidence", 0.0) or 0.0
+        try:
+            confidence = min(1.0, max(0.0, float(confidence)))
+        except (TypeError, ValueError):
+            confidence = 0.0
+
         return VisualResult(
             product_name=data.get("product_name"),
             brand=data.get("brand"),
+            product_line=data.get("product_line"),
+            model=data.get("model"),
             category=data.get("category"),
+            sub_category=data.get("sub_category"),
             specs=specs,
+            visible_text=[str(item)[:80] for item in visible_text[:6] if item],
             price=price,
             capacity=data.get("capacity"),
             power=data.get("power"),
             ports=ports,
             highlights=highlights,
-            confidence=data.get("confidence", 0.0) or 0.0,
+            confidence=confidence,
             evidence_list=evidence_list,
             fallback_level=0,
         )

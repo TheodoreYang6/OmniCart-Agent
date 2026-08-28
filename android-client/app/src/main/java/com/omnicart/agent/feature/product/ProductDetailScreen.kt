@@ -67,7 +67,7 @@ fun ProductDetailScreen(
         },
         bottomBar = {
             detail?.let { p ->
-                Surface(color = Surface, tonalElevation = 6.dp, shadowElevation = 10.dp) {
+                Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 6.dp, shadowElevation = 10.dp) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -80,25 +80,29 @@ fun ProductDetailScreen(
                         ) {
                             Icon(Icons.Default.QuestionAnswer, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("问小O")
+                            Text("问欧米")
                         }
                         Button(
                             onClick = {
-                                scope.launch {
-                                    try {
-                                        ApiClient.api.addToCart(
-                                            item = AddToCartRequest(
-                                                productId = productId,
-                                                skuId = p.skus.getOrNull(selectedSkuIndex)?.skuId ?: "",
-                                                quantity = 1,
-                                            ),
-                                            userId = userId.ifBlank { AuthManager.effectiveUserId },
-                                            sessionId = sessionId,
-                                            conversationId = "",
-                                        )
-                                        snackbar.showSnackbar("已加入购物车")
-                                    } catch (e: Exception) {
-                                        snackbar.showSnackbar("加购失败: ${e.message}")
+                                if (!AuthManager.isLoggedIn) {
+                                    scope.launch { snackbar.showSnackbar("登录后即可加入购物车") }
+                                } else {
+                                    scope.launch {
+                                        try {
+                                            ApiClient.api.addToCart(
+                                                item = AddToCartRequest(
+                                                    productId = productId,
+                                                    skuId = p.skus.getOrNull(selectedSkuIndex)?.skuId ?: "",
+                                                    quantity = 1,
+                                                ),
+                                                userId = userId.ifBlank { AuthManager.effectiveUserId },
+                                                sessionId = sessionId,
+                                                conversationId = "",
+                                            )
+                                            snackbar.showSnackbar("已加入购物车")
+                                        } catch (e: Exception) {
+                                            snackbar.showSnackbar("加购失败: ${e.message}")
+                                        }
                                     }
                                 }
                             },
@@ -114,7 +118,7 @@ fun ProductDetailScreen(
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
-        containerColor = Background,
+        containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         when {
             isLoading -> Box(
@@ -189,12 +193,13 @@ private fun ProductHero(product: ProductDetailResponse) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             shape = RoundedCornerShape(20.dp),
-            color = Surface.copy(alpha = 0.82f),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
             tonalElevation = 1.dp,
         ) {
             ProductImage(
                 imageUrl = product.imageUrls.firstOrNull(),
                 contentDescription = product.title,
+                productId = product.productId,
                 modifier = Modifier.fillMaxSize().padding(10.dp),
                 cornerRadius = 18.dp,
                 contentScale = ContentScale.Fit,
@@ -210,7 +215,7 @@ private fun DetailTopBar(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = Surface,
+        color = MaterialTheme.colorScheme.surface,
         shadowElevation = 1.dp,
     ) {
         Row(
@@ -239,7 +244,7 @@ private fun DetailTopBar(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ProductInfoCard(product: ProductDetailResponse, displayPrice: Double = product.price) {
-    Surface(shape = RoundedCornerShape(16.dp), color = Surface, tonalElevation = 1.dp) {
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text("¥", style = MaterialTheme.typography.titleMedium, color = PriceRed, fontWeight = FontWeight.Bold)
@@ -275,7 +280,7 @@ private fun ProductInfoCard(product: ProductDetailResponse, displayPrice: Double
             Spacer(Modifier.height(8.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(product.brand, product.category, product.subCategory).filter { it.isNotBlank() }.forEach { tag ->
-                    Surface(shape = RoundedCornerShape(999.dp), color = SurfaceVariant) {
+                    Surface(shape = RoundedCornerShape(999.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                         Text(tag, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
                     }
                 }
@@ -362,7 +367,7 @@ private fun FaqSection(
         if (expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items.forEach { (question, answer) ->
-                    Surface(shape = RoundedCornerShape(12.dp), color = SurfaceVariant.copy(alpha = 0.55f)) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) {
                         Column(Modifier.padding(12.dp)) {
                             Text("Q: $question", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.height(4.dp))
@@ -383,7 +388,7 @@ private fun ReviewSection(reviews: List<ReviewDto>) {
     DetailSection(title = "用户评论 (${reviews.size})") {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             reviews.take(6).forEach { review ->
-                Surface(shape = RoundedCornerShape(12.dp), color = SurfaceVariant.copy(alpha = 0.45f)) {
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)) {
                     Column(Modifier.padding(12.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(review.nickname, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
@@ -415,7 +420,7 @@ private fun DetailSection(
     onTitleClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Surface(shape = RoundedCornerShape(16.dp), color = Surface, tonalElevation = 1.dp) {
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Row(
                 modifier = Modifier

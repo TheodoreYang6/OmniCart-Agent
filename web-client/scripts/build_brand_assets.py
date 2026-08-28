@@ -19,6 +19,12 @@ perch = im.resize((target_w, round(im.height * target_w / im.width)), Image.LANC
 perch.save(f"{out_dir}/brand/omi-perch.png", optimize=True)
 print(f"brand/omi-perch.png {perch.size}")
 
+# App-icon assets are now maintained from public/brand/omi-ai-icon.svg. Do not
+# regenerate apple-touch-icon or favicon from the mascot cutout: doing so would
+# silently restore the previous 3D-cat branding.
+print("Skipped Apple/favicon generation; use the shared AI-line icon.")
+raise SystemExit(0)
+
 # ---- 2) apple-touch-icon：截猫头 + 品牌渐变底 ----
 # 头部框用比例常量（对 omi-perch 素材实测）：猫身向右下逐行延展
 # （y=100 行右界 522 → y=420 行 804），因此不能用整图/上半区的 alpha bbox，

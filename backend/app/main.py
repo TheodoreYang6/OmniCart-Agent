@@ -1,4 +1,6 @@
 import logging
+import time
+from uuid import uuid4
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -39,6 +41,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_trace(request, call_next):
+    """Attach a stable request id and emit a concise, privacy-safe HTTP trace.
+
+    SSE has its own event-level trace in ``agent_stream``; this middleware makes
+    ordinary cart/auth/upload failures equally diagnosable without logging query
+    text, images, audio, tokens, or cookies.
+    """
+    request_id = request.headers.get("X-Request-ID") or uuid4().hex[:12]
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "http_error request_id=%s method=%s path=%s",
+            request_id, request.method, request.url.path,
+        )
+        raise
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "http request_id=%s method=%s path=%s status=%s elapsed_ms=%d client=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        (time.perf_counter() - started) * 1000,
+        request.headers.get("X-Client-Platform", "unknown"),
+    )
+    return response
 
 # 静态文件 — 上传的图片
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / DEMO_DATA_DIR / "uploads"

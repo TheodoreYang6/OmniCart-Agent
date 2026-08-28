@@ -1,4 +1,4 @@
-"""RAG 全链路日志 — embedding → rerank → 最终候选，结构化 JSON 输出。
+"""RAG 全链路日志 — 召回 → 精排/过滤 → 最终交付，结构化 JSON 输出。
 
 每轮对话写入一条 RAG trace 到 data/rag_traces.jsonl。
 支持后续用脚本分析命中率、MRR、NDCG 等指标。
@@ -32,6 +32,7 @@ class RagTrace:
 
     def __init__(self, session_id: str = "", query: str = ""):
         self.trace = {
+            "schema_version": "rag_trace_v2",
             "session_id": session_id,
             "query": query,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -41,7 +42,11 @@ class RagTrace:
             "evaluation": {},
         }
 
-    def set_embedding(self, query_vec: list, candidates: list[dict], latency_ms: int):
+    def set_embedding(self, query_vec: list, candidates: list[dict], latency_ms: int,
+                      retrieval_mode: str = "legacy"):
+        # ``query_vec`` 只用于记录维度，绝不把向量本身写入磁盘。V9 的向量
+        # 检索封装在 shopping.search 内，因此维度未知时明确标注，而不是伪造 0 分。
+        self.trace["retrieval_mode"] = retrieval_mode
         self.trace["embedding"]["query_vec_dims"] = len(query_vec) if query_vec else 0
         self.trace["embedding"]["latency_ms"] = latency_ms
         self.trace["embedding"]["candidates"] = [
@@ -51,7 +56,7 @@ class RagTrace:
                 "title": (c.get("title") or "")[:60],
                 "brand": c.get("brand", ""),
                 "price": c.get("price", 0),
-                "score": c.get("score", 0),
+                "source": c.get("retrieval_source", c.get("discovery_source", "")),
             }
             for i, c in enumerate(candidates[:15])
         ]
@@ -86,8 +91,10 @@ class RagTrace:
                 "title": (p.get("title") or "")[:60],
                 "brand": p.get("brand", ""),
                 "price": p.get("price", 0),
-                "display_score": dec.get("display_score", 0) if dec else 0,
                 "level": dec.get("recommendation_level", "") if dec else "",
+                "filter_verdict": dec.get("filter_verdict", "") if dec else "",
+                "match_label": dec.get("match_label", "") if dec else "",
+                "evidence_status": dec.get("evidence_label", "") if dec else "",
             })
 
     def evaluate(self, golden_products: list[str] | None = None):

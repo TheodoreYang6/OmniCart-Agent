@@ -102,6 +102,11 @@ def env(monkeypatch):
     monkeypatch.setattr("app.repositories.pg_cart_repo.get_cart_repo", lambda: cart)
     monkeypatch.setattr("app.repositories.product_repo.get_product_repo", lambda: prod)
     monkeypatch.setattr("app.repositories.address_repo.get_address_repo", lambda: addr)
+    # 下单已统一收敛到 checkout_service 持久化；这里保持单测的内存边界，
+    # 只验证 ShopActionAgent 的编排、卡片与清车行为，不依赖真实 PostgreSQL。
+    async def _persist_order(_user_id, _items, _total):
+        return "ORD-TEST-001"
+    monkeypatch.setattr("app.services.checkout_service.persist_order", _persist_order)
     return SimpleNamespace(conv=conv, cart=cart, prod=prod, addr=addr)
 
 
@@ -117,14 +122,14 @@ async def _run(msg: str):
 async def test_add_single_from_focus(env):
     env.conv._snap["focus_product"] = {"product_id": "P1", "title": "速溶咖啡", "brand": "雀巢", "price": 99}
     res = await _run("加入购物车")
-    assert res.ok and "已把" in res.message and "加入购物车" in res.message
+    assert res.ok and "放进购物车" in res.message
     assert len(env.cart.cart.items) == 1 and env.cart.cart.items[0].product_id == "P1"
 
 
 async def test_add_multi_sku_prompts_and_writes_pending(env):
     env.conv._snap["focus_product"] = {"product_id": "P2", "title": "精华", "brand": "兰蔻", "price": 500}
     res = await _run("加购")
-    assert "个规格，选哪个" in res.message
+    assert "个规格" in res.message
     assert any(a["type"] == "sku_option" for a in res.actions)
     assert env.conv._snap.get("pending_sku_product", {}).get("product_id") == "P2"
     assert len(env.cart.cart.items) == 0  # 尚未加入
@@ -133,7 +138,7 @@ async def test_add_multi_sku_prompts_and_writes_pending(env):
 async def test_pending_sku_resolves(env):
     env.conv._snap["pending_sku_product"] = {"product_id": "P2", "title": "精华", "brand": "兰蔻", "base_price": 500}
     res = await _run("要30ml的")
-    assert res.ok and "加入购物车" in res.message
+    assert res.ok and "放进购物车" in res.message
     assert len(env.cart.cart.items) == 1 and env.cart.cart.items[0].sku_id == "s30"
     assert env.conv._snap.get("pending_sku_product") is None
 
@@ -153,7 +158,7 @@ async def test_add_all(env):
 async def test_order_preview_with_address(env):
     env.conv._snap["focus_product"] = {"product_id": "P1", "title": "速溶咖啡", "brand": "雀巢", "price": 99}
     res = await _run("下单")
-    assert "订单确认" in res.message and "确认下单吗？" in res.message
+    assert "确认没问题就下单" in res.message
     labels = [a["label"] for a in res.actions]
     assert "确认下单" in labels and "修改地址" in labels
     assert env.conv._snap.get("pending_order_items")
@@ -163,7 +168,7 @@ async def test_order_preview_without_address(env):
     env.addr._a = []
     env.conv._snap["focus_product"] = {"product_id": "P1", "title": "速溶咖啡", "brand": "雀巢", "price": 99}
     res = await _run("下单")
-    assert "请先设置收货地址" in res.message
+    assert "还差一个收货地址" in res.message
     assert res.actions and res.actions[0]["type"] == "address_form"
 
 

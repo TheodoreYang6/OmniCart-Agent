@@ -14,7 +14,6 @@ import com.omnicart.agent.core.model.RagKnowledge
 import com.omnicart.agent.core.model.ReviewItem
 import com.omnicart.agent.core.model.Sku
 import com.omnicart.agent.core.model.RecommendRequest
-import com.omnicart.agent.core.model.ScoreBreakdown
 import com.omnicart.agent.core.network.AddToCartRequest
 import com.omnicart.agent.core.network.AgentActionRequest
 import com.omnicart.agent.core.network.ApiClient
@@ -126,8 +125,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     GuideRequest(
                         userQuery = query,
                         sessionId = state.sessionId,
-                        userId = AuthManager.effectiveUserId,
-                        conversationId = state.conversationId,
+                        userId = if (AuthManager.isLoggedIn) AuthManager.userId else "",
+                        conversationId = if (AuthManager.isLoggedIn) state.conversationId else "",
                         category = state.lockedCategory,
                         subCategory = state.lockedSubCategory,
                         concern = state.lockedConcern,
@@ -157,7 +156,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             lockedSubCategory = "",
                             lockedConcern = "",
                             guideRound = 0,
-                            conversationId = response.conversationId.ifBlank { it.conversationId },
+                            conversationId = if (AuthManager.isLoggedIn) {
+                                response.conversationId.ifBlank { it.conversationId }
+                            } else "",
                         )
                     }
                 } else {
@@ -233,14 +234,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val assistantMessage = ChatMessage(
             role = MessageRole.Assistant,
             text = response.answer,
-            products = response.products,
+            products = response.primaryProducts.ifEmpty { response.products },
+            recommendationAlternatives = response.recommendationAlternatives,
+            productResolution = response.productResolution,
             decisionResults = response.decisionResults,
             evidenceList = response.evidenceList,
             traceSteps = response.traceSteps,
             harnessReport = response.harnessReport?.mapValues { it.value },
             targetProductAnalysis = response.targetProductAnalysis,
             comparisonTable = response.comparisonTable,
-            alternativeProducts = response.alternativeProducts,
+            comparison = response.comparison,
+            focusAnalysis = response.focusAnalysis,
+            shopCard = response.shopCard,
+            actions = response.actions.orEmpty(),
+            needsClarification = response.needsClarification,
+            clarificationQuestion = response.clarificationQuestion,
+            clarificationOptions = response.clarificationOptions.orEmpty(),
+            analysisAlternatives = response.analysisAlternatives,
             crossCategory = response.crossCategory,
         )
         _uiState.update {
@@ -256,7 +266,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** SSE 流式发送 — 文字逐字到达并实时显示。 */
-    fun onSendStream() {
+    /**
+     * All text-like input (keyboard and ASR) enters this one SSE path.  The
+     * source flag is presentation-only: it lets the user inspect exactly what
+     * ASR submitted without changing routing, context, or recommendation logic.
+     */
+    fun onSendStream(isVoiceInput: Boolean = false) {
         val query = _uiState.value.queryText.trim()
         val hasImage = _uiState.value.selectedImageUri != null
         if (query.isBlank() && !hasImage) return
@@ -265,7 +280,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val sentImageUri = _uiState.value.selectedImageUri
         val sentImageUrl = _uiState.value.uploadedImageUrl
 
-        val userMessage = ChatMessage(role = MessageRole.User, text = finalQuery, imageUri = sentImageUri)
+        val userMessage = ChatMessage(
+            role = MessageRole.User,
+            text = finalQuery,
+            imageUri = sentImageUri,
+            isVoice = isVoiceInput,
+        )
         _uiState.update { it.copy(
             messages = it.messages + userMessage,
             queryText = "",
@@ -273,9 +293,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             uploadedImageUrl = null,
             isStreamingText = true,
             streamingText = "",
+            streamingPrimaryProducts = emptyList(),
+            streamingAlternatives = emptyList(),
+            streamingDecisionResults = emptyList(),
+            recommendationStage = "",
+            streamingResolutionLabel = "",
+            streamingVisualResult = null,
+            streamingVisualResolution = null,
             errorMessage = null,
             lastResponse = null,
-            loadingMessage = "小O正在帮你找商品…",
+            loadingMessage = if (_uiState.value.deepThink) "欧米正在认真帮你挑选…" else "欧米正在帮你找合适的商品…",
         ) }
 
         viewModelScope.launch {
@@ -288,11 +315,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 val obj = JsonObject().apply {
                     addProperty("session_id", _uiState.value.sessionId)
-                    addProperty("user_id", AuthManager.effectiveUserId)
-                    addProperty("conversation_id", _uiState.value.conversationId)
+                    if (AuthManager.isLoggedIn) {
+                        addProperty("user_id", AuthManager.userId)
+                        addProperty("conversation_id", _uiState.value.conversationId)
+                    }
                     addProperty("message", finalQuery)
                     if (imageUrl != null) addProperty("image_url", imageUrl)
-                    addProperty("fast_mode", _uiState.value.fastMode)
+                    addProperty("deep_think", _uiState.value.deepThink)
                 }
 
                 var fullText = ""
@@ -306,6 +335,35 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             } catch (_: Exception) { "" }
                             fullText += text
                             _uiState.update { it.copy(streamingText = fullText) }
+                        }
+                        "stage" -> {
+                            val label = try {
+                                com.google.gson.JsonParser.parseString(event.data).asJsonObject.get("text")?.asString ?: ""
+                            } catch (_: Exception) { "" }
+                            _uiState.update { it.copy(recommendationStage = label, loadingMessage = label) }
+                        }
+                        "recommendations" -> {
+                            try {
+                                val preview = Gson().fromJson(event.data, RecommendResponse::class.java)
+                                _uiState.update { it.copy(
+                                    streamingPrimaryProducts = preview.primaryProducts,
+                                    streamingAlternatives = preview.recommendationAlternatives,
+                                    streamingDecisionResults = preview.decisionResults,
+                                    streamingResolutionLabel = preview.productResolution
+                                        ?.get("label")?.toString().orEmpty(),
+                                ) }
+                            } catch (_: Exception) { }
+                        }
+                        "visual_result" -> {
+                            try {
+                                val payload = com.google.gson.JsonParser.parseString(event.data).asJsonObject
+                                val visual = Gson().fromJson(payload.get("visual_result"), Map::class.java)
+                                val resolution = Gson().fromJson(payload.get("product_resolution"), Map::class.java)
+                                _uiState.update { it.copy(
+                                    streamingVisualResult = visual as? Map<String, Any?>,
+                                    streamingVisualResolution = resolution as? Map<String, Any?>,
+                                ) }
+                            } catch (_: Exception) { }
                         }
                         "result" -> {
                             try {
@@ -331,29 +389,65 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     catch (_: Exception) { null }
                 } else null
 
-                // 优先使用流式文本作为 answer
-                val answer = fullText.ifBlank { response?.answer ?: "抱歉，暂时无法回答您的问题。" }
+                // A transport/provider failure must not become a fake assistant
+                // reply.  Web keeps the failed turn retryable; Android now does
+                // the same rather than appending a misleading template bubble.
+                if (fullText.isBlank() && response?.answer.isNullOrBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            isStreamingText = false,
+                            streamingText = "",
+                            streamingPrimaryProducts = emptyList(),
+                            streamingAlternatives = emptyList(),
+                            streamingDecisionResults = emptyList(),
+                            recommendationStage = "",
+                            streamingResolutionLabel = "",
+                            streamingVisualResult = null,
+                            streamingVisualResolution = null,
+                            errorMessage = it.errorMessage ?: "没有收到欧米的回答，请重试",
+                        )
+                    }
+                    return@launch
+                }
+                val answer = fullText.ifBlank { response?.answer.orEmpty() }
 
                 val msg = ChatMessage(
                     role = MessageRole.Assistant,
                     text = answer,
-                    products = response?.products ?: emptyList(),
+                    products = response?.let { it.primaryProducts.ifEmpty { it.products } }.orEmpty(),
+                    recommendationAlternatives = response?.recommendationAlternatives ?: emptyList(),
+                    productResolution = response?.productResolution,
+                    visualResult = response?.visualResult,
                     decisionResults = response?.decisionResults ?: emptyList(),
                     evidenceList = response?.evidenceList ?: emptyList(),
                     traceSteps = response?.traceSteps ?: emptyList(),
                     harnessReport = response?.harnessReport?.mapValues { it.value },
                     targetProductAnalysis = response?.targetProductAnalysis,
                     comparisonTable = response?.comparisonTable,
-                    alternativeProducts = response?.alternativeProducts,
+                    comparison = response?.comparison,
+                    focusAnalysis = response?.focusAnalysis,
+                    shopCard = response?.shopCard,
+                    actions = response?.actions.orEmpty(),
+                    needsClarification = response?.needsClarification == true,
+                    clarificationQuestion = response?.clarificationQuestion.orEmpty(),
+                    clarificationOptions = response?.clarificationOptions.orEmpty(),
+                    analysisAlternatives = response?.analysisAlternatives,
                     crossCategory = response?.crossCategory,
                 )
                 val convId = response?.conversationId ?: ""
                 _uiState.update { it.copy(
                     isStreamingText = false,
                     streamingText = "",
+                    streamingPrimaryProducts = emptyList(),
+                    streamingAlternatives = emptyList(),
+                    streamingDecisionResults = emptyList(),
+                    recommendationStage = "",
+                    streamingResolutionLabel = "",
+                    streamingVisualResult = null,
+                    streamingVisualResolution = null,
                     messages = it.messages + msg,
                     lastResponse = response?.copy(answer = answer),
-                    conversationId = convId.ifBlank { it.conversationId },
+                    conversationId = if (AuthManager.isLoggedIn) convId.ifBlank { it.conversationId } else "",
                 ) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isStreamingText = false, isLoading = false, errorMessage = "连接失败: ${e.message}") }
@@ -378,26 +472,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 问问小O：发送 product_focused_analysis */
-    fun sendAskDouzai(productId: String, title: String) {
-        val query = "帮我分析一下「${title}」"
+    fun sendAskDouzai(productId: String, title: String, comparison: Boolean = false) {
+        val query = if (comparison) {
+            "请把「${title}」与同类商品横向对比，说明主要差异、分别适合谁，以及我该怎么选。"
+        } else {
+            "帮我分析一下「${title}」"
+        }
         val userMessage = ChatMessage(role = MessageRole.User, text = query)
         _uiState.update { it.copy(
             messages = it.messages + userMessage,
             isStreamingText = true, streamingText = "", errorMessage = null,
             isLoading = true,
-            loadingMessage = "小O正在分析「${title.take(15)}」…",
+            streamingPrimaryProducts = emptyList(), streamingAlternatives = emptyList(),
+            streamingDecisionResults = emptyList(), recommendationStage = "", streamingResolutionLabel = "",
+            streamingVisualResult = null, streamingVisualResolution = null,
+            loadingMessage = if (comparison) "欧米正在横向比较「${title.take(15)}」…" else "欧米正在分析「${title.take(15)}」…",
         ) }
         viewModelScope.launch {
             try {
                 val obj = JsonObject().apply {
                     addProperty("session_id", _uiState.value.sessionId)
-                    addProperty("user_id", AuthManager.effectiveUserId)
-                    addProperty("conversation_id", _uiState.value.conversationId)
+                    if (AuthManager.isLoggedIn) {
+                        addProperty("user_id", AuthManager.userId)
+                        addProperty("conversation_id", _uiState.value.conversationId)
+                    }
                     addProperty("message", query)
-                    addProperty("mode", "product_focused_analysis")
+                    addProperty("mode", if (comparison) "same_category_comparison" else "product_focused_analysis")
                     addProperty("target_product_id", productId)
-                    addProperty("allow_same_category_comparison", true)
-                    addProperty("fast_mode", _uiState.value.fastMode)
+                    // 单品聚焦默认只讲当前商品；用户明确要对比时再扩展同类。
+                    addProperty("allow_same_category_comparison", comparison)
+                    addProperty("deep_think", _uiState.value.deepThink)
                 }
                 var fullText = ""
                 var resultData: JsonObject? = null
@@ -407,6 +511,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             val text = try { com.google.gson.JsonParser.parseString(event.data).asJsonObject.get("text")?.asString ?: "" } catch (_: Exception) { "" }
                             fullText += text
                             _uiState.update { it.copy(streamingText = fullText, isLoading = false) }
+                        }
+                        "stage" -> {
+                            val label = try { com.google.gson.JsonParser.parseString(event.data).asJsonObject.get("text")?.asString ?: "" } catch (_: Exception) { "" }
+                            _uiState.update { it.copy(recommendationStage = label, loadingMessage = label, isLoading = false) }
+                        }
+                        "recommendations" -> {
+                            try {
+                                val preview = Gson().fromJson(event.data, RecommendResponse::class.java)
+                                _uiState.update { it.copy(
+                                    streamingPrimaryProducts = preview.primaryProducts,
+                                    streamingAlternatives = preview.recommendationAlternatives,
+                                    streamingDecisionResults = preview.decisionResults,
+                                    streamingResolutionLabel = preview.productResolution?.get("label")?.toString().orEmpty(),
+                                    isLoading = false,
+                                ) }
+                            } catch (_: Exception) { }
+                        }
+                        "focus_analysis", "comparison", "visual_result" -> {
+                            // The canonical payload is also delivered in result;
+                            // receiving it early keeps both clients on the same
+                            // event contract without creating a second state path.
+                            if (event.type == "visual_result") {
+                                try {
+                                    val payload = com.google.gson.JsonParser.parseString(event.data).asJsonObject
+                                    val visual = Gson().fromJson(payload.get("visual_result"), Map::class.java)
+                                    val resolution = Gson().fromJson(payload.get("product_resolution"), Map::class.java)
+                                    _uiState.update { it.copy(
+                                        streamingVisualResult = visual as? Map<String, Any?>,
+                                        streamingVisualResolution = resolution as? Map<String, Any?>,
+                                    ) }
+                                } catch (_: Exception) { }
+                            }
                         }
                         "result" -> { try { resultData = com.google.gson.JsonParser.parseString(event.data).asJsonObject } catch (_: Exception) { } }
                         "error" -> {
@@ -423,27 +559,61 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     try { gson.fromJson(resultData, RecommendResponse::class.java) }
                     catch (_: Exception) { null }
                 } else null
-                val answer = fullText.ifBlank { response?.answer ?: "抱歉，暂时无法回答您的问题。" }
+                if (fullText.isBlank() && response?.answer.isNullOrBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            isStreamingText = false,
+                            streamingText = "",
+                            streamingPrimaryProducts = emptyList(),
+                            streamingAlternatives = emptyList(),
+                            streamingDecisionResults = emptyList(),
+                            recommendationStage = "",
+                            streamingResolutionLabel = "",
+                            streamingVisualResult = null,
+                            streamingVisualResolution = null,
+                            errorMessage = it.errorMessage ?: "没有收到欧米的分析结果，请重试",
+                        )
+                    }
+                    return@launch
+                }
+                val answer = fullText.ifBlank { response?.answer.orEmpty() }
                 val msg = ChatMessage(
                     role = MessageRole.Assistant,
                     text = answer,
-                    products = response?.products ?: emptyList(),
+                    products = response?.let { it.primaryProducts.ifEmpty { it.products } }.orEmpty(),
+                    recommendationAlternatives = response?.recommendationAlternatives ?: emptyList(),
+                    productResolution = response?.productResolution,
+                    visualResult = response?.visualResult,
                     decisionResults = response?.decisionResults ?: emptyList(),
                     evidenceList = response?.evidenceList ?: emptyList(),
                     traceSteps = response?.traceSteps ?: emptyList(),
                     harnessReport = response?.harnessReport?.mapValues { it.value },
                     targetProductAnalysis = response?.targetProductAnalysis,
                     comparisonTable = response?.comparisonTable,
-                    alternativeProducts = response?.alternativeProducts,
+                    comparison = response?.comparison,
+                    focusAnalysis = response?.focusAnalysis,
+                    shopCard = response?.shopCard,
+                    actions = response?.actions.orEmpty(),
+                    needsClarification = response?.needsClarification == true,
+                    clarificationQuestion = response?.clarificationQuestion.orEmpty(),
+                    clarificationOptions = response?.clarificationOptions.orEmpty(),
+                    analysisAlternatives = response?.analysisAlternatives,
                     crossCategory = response?.crossCategory,
                 )
                 val convId = response?.conversationId ?: ""
                 _uiState.update { it.copy(
                     isStreamingText = false,
                     streamingText = "",
+                    streamingPrimaryProducts = emptyList(),
+                    streamingAlternatives = emptyList(),
+                    streamingDecisionResults = emptyList(),
+                    recommendationStage = "",
+                    streamingResolutionLabel = "",
+                    streamingVisualResult = null,
+                    streamingVisualResolution = null,
                     messages = it.messages + msg,
                     lastResponse = response?.copy(answer = answer),
-                    conversationId = convId.ifBlank { it.conversationId },
+                    conversationId = if (AuthManager.isLoggedIn) convId.ifBlank { it.conversationId } else "",
                 ) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isStreamingText = false, isLoading = false, errorMessage = "连接失败: ${e.message}") }
@@ -451,8 +621,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun toggleFastMode() {
-        _uiState.update { it.copy(fastMode = !it.fastMode) }
+    fun toggleDeepThink() {
+        _uiState.update { it.copy(deepThink = !it.deepThink) }
     }
 
     fun onNewConversation() {
@@ -581,6 +751,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAddToCart(productId: String, productTitle: String,
                     skuId: String? = null, skuLabel: String = "", skuPrice: Double = 0.0) {
+        if (!AuthManager.isLoggedIn) {
+            _uiState.update { it.copy(errorMessage = "登录后即可把「${productTitle.take(18)}」加入购物车") }
+            return
+        }
         viewModelScope.launch {
             try {
                 ApiClient.api.addToCart(
@@ -654,135 +828,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            val pendingId = java.util.UUID.randomUUID().toString()
             try {
                 val bytes = file.readBytes()
-                if (bytes.size < 100) {
-                    _uiState.update {
-                        it.copy(errorMessage = "录音太短，请至少录制1秒")
-                    }
+                if (bytes.size < 800) {
+                    _uiState.update { it.copy(errorMessage = "录音太短，请至少录制 1 秒") }
                     return@launch
                 }
-
-                // Step 0: 立即显示"语音识别中"占位消息，让用户知道在处理
-                val pendingId = java.util.UUID.randomUUID().toString()
-                val pendingMsg = ChatMessage(
-                    id = pendingId,
-                    role = MessageRole.User,
-                    text = "",
-                    isVoice = true,
-                    isTranscribing = true,
-                )
-                _uiState.update {
-                    it.copy(messages = it.messages + pendingMsg)
-                }
-
-                val audioBody = bytes.toRequestBody("audio/m4a".toMediaTypeOrNull())
+                _uiState.update { it.copy(messages = it.messages + ChatMessage(
+                    id = pendingId, role = MessageRole.User, text = "", isVoice = true, isTranscribing = true,
+                )) }
                 val audioPart = okhttp3.MultipartBody.Part.createFormData(
-                    "audio", "voice.m4a", audioBody
+                    "audio", "voice.m4a", bytes.toRequestBody("audio/m4a".toMediaTypeOrNull()),
                 )
-
-                // Step 1: ASR 转文字 — 空结果直接丢弃，不发送
                 val asr = ApiClient.api.voiceTranscribe(audioPart)
                 if (asr.fallback || asr.text.isBlank()) {
-                    _uiState.update {
-                        it.copy(messages = it.messages.filter { m -> m.id != pendingId })
-                    }
+                    _uiState.update { it.copy(messages = it.messages.filter { message -> message.id != pendingId }, errorMessage = "没有听清，请再说一次") }
                     return@launch
                 }
-                val transcribed = asr.text.trim()
-
-                // Step 2: 替换占位消息为真实转写文字 + 开启 loading
-                val userMsg = ChatMessage(
-                    role = MessageRole.User,
-                    text = transcribed,
-                    isVoice = true,
-                )
-                _uiState.update {
-                    it.copy(
-                        isLoading = true,
-                        messages = it.messages.map { m -> if (m.id == pendingId) userMsg else m },
-                        queryText = "",
-                        errorMessage = null,
-                    )
-                }
-
-                // Step 3: SSE 流式推荐（跟文字输入一致）
-                _uiState.update { it.copy(isLoading = false, isStreamingText = true, streamingText = "", lastResponse = null, loadingMessage = "小O正在分析…") }
-                val streamJson = JsonObject().apply {
-                    addProperty("session_id", _uiState.value.sessionId)
-                    addProperty("user_id", AuthManager.effectiveUserId)
-                    addProperty("conversation_id", _uiState.value.conversationId)
-                    addProperty("message", transcribed)
-                    addProperty("fast_mode", _uiState.value.fastMode)
-                }
-                var voiceFullText = ""
-                var voiceResultData: JsonObject? = null
-                AgentStreamClient.connect(Gson().toJson(streamJson)).collect { event ->
-                    when (event.type) {
-                        "token" -> {
-                            val t = try {
-                                com.google.gson.JsonParser.parseString(event.data).asJsonObject.get("text")?.asString ?: ""
-                            } catch (_: Exception) { "" }
-                            voiceFullText += t
-                            _uiState.update { it.copy(streamingText = voiceFullText) }
-                        }
-                        "result" -> {
-                            try { voiceResultData = com.google.gson.JsonParser.parseString(event.data).asJsonObject }
-                            catch (_: Exception) { }
-                        }
-                        "error" -> {
-                            val msg = try {
-                                com.google.gson.JsonParser.parseString(event.data).asJsonObject.get("message")?.asString
-                            } catch (_: Exception) { null }
-                            _uiState.update { it.copy(errorMessage = msg ?: "服务异常") }
-                        }
-                        "done" -> {
-                            _uiState.update { it.copy(isStreamingText = false) }
-                        }
-                    }
-                }
-                val voiceResponse: RecommendResponse? = if (voiceResultData != null) {
-                    try { Gson().fromJson(voiceResultData, RecommendResponse::class.java) }
-                    catch (_: Exception) { null }
-                } else null
-                val voiceAnswer = voiceFullText.ifBlank {
-                    voiceResponse?.answer ?: "抱歉，暂时无法回答您的问题。"
-                }
-                val assistantMsg = ChatMessage(
-                    role = MessageRole.Assistant,
-                    text = voiceAnswer,
-                    products = voiceResponse?.products ?: emptyList(),
-                    decisionResults = voiceResponse?.decisionResults ?: emptyList(),
-                    evidenceList = voiceResponse?.evidenceList ?: emptyList(),
-                    traceSteps = voiceResponse?.traceSteps ?: emptyList(),
-                    harnessReport = voiceResponse?.harnessReport?.mapValues { it.value },
-                )
-                val voiceConvId = voiceResponse?.conversationId ?: ""
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        isStreamingText = false,
-                        streamingText = "",
-                        messages = it.messages + assistantMsg,
-                        lastResponse = voiceResponse?.copy(answer = voiceAnswer),
-                        conversationId = voiceConvId.ifBlank { it.conversationId },
-                    )
-                }
-                // TTS 语音播报
-                playTTS(voiceAnswer)
+                // Remove the temporary ASR bubble, then delegate to the exact same
+                // text sender. This keeps SSE stages/cards/errors in one code path.
+                _uiState.update { it.copy(
+                    messages = it.messages.filter { message -> message.id != pendingId },
+                    queryText = asr.text.trim(), errorMessage = null,
+                ) }
+                onSendStream(isVoiceInput = true)
             } catch (e: Exception) {
-                // 替换占位消息为错误提示
-                _uiState.update {
-                    val cleaned = it.messages.map { m ->
-                        if (m.isTranscribing) m.copy(text = "[语音识别失败]", isTranscribing = false) else m
-                    }
-                    it.copy(
-                        isLoading = false,
-                        isStreamingText = false,
-                        showVoiceOverlay = false,
-                        messages = cleaned,
-                    )
-                }
+                _uiState.update { it.copy(
+                    messages = it.messages.filter { message -> message.id != pendingId },
+                    errorMessage = "语音识别失败：${e.message ?: "请重试"}",
+                ) }
             } finally {
                 file.delete()
             }

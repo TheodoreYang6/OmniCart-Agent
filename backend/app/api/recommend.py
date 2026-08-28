@@ -54,8 +54,9 @@ class RecommendResponse(BaseModel):
 
 @router.post("/api/recommend", response_model=RecommendResponse)
 async def recommend(req: RecommendRequest, actor: Actor = Depends(resolve_public_actor)):
-    if isinstance(actor, Actor):
-        req.user_id = actor.user_id
+    # 游客推荐是一次性的：请求体 user_id 不可作为身份，也不读取或写入偏好。
+    can_persist = isinstance(actor, Actor) and actor.is_authenticated
+    req.user_id = actor.user_id if can_persist else ""
     session_id = req.session_id or str(uuid.uuid4())[:8]
     trace_steps: list[dict] = []
     visual_result = None
@@ -258,28 +259,31 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
     import logging
     _log = logging.getLogger(__name__)
 
-    if isinstance(actor, Actor):
-        req.user_id = actor.user_id
+    # 仅登录用户拥有对话与偏好上下文；游客本轮仍可推荐，但不落库。
+    can_persist = isinstance(actor, Actor) and actor.is_authenticated
+    req.user_id = actor.user_id if can_persist else ""
     session_id = req.session_id or str(uuid.uuid4())[:8]
     user_id = req.user_id or ""
-    conversation_id = req.conversation_id or ""
+    conversation_id = req.conversation_id if can_persist else ""
 
     # P0: 创建或恢复 conversation (Memory Lite, async)
-    conv_svc = get_conversation_service()
-    conv_result = await conv_svc.aget_or_create(user_id=user_id, session_id=session_id,
-                                                conversation_id=conversation_id)
-    conversation_id = conv_result["conversation_id"]
+    conv_svc = get_conversation_service() if can_persist else None
+    if conv_svc:
+        conv_result = await conv_svc.aget_or_create(user_id=user_id, session_id=session_id,
+                                                    conversation_id=conversation_id)
+        conversation_id = conv_result["conversation_id"]
 
     # P0: 写入 user message
-    try:
-        await conv_svc.aappend_user_message(
-            conversation_id=conversation_id, user_id=user_id,
-            session_id=session_id, content=req.user_query,
-            image_url=req.image_url or "",
-            metadata={"demo_mode": req.demo_mode},
-        )
-    except Exception as e:
-        _log.warning(f"Failed to write user message: {e}")
+    if conv_svc:
+        try:
+            await conv_svc.aappend_user_message(
+                conversation_id=conversation_id, user_id=user_id,
+                session_id=session_id, content=req.user_query,
+                image_url=req.image_url or "",
+                metadata={"demo_mode": req.demo_mode},
+            )
+        except Exception as e:
+            _log.warning(f"Failed to write user message: {e}")
 
     # P2: FollowUpEngine 统一追问检测 (best-effort)
     # P2 + P4: FollowUpEngine + Profile 并行加载
@@ -357,16 +361,17 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
 
     # P0: 写入 assistant message
     product_ids = [p.get("product_id", "") for p in result.retrieved_products[:10]]
-    try:
-        evidence_ids = [e.get("evidence_id", "") for e in result.evidence_list[:10]]
-        await conv_svc.aappend_assistant_message(
-            conversation_id=conversation_id, user_id=user_id,
-            session_id=session_id, content=result.answer,
-            product_refs=product_ids,
-            evidence_refs=evidence_ids,
-        )
-    except Exception as e:
-        _log.warning(f"Failed to write assistant message: {e}")
+    if conv_svc:
+        try:
+            evidence_ids = [e.get("evidence_id", "") for e in result.evidence_list[:10]]
+            await conv_svc.aappend_assistant_message(
+                conversation_id=conversation_id, user_id=user_id,
+                session_id=session_id, content=result.answer,
+                product_refs=product_ids,
+                evidence_refs=evidence_ids,
+            )
+        except Exception as e:
+            _log.warning(f"Failed to write assistant message: {e}")
 
     # P2: 更新 context_snapshot（含追问上下文 + Router 品类持久化）
     snapshot_update = {
@@ -374,8 +379,8 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
         "last_recommended_product_ids": product_ids,
         "last_answer": result.answer[:200],
     }
-    if follow_up_ctx["is_follow_up"]:
-        snapshot_update["last_follow_up_type"] = follow_up_ctx["follow_up_type"]
+    if follow_up_ctx.get("is_follow_up"):
+        snapshot_update["last_follow_up_type"] = follow_up_ctx.get("follow_up_type")
     updated_budget = follow_up_ctx.get("updated_constraints", {}).get("budget_max")
     if updated_budget:
         snapshot_update["budget_max"] = updated_budget
@@ -393,10 +398,11 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
             cur_turn["scenario"] = c.scenario
         if cur_turn:
             snapshot_update["current_turn"] = cur_turn
-    try:
-        await conv_svc.aupdate_context_snapshot(conversation_id, snapshot_update)
-    except Exception as e:
-        _log.debug(f"Context snapshot update skipped: {e}")
+    if conv_svc:
+        try:
+            await conv_svc.aupdate_context_snapshot(conversation_id, snapshot_update)
+        except Exception as e:
+            _log.debug(f"Context snapshot update skipped: {e}")
 
     # P4: 对话提取检查 — 用户消息含长时信号则异步提取偏好
     try:
@@ -513,9 +519,17 @@ async def recommend_guide(req: GuideRequest, actor: Actor = Depends(resolve_publ
     """约束引导式推荐: 每次返回下一轮追问或最终推荐结果。"""
     from app.services.constraint_guide import get_constraint_guide
 
-    if isinstance(actor, Actor):
-        req.user_id = actor.user_id
+    can_persist = isinstance(actor, Actor) and actor.is_authenticated
+    req.user_id = actor.user_id if can_persist else ""
+    if not can_persist:
+        req.conversation_id = ""
     session_id = req.session_id or str(uuid.uuid4())[:8]
+
+    category = req.category
+    sub_category = req.sub_category
+    budget_max = req.budget_max
+    budget_min = req.budget_min
+    concern = req.concern
 
     # P4: 加载长期偏好画像（预填约束 + 后续注入检索/上下文）
     profile = None
@@ -537,26 +551,21 @@ async def recommend_guide(req: GuideRequest, actor: Actor = Depends(resolve_publ
             budget_min = profile["budget_min"]
 
     # 从 query 中检测 category (如果还没锁定)
-    category = req.category
     if not category:
         from app.decision.rules import detect_category
         category = detect_category(req.user_query) or ""
 
     # 从 query 中检测 sub_category
-    sub_category = req.sub_category
     if not sub_category and category:
         from app.decision.rules import detect_sub_category
         sub_category = detect_sub_category(req.user_query, category) or ""
 
     # 从 query 中检测 budget
-    budget_max = req.budget_max
-    budget_min = req.budget_min
     if budget_max is None and budget_min is None:
         from app.decision.rules import detect_budget
         budget_max = detect_budget(req.user_query)
 
     # 从 query 中检测 concern
-    concern = req.concern
     if not concern and category:
         from app.services.constraint_guide import CONCERN_KEYWORDS
         import re
@@ -686,10 +695,16 @@ def _build_answer(products: list[dict], results: list[dict]) -> str:
 
     lines = ["根据您的需求，为您找到以下商品："]
     for i, (p, r) in enumerate(zip(products, results), 1):
-        score = r.get("display_score", 0)
         cat_tag = f"[{p.get('category', '')}/{p.get('sub_category', '')}]"
         lines.append(f"\n{i}. {cat_tag} {p['title']} - ¥{p['price']}")
-        lines.append(f"   推荐分 {score}/10")
+        level = r.get("match_label") or {
+            "strong_recommend": "高度匹配",
+            "recommended": "较匹配",
+            "worth_considering": "有条件匹配",
+            "cautious": "有条件匹配",
+            "not_recommended": "暂不建议优先",
+        }.get(r.get("recommendation_level", ""), "可进一步了解")
+        lines.append(f"   匹配情况：{level}")
         reason = r.get("recommendation_reason", "")
         if reason:
             lines.append(f"   {reason}")

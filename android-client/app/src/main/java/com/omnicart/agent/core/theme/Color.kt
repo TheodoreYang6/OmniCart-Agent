@@ -4,13 +4,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-// Primary — 淡蓝色 AI 助手风格，接近豆包一类的清爽产品调性
-val Primary = Color(0xFF4A7DFF)
-val PrimaryLight = Color(0xFF86A8FF)
-val PrimaryDark = Color(0xFF2457D6)
+// 与 Web 端同源：亮蓝 + 海军蓝，保持可信 AI 决策助手的克制层次。
+val Primary = Color(0xFF256BFF)
+val PrimaryLight = Color(0xFF7DB5FF)
+val PrimaryDark = Color(0xFF1A54E8)
 val OnPrimary = Color(0xFFFFFFFF)
-val PrimaryContainer = Color(0xFFEAF0FF)
-val OnPrimaryContainer = Color(0xFF08215E)
+val PrimaryContainer = Color(0xFFEAF1FF)
+val OnPrimaryContainer = Color(0xFF103B9F)
 
 // Secondary — 深灰蓝，专业感
 val Secondary = Color(0xFF52627A)
@@ -19,12 +19,25 @@ val SecondaryContainer = Color(0xFFE4EAF5)
 val OnSecondaryContainer = Color(0xFF121927)
 
 // Background / Surface
-val Background = Color(0xFFF7F9FF)
-val OnBackground = Color(0xFF1A1C1E)
+val Background = Color(0xFFF2F6FF)
+val OnBackground = Color(0xFF171A24)
 val Surface = Color(0xFFFFFFFF)
 val OnSurface = Color(0xFF1A1C1E)
-val SurfaceVariant = Color(0xFFF0F4FF)
-val OnSurfaceVariant = Color(0xFF44474E)
+val SurfaceVariant = Color(0xFFEAF1FF)
+val OnSurfaceVariant = Color(0xFF596174)
+
+// 与 Web dark token 对齐；商品图仍保留浅色展台，内容不被深色背景吞没。
+val DarkPrimary = Color(0xFF4D8BFF)
+val DarkOnPrimary = Color(0xFF07152F)
+val DarkPrimaryContainer = Color(0xFF173B84)
+val DarkOnPrimaryContainer = Color(0xFFDCE8FF)
+val DarkBackground = Color(0xFF0D0D14)
+val DarkOnBackground = Color(0xFFE8E8F0)
+val DarkSurface = Color(0xFF14141F)
+val DarkOnSurface = Color(0xFFE8E8F0)
+val DarkSurfaceVariant = Color(0xFF1A1A2E)
+val DarkOnSurfaceVariant = Color(0xFFB4B8C8)
+val DarkOutline = Color(0xFF383B4C)
 
 // Tertiary palette
 val Tertiary = Color(0xFF6D5677)
@@ -52,10 +65,10 @@ val AiBlue = Color(0xFF2457D6)
 val AiBlueContainer = Color(0xFFEAF0FF)
 
 // Global Shapes
-val CardShape = RoundedCornerShape(14.dp)
-val ButtonShape = RoundedCornerShape(8.dp)
+val CardShape = RoundedCornerShape(20.dp)
+val ButtonShape = RoundedCornerShape(14.dp)
 val ChipShape = RoundedCornerShape(20.dp)
-val ImageShape = RoundedCornerShape(12.dp)
+val ImageShape = RoundedCornerShape(16.dp)
 
 // Shadows
-val CardElevation = 1.dp
+val CardElevation = 0.dp

@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { OmiAppIcon } from './OmiAppIcon'
 
 describe('OmiAppIcon', () => {
-  it('uses the compact transparent cat-and-cart asset', () => {
+  it('uses the light brand asset by default', () => {
     const { container } = render(<OmiAppIcon size={44} />)
     const icon = container.querySelector('.omi-app-icon')
     const image = container.querySelector('img')
 
     expect(icon).toHaveStyle({ width: '44px', height: '44px' })
-    expect(image).toHaveAttribute('src', '/brand/omi-cart-avatar-256-v2.webp')
+    expect(image).toHaveAttribute('src', '/brand/omi-logo-light.png')
     expect(icon).toHaveAttribute('aria-hidden', 'true')
   })
 

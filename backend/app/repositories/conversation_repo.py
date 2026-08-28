@@ -8,11 +8,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session_sync, run_async
-from app.models.conversation import ConversationModel, ConversationMessageModel
+from app.models.conversation import (
+    ConversationModel, ConversationMessageModel, ConversationContextCheckpointModel,
+)
 
 
 def _new_id(prefix: str) -> str:
@@ -160,13 +162,76 @@ class ConversationRepository:
         gen = self._aget_session()
         session = await anext(gen)
         try:
+            # 调用者将 limit 用作“最近 N 条”的上下文窗口。原先按时间正序直接
+            # limit，会在长会话中永远返回最早的消息，使追问和记忆逐渐失真。
+            # 先倒序截取最新窗口，再恢复成自然对话顺序交给上层。
             result = await session.execute(
                 select(ConversationMessageModel)
                 .where(ConversationMessageModel.conversation_id == conversation_id)
-                .order_by(ConversationMessageModel.created_at)
+                .order_by(desc(ConversationMessageModel.created_at))
                 .limit(limit)
             )
-            return list(result.scalars().all())
+            return list(reversed(list(result.scalars().all())))
+        finally:
+            await gen.aclose()
+
+    async def aget_active_checkpoint(self, conversation_id: str) -> Optional[ConversationContextCheckpointModel]:
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            result = await session.execute(
+                select(ConversationContextCheckpointModel)
+                .where(
+                    ConversationContextCheckpointModel.conversation_id == conversation_id,
+                    ConversationContextCheckpointModel.status == "active",
+                )
+                .order_by(desc(ConversationContextCheckpointModel.revision))
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+        finally:
+            await gen.aclose()
+
+    async def acommit_checkpoint(
+        self, conversation_id: str, *, expected_revision: int, summary: str,
+        shopping_state: dict, source_through_message_id: str | None,
+        retained_message_ids: list[str], token_count: int,
+    ) -> Optional[ConversationContextCheckpointModel]:
+        """原子提交检查点；revision 不一致说明已有更新，调用方应重新投影。"""
+        gen = self._aget_session()
+        session = await anext(gen)
+        try:
+            conv_result = await session.execute(
+                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id).with_for_update()
+            )
+            conv = conv_result.scalar_one_or_none()
+            if not conv or int(conv.context_revision or 0) != int(expected_revision):
+                await session.rollback()
+                return None
+            await session.execute(
+                update(ConversationContextCheckpointModel)
+                .where(
+                    ConversationContextCheckpointModel.conversation_id == conversation_id,
+                    ConversationContextCheckpointModel.status == "active",
+                )
+                .values(status="superseded")
+            )
+            checkpoint = ConversationContextCheckpointModel(
+                checkpoint_id=_new_id("CKP"), conversation_id=conversation_id,
+                revision=expected_revision + 1, summary=summary[:1600],
+                shopping_state=shopping_state or {}, source_through_message_id=source_through_message_id,
+                retained_message_ids=retained_message_ids or [], token_count=int(token_count or 0), status="active",
+            )
+            session.add(checkpoint)
+            conv.context_revision = expected_revision + 1
+            conv.active_checkpoint_id = checkpoint.checkpoint_id
+            conv.updated_at = _utcnow()
+            await session.commit()
+            await session.refresh(checkpoint)
+            return checkpoint
+        except Exception:
+            await session.rollback()
+            raise
         finally:
             await gen.aclose()
 
@@ -197,8 +262,13 @@ class ConversationRepository:
         gen = self._aget_session()
         session = await anext(gen)
         try:
-            # 先删消息
+            # 先删检查点与消息，再删对话本身，避免留下孤儿记录。
             from sqlalchemy import delete
+            await session.execute(
+                delete(ConversationContextCheckpointModel).where(
+                    ConversationContextCheckpointModel.conversation_id == conversation_id
+                )
+            )
             await session.execute(
                 delete(ConversationMessageModel).where(
                     ConversationMessageModel.conversation_id == conversation_id

@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +33,7 @@ fun ProductCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
     onAddToCart: ((skuId: String?, skuLabel: String, skuPrice: Double) -> Unit)? = null,
+    onAskAgent: (() -> Unit)? = null,
     onScoreDetail: (() -> Unit)? = null,
 ) {
     // SKU 选择状态
@@ -45,13 +45,18 @@ fun ProductCard(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
         shape = CardShape,
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = Surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.56f),
+        ),
     ) {
         Row(modifier = Modifier.padding(12.dp)) {
             ProductImage(
                 imageUrl = product.imageUrls.firstOrNull(),
                 contentDescription = product.title,
+                productId = product.productId,
                 modifier = Modifier.size(width = 108.dp, height = 118.dp),
                 cornerRadius = 12.dp,
             )
@@ -59,12 +64,12 @@ fun ProductCard(
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (product.brand.isNotBlank()) {
-                        Surface(shape = RoundedCornerShape(6.dp), color = AiBlueContainer) {
+                        Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                             Text(
                                 product.brand,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = AiBlue,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                             )
@@ -93,46 +98,39 @@ fun ProductCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     PriceLabel(price = product.price)
-                    decisionResult?.let { dr ->
-                        val sc = when {
-                            dr.displayScore >= 8.0 -> ScoreHigh
-                            dr.displayScore >= 6.0 -> ScoreMedium
-                            else -> ScoreLow
-                        }
-                        Surface(shape = RoundedCornerShape(999.dp), color = sc.copy(alpha = 0.12f)) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(Icons.Filled.Star, null, Modifier.size(14.dp), tint = sc)
-                                Spacer(Modifier.width(3.dp))
-                                Text(
-                                    "%.1f".format(dr.displayScore),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = sc,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
-                        }
-                    }
                 }
                 decisionResult?.let { dr ->
                     val lbl = dr.recommendationLevel.let {
                         when (it) {
-                            "strong_recommend" -> "强推荐"
-                            "recommended" -> "推荐"
-                            "cautious" -> "谨慎"
-                            "insufficient_evidence" -> "证据不足"
-                            "not_recommended" -> "不推荐"
+                            "strong_recommend" -> "高度匹配"
+                            "recommended" -> "较匹配"
+                            "worth_considering" -> "有条件匹配"
+                            "cautious" -> "有条件匹配"
+                            "insufficient_evidence" -> "信息有限"
+                            "not_recommended" -> "暂不建议优先"
                             else -> null
                         }
                     }
-                    if (lbl != null || dr.evidenceConfidence > 0.0) {
+                    if (lbl != null || dr.evidenceLabel.isNotBlank()) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            dr.recommendationScore?.let { score ->
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                ) {
+                                    Text(
+                                        "欧米指数 ${score.score}",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
                             if (lbl != null) {
                                 val lc = when (dr.recommendationLevel) {
                                     "strong_recommend" -> ScoreHigh; "recommended" -> ScoreMedium
-                                    "cautious" -> ScoreMedium; "not_recommended" -> ScoreLow; else -> ScoreLow
+                                    "cautious" -> ScoreMedium; "not_recommended" -> ScoreLow; else -> ScoreMedium
                                 }
                                 Surface(shape = RoundedCornerShape(4.dp), color = lc.copy(alpha = 0.1f)) {
                                     Row(
@@ -146,11 +144,20 @@ fun ProductCard(
                                     }
                                 }
                             }
-                            if (dr.evidenceConfidence > 0.0) {
-                                Text("证据${(dr.evidenceConfidence * 100).toInt()}%",
+                            if (dr.evidenceLabel.isNotBlank()) {
+                                Text(dr.evidenceLabel,
                                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
+                    }
+                    decisionResult?.whyItFits?.takeIf { it.isNotBlank() }?.let { reason ->
+                        Text(
+                            text = reason,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
@@ -192,32 +199,45 @@ fun ProductCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "查看证据与评分",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .clickable { onScoreDetail?.invoke() }
-                    .padding(vertical = 8.dp, horizontal = 4.dp),
-            )
-            if (onAddToCart != null) {
-                Button(
-                    onClick = {
-                        val sku = skus.getOrNull(selectedSkuIndex)
-                        val skuId = sku?.skuId?.ifBlank { null }
-                        val skuLabel = sku?.properties?.entries
-                            ?.joinToString(" · ") { "${it.key}:${it.value}" }
-                            ?: ""
-                        val skuPrice = sku?.price ?: product.price
-                        onAddToCart(skuId, skuLabel, skuPrice)
-                    },
-                    shape = ButtonShape,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Icon(Icons.Filled.AddShoppingCart, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("加购", style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "查看依据",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickable { onScoreDetail?.invoke() }
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                )
+                if (onAskAgent != null) {
+                    OutlinedButton(
+                        onClick = onAskAgent,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
+                    ) {
+                        Icon(Icons.Filled.AutoAwesome, null, Modifier.size(14.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text("问欧米", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                if (onAddToCart != null) {
+                    Button(
+                        onClick = {
+                            val sku = skus.getOrNull(selectedSkuIndex)
+                            val skuId = sku?.skuId?.ifBlank { null }
+                            val skuLabel = sku?.properties?.entries
+                                ?.joinToString(" · ") { "${it.key}:${it.value}" }
+                                ?: ""
+                            val skuPrice = sku?.price ?: product.price
+                            onAddToCart(skuId, skuLabel, skuPrice)
+                        },
+                        shape = ButtonShape,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
+                        Icon(Icons.Filled.AddShoppingCart, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text("加购", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
         }

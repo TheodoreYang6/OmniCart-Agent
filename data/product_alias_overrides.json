@@ -1,0 +1,10 @@
+[
+  {
+    "selector": {"brand_key": "apple", "product_line_key": "iphone", "model_key": "iphone15pro"},
+    "aliases": [
+      {"display": "\u82f9\u679c15Pro", "type": "manual_model"},
+      {"display": "\u7231\u75af15Pro", "type": "manual_model"},
+      {"display": "15Pro\u82f9\u679c\u624b\u673a", "type": "manual_reordered_model"}
+    ]
+  }
+]

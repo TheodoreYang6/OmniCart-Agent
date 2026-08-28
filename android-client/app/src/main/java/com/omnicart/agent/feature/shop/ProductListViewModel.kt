@@ -41,8 +41,13 @@ class ProductListViewModel : ViewModel() {
                         totalCount = response.total,
                     )
                 }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "加载失败") }
+            } catch (_: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "暂时连不上欧米服务，请确认电脑端服务已启动且手机与电脑在同一 Wi‑Fi。",
+                    )
+                }
             }
         }
     }

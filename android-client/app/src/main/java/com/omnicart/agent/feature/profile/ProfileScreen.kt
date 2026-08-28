@@ -1,6 +1,5 @@
 package com.omnicart.agent.feature.profile
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,17 +16,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.*
-import com.omnicart.agent.R
+import android.widget.Toast
+import com.omnicart.agent.core.config.ServerConfig
 import com.omnicart.agent.core.network.UserMemoryItem
+import com.omnicart.agent.core.design.OmiLogo
 
 @Composable
 fun ProfileScreen(
     isLoggedIn: Boolean = false,
     username: String = "",
+    isDarkTheme: Boolean = false,
     memories: List<UserMemoryItem> = emptyList(),
     isLoadingMemories: Boolean = false,
     onLoginClick: () -> Unit = {},
@@ -37,13 +39,19 @@ fun ProfileScreen(
     onOrdersClick: () -> Unit = {},
     onLoadMemories: () -> Unit = {},
     onDeleteMemory: (String) -> Unit = {},
+    onDarkThemeChange: (Boolean) -> Unit = {},
 ) {
     LaunchedEffect(Unit) {
         onLoadMemories()
     }
+    val context = LocalContext.current
+    var showServerDialog by remember { mutableStateOf(false) }
+    var serverInput by remember { mutableStateOf(ServerConfig.current()) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
     ) {
         Box(
@@ -52,38 +60,33 @@ fun ProfileScreen(
                 .background(
                     Brush.linearGradient(
                         listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.surfaceVariant,
                         )
                     )
                 )
                 .padding(20.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_douzai),
-                    contentDescription = "头像",
-                    modifier = Modifier.size(76.dp).clip(CircleShape),
-                    contentScale = ContentScale.Crop,
-                )
+                OmiLogo(size = 72.dp, contentDescription = "欧米")
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (isLoggedIn) username else "欢迎来到 OmniCart",
+                        if (isLoggedIn) username else "你好，我是欧米",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                     Text(
-                        if (isLoggedIn) "购物车、偏好和对话可同步" else "登录后同步购物车、地址和偏好",
+                        if (isLoggedIn) "欧米会结合你的偏好，推荐更适合的商品" else "登录后，欧米会更懂你的购物偏好",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f),
                     )
                 }
                 if (isLoggedIn) {
                     OutlinedButton(
                         onClick = onLogoutClick,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
                     ) {
                         Text("退出")
                     }
@@ -100,18 +103,19 @@ fun ProfileScreen(
         Spacer(Modifier.height(16.dp))
 
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatCard("AI 推荐", "证据可追溯", Modifier.weight(1f))
-            StatCard("购物偏好", if (isLoggedIn) "已启用" else "待登录", Modifier.weight(1f))
+            StatCard("懂你偏好", if (isLoggedIn) "正在为你生效" else "登录后开启", Modifier.weight(1f))
+            StatCard("购物清单", if (isLoggedIn) "随时查看和管理" else "登录后同步", Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(12.dp))
 
-        ProfileItem(Icons.Filled.ShoppingBag, "我的订单", "查看已结算的模拟订单", onClick = onOrdersClick)
-        ProfileItem(Icons.Filled.LocationOn, "收货地址", if (isLoggedIn) "管理收货地址" else "登录后管理收货地址", onClick = onAddressClick)
-        ProfileItem(Icons.Filled.Settings, "偏好设置", if (isLoggedIn) "预算、场景、标签会用于推荐" else "登录后设置购物偏好", onClick = onPreferenceClick)
+        ProfileItem(Icons.Filled.ShoppingBag, "我的订单", "查看已下单的商品", onClick = onOrdersClick)
+        ProfileItem(Icons.Filled.LocationOn, "收货地址", if (isLoggedIn) "用于给出更贴近你的建议" else "登录后管理常用地址", onClick = onAddressClick)
+        ProfileItem(Icons.Filled.Settings, "偏好设置", if (isLoggedIn) "预算、场景与品牌偏好正在生效" else "登录后建立你的购物偏好", onClick = onPreferenceClick)
+        ThemeToggleItem(isDarkTheme = isDarkTheme, onDarkThemeChange = onDarkThemeChange)
 
         Spacer(Modifier.height(12.dp))
-        Text("我的记忆", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
+        Text("欧米记住的偏好", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
         Spacer(Modifier.height(4.dp))
 
         if (isLoadingMemories) {
@@ -119,7 +123,7 @@ fun ProfileScreen(
                 CircularProgressIndicator(modifier = Modifier.size(24.dp))
             }
         } else if (memories.isEmpty()) {
-            Text("暂无记忆数据。使用推荐后系统会自动积累您的购物偏好。",
+            Text("还没有可用偏好。多和欧米聊几次，它会逐步记住你的取舍。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
@@ -130,7 +134,83 @@ fun ProfileScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        ProfileItem(Icons.Filled.Info, "关于小O", "参赛版 · 基于 RAG 的多模态电商智能导购 Agent")
+        ProfileItem(
+            Icons.Filled.Cloud,
+            "服务器地址",
+            ServerConfig.current(),
+            onClick = {
+                serverInput = ServerConfig.current()
+                showServerDialog = true
+            },
+        )
+        ProfileItem(Icons.Filled.Info, "关于欧米", "你的购物智能体")
+    }
+
+    if (showServerDialog) {
+        AlertDialog(
+            onDismissRequest = { showServerDialog = false },
+            title = { Text("设置服务器地址") },
+            text = {
+                Column {
+                    Text(
+                        "USB 调试时保持默认 127.0.0.1:8006（Android Studio 会通过 adb reverse 连到电脑）。只有未连接 USB 时，才填写电脑的局域网 IP。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = serverInput,
+                        onValueChange = { serverInput = it },
+                        singleLine = true,
+                        placeholder = { Text("http://127.0.0.1:8006/") },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    ServerConfig.save(context, serverInput)
+                    Toast.makeText(context, "已保存，重新操作即可生效", Toast.LENGTH_SHORT).show()
+                    showServerDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showServerDialog = false }) { Text("取消") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ThemeToggleItem(
+    isDarkTheme: Boolean,
+    onDarkThemeChange: (Boolean) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("深色模式", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (isDarkTheme) "已开启，夜间浏览更舒适" else "关闭后使用清爽的浅色界面",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = isDarkTheme, onCheckedChange = onDarkThemeChange)
+        }
     }
 }
 
@@ -138,9 +218,9 @@ fun ProfileScreen(
 private fun StatCard(title: String, subtitle: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
+        tonalElevation = 0.dp,
     ) {
         Column(Modifier.padding(14.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -154,7 +234,9 @@ private fun StatCard(title: String, subtitle: String, modifier: Modifier = Modif
 private fun ProfileItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit = {}) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = MaterialTheme.shapes.medium,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp,
         onClick = onClick,
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

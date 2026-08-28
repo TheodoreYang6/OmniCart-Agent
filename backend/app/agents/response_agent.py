@@ -1,15 +1,14 @@
 """V3 Response Agent — 压缩上下文 + 超时兜底 + FAST_MODE 模板优先。
 
-FAST_MODE=true: 模板回答 → LLM 可选润色 (≤6s)
-FAST_MODE=false: LLM 生成 → 模板兜底 (≤6s timeout)
+FAST_MODE=true: 模板回答 → LLM 可选润色
+FAST_MODE=false: LLM 生成 → 仅在明确超时或失败时模板兜底
 """
 
 import asyncio
 import time
 
 from app.agents.base import BaseAgent
-from app.context.compiler import compile_context
-from app.core.config import FAST_MODE
+from app.core.config import FAST_MODE, RESPONSE_LLM_TIMEOUT
 from app.model_gateway.gateway import get_model_gateway
 from app.prompts.agent_prompts import build_chitchat_prompt, build_response_prompt
 from app.schemas.a2a import AgentCard
@@ -57,42 +56,27 @@ class ResponseAgent(BaseAgent):
                 state.answer = self._generate_template(state)
             return self._finish_trace(state, "fallback", status="fallback")
 
-    async def _assemble_context(self, state: WorkflowState):
-        """用 ContextManager 组装多源上下文（time/visual/followup）+ token 预算。
+    async def _assemble_context(self, state: WorkflowState) -> str:
+        """最终回答的唯一上下文入口。
 
-        include 排除 profile_hint：偏好已由 followup 携带的 context_prompt 注入，避免重复。
-        异常返回 None → compile_context 回退原 context_prompt。
+        ReAct 的工具转录、FollowUp 拼接文本和 scratchpad 都不能进入此处；它们只
+        服务各自的工作阶段。这里始终使用可追溯的会话检查点 + 最近完整回合 +
+        本轮已锁定推荐简报。
         """
-        try:
-            from app.framework.context import ContextTrigger
-            from app.providers.context import get_context_manager
+        from app.context.conversation_assembler import get_conversation_context_assembler
 
-            category = state.constraints.category if state.constraints else ""
-            return await get_context_manager().assemble(
-                ContextTrigger(
-                    query=state.user_query,
-                    user_id=state.user_id,
-                    conversation_id=state.conversation_id,
-                    category=category or "",
-                    metadata={
-                        "context_prompt": state.context_prompt or "",
-                        "visual_result": state.visual_result or {},
-                    },
-                ),
-                include_providers={"time", "visual", "followup"},
-            )
-        except Exception:
-            return None
+        result = await get_conversation_context_assembler().assemble(state)
+        return result.text
 
     async def _generate_with_llm_fallback(self, state: WorkflowState) -> str:
-        """LLM 生成 + 6s 超时 → 模板兜底。"""
-        context = compile_context(state, await self._assemble_context(state))
+        """LLM 生成；只在配置的超时、异常或不安全输出时使用模板兜底。"""
+        context = await self._assemble_context(state)
         prompt = build_response_prompt(context)
         try:
             gateway = get_model_gateway()
             answer = await asyncio.wait_for(
                 gateway.chat("chat_generation", prompt),
-                timeout=6.0,
+                timeout=RESPONSE_LLM_TIMEOUT,
             )
             if not answer or len(answer.strip()) < 10:
                 return self._generate_template(state)
@@ -137,18 +121,34 @@ class ResponseAgent(BaseAgent):
         # LLM 流式生成
         full = ""
         try:
-            context = compile_context(state, await self._assemble_context(state))
+            context = await self._assemble_context(state)
             prompt = build_response_prompt(context)
             gateway = get_model_gateway()
             async for token in gateway.chat_stream("chat_generation", prompt):
-                full += token
-                yield token
+                # LLM 偶尔会把 Markdown 作为习惯性格式输出；客户端不负责解释
+                # 这些符号，流中直接清理，避免出现一串 "*"。
+                safe = token.replace("*", "").replace("#", "")
+                if not safe:
+                    continue
+                full += safe
+                if self._stream_token_is_unsafe(full, state):
+                    yield "\n抱歉，这个结论需要再核对一下；欧米只按上面的商品卡给你建议。"
+                    return
+                yield safe
             # 已发内容无法撤回 — 仅在产出过短时补模板，引用校验失败不重发
             if len(full.strip()) < 10:
                 yield self._generate_template(state)
         except Exception:
             if not full:
                 yield self._generate_template(state)
+
+    @staticmethod
+    def _stream_token_is_unsafe(answer: str, state: WorkflowState) -> bool:
+        """真流式的轻量阻断：只拦内部过程词泄露。"""
+        lowered = answer.lower()
+        if any(term in lowered for term in ("工具调用", "检索管线", "scratchpad", "候选列表")):
+            return True
+        return False
 
     async def _generate_with_optional_llm(self, state: WorkflowState) -> str:
         """FAST_MODE: 纯模板回答，不调 LLM。"""
@@ -214,8 +214,25 @@ class ResponseAgent(BaseAgent):
         回答讲 A/B 而卡片列 C/D/E。统一从此取，并把引用集写回 state，
         由 SSE 层 ``_order_by_cited`` 据此置顶 products。
         """
-        products = (state.retrieved_products or [])[:n]
-        decisions = (state.decision_results or [])[:n]
+        primary_ids = list(getattr(state, "primary_product_ids", None) or [])
+        if primary_ids:
+            by_id = {p.get("product_id"): p for p in (state.retrieved_products or [])}
+            products = [by_id[pid] for pid in primary_ids if pid in by_id]
+            selected_ids = set(primary_ids)
+            decisions = [d for d in (state.decision_results or [])
+                         if d.get("product_id") in selected_ids]
+        else:
+            selected = getattr(state, "selected_products", None) or []
+            if selected:
+                # ReAct 路径：LLM 经 shopping.display 显式确认过的集合，是它真正分析过的商品。
+                products = selected[:n]
+                sel_ids = {p.get("product_id") for p in products}
+                decisions = [d for d in (state.decision_results or [])
+                             if d.get("product_id") in sel_ids]
+            else:
+                # pipeline 路径：经 reranker+decision 排过序，前 n 即最优。
+                products = (state.retrieved_products or [])[:n]
+                decisions = (state.decision_results or [])[:n]
         pids = [p.get("product_id", "") for p in products if p.get("product_id")]
         if pids:
             state.answer_cited_pids = pids
@@ -312,8 +329,6 @@ class ResponseAgent(BaseAgent):
         name2 = _brand_prefix(b2, t2)
         price1 = f"¥{p1.get('price',0):.0f}"
         price2 = f"¥{p2.get('price',0):.0f}"
-        score1 = d1.get("display_score", 0)
-        score2 = d2.get("display_score", 0)
 
         # 从 evidence_list 中找和对比维度相关的证据
         evidence_for_dim = []
@@ -323,14 +338,10 @@ class ResponseAgent(BaseAgent):
                 if dim_label in content:
                     evidence_for_dim.append(content[:120])
 
-        # 推荐等级中文
-        LVL = {"strong_recommend":"强烈推荐","recommended":"推荐","cautious":"谨慎推荐","insufficient_evidence":"证据不足","not_recommended":"不推荐"}
-
         lines = [f"📊 {name1} vs {name2}，{dim_label}维度对比\n"]
 
         # 基本信息
-        lvl1 = LVL.get(d1.get("recommendation_level",""), "")
-        lines.append(f"【{name1}】{price1} | {score1}/10 | {lvl1}")
+        lines.append(f"【{name1}】{price1} | {d1.get('match_label', '优先看看')}")
         reason1 = d1.get("recommendation_reason", "")
         # 去除开头的推荐等级前缀（已在标题显示）
         for prefix in ["强烈推荐 | ", "推荐 | ", "谨慎推荐 | ", "值得购买 | "]:
@@ -340,7 +351,7 @@ class ResponseAgent(BaseAgent):
             reason1 = reason1[:60] + "..."
         if reason1:
             lines.append(f"  {reason1}")
-        lines.append(f"\n【{name2}】{price2} | {score2}/10 | {LVL.get(d2.get('recommendation_level',''),'')}")
+        lines.append(f"\n【{name2}】{price2} | {d2.get('match_label', '优先看看')}")
         reason2 = d2.get("recommendation_reason", "")
         for prefix in ["强烈推荐 | ", "推荐 | ", "谨慎推荐 | ", "值得购买 | "]:
             if reason2.startswith(prefix):
@@ -357,7 +368,9 @@ class ResponseAgent(BaseAgent):
                 lines.append(f"  • {e}")
 
         # 结论
-        if score1 > score2 + 0.5:
+        score1 = float(d1.get("final_score", 0) or 0)
+        score2 = float(d2.get("final_score", 0) or 0)
+        if score1 > score2 + 0.08:
             lines.append(f"\n💡 {dim_label}角度，{name1}更胜一筹。")
         elif score2 > score1 + 0.5:
             lines.append(f"\n💡 {dim_label}角度，{name2}更值得入手。")
@@ -383,17 +396,19 @@ class ResponseAgent(BaseAgent):
                     f"您拍的看起来是「{vr['product_name']}」{brand_str}，"
                     f"可惜商品库里暂时还没有收录这款商品。要不要试试搜一下同类产品？"
                 )
-            msg = "抱歉，没有找到完全匹配您条件的商品。"
+            msg = "暂时没找到完全匹配的商品。"
+            tips = []
             if state.constraints.budget_max:
-                msg += f" 试试放宽预算到 {state.constraints.budget_max * 1.5:.0f} 元左右？"
+                tips.append(f"可以试试把预算放宽到 {state.constraints.budget_max * 1.5:.0f} 元左右")
+            tips.append("换个品类，或者告诉我更具体的用途")
+            msg += "，".join(tips) + "，我再帮你挑几款。"
             return msg
 
         vr = state.visual_result or {}
         exact_pids = set(state.visual_matched_pids or [])
         exact_products = [p for p in products if p.get("product_id") in exact_pids]
         other_products = [p for p in products if p.get("product_id") not in exact_pids]
-        exact_decisions = [d for d in decisions if d.get("product_id") in exact_pids]
-        other_decisions = [d for d in decisions if d.get("product_id") not in exact_pids]
+        decision_by_pid = {d.get("product_id"): d for d in decisions if d.get("product_id")}
 
         lines = []
 
@@ -407,14 +422,29 @@ class ResponseAgent(BaseAgent):
         elif vr.get("brand"):
             lines.append(f"认出是{vr['brand']}的产品，帮你挑了几款～")
         else:
-            lines.append("帮你挑了几款～")
+            lines.append("欧米先帮你把更值得看的几款挑出来了～")
 
         # 同款优先
-        display_list = list(zip(exact_products, exact_decisions)) if exact_products else []
+        display_list = [(p, decision_by_pid.get(p.get("product_id"), {})) for p in exact_products]
         if exact_products and other_products:
             display_list += [(None, None)]
-        display_list += list(zip(other_products, other_decisions))
+        display_list += [(p, decision_by_pid.get(p.get("product_id"), {})) for p in other_products]
 
+        roles_by_pid: dict[str, str] = {}
+        for group in (state.retrieval_groups or []):
+            if isinstance(group, dict):
+                status, pids, role = group.get("status"), group.get("product_ids", []), group.get("role")
+            else:
+                status = getattr(group, "status", "")
+                pids = getattr(group, "product_ids", [])
+                role = getattr(group, "role", "")
+            if status == "matched":
+                for pid in pids:
+                    roles_by_pid.setdefault(str(pid), str(role or ""))
+
+        facts_by_pid = {
+            p.get("product_id", ""): p.get("product_facts", []) or [] for p in products
+        }
         for prod, dec in display_list:
             if prod is None:
                 lines.append("📌 同类还有这些：")
@@ -426,6 +456,24 @@ class ResponseAgent(BaseAgent):
             name = f"{brand} {title}" if brand and not title.startswith(brand) else title
             if len(name) > 55:
                 name = name[:55] + "…"
-            lines.append(f"{name}  ¥{price:.0f}")
+            reason = str((dec or {}).get("why_it_fits") or (dec or {}).get("recommendation_reason") or "").strip()
+            reason = reason.replace("\n", " ")
+            if len(reason) > 58:
+                reason = reason[:58].rstrip("，。；; ") + "。"
+            if not reason:
+                labels = {
+                    "nutrition.zero_sugar": "0糖", "nutrition.low_sugar": "低糖",
+                    "nutrition.zero_fat": "0脂", "nutrition.low_fat": "低脂",
+                    "nutrition.zero_calorie": "0卡", "nutrition.low_calorie": "低卡",
+                    "nutrition.high_protein": "高蛋白",
+                }
+                visible = [labels.get(f.get("fact_key", ""), "") for f in facts_by_pid.get(prod.get("product_id", ""), [])]
+                reason = f"可核对到{'、'.join(x for x in visible if x) or '商品信息'}。"
+            role = roles_by_pid.get(str(prod.get("product_id", "")), "")
+            prefix = f"{role}：" if role else ""
+            lines.append(f"{prefix}{name}（¥{price:.0f}）——{reason}")
+
+        if len(display_list) > 1:
+            lines.append("想继续的话，告诉欧米你最在意价格、口感还是具体规格，欧米再帮你收窄到一款喵～")
 
         return "\n".join(lines)

@@ -17,10 +17,10 @@ RESULT_REQUIRED_FIELDS = [
     "harness_report", "used_memories", "blocked_memories", "memory_trace",
 ]
 
-# Decision result fields each product should have
+# 决策结果只下发用户可理解的结论；内部数值评分仅留在服务端诊断账本。
 DECISION_FIELDS = [
-    "product_id", "final_score", "display_score", "recommendation_level",
-    "evidence_confidence", "support_evidence_ids",
+    "product_id", "recommendation_level", "match_label", "evidence_label",
+    "why_it_fits", "caution",
 ]
 
 # Product fields each product should have
@@ -36,14 +36,14 @@ def async_client():
 
 @pytest.mark.asyncio
 async def test_sse_event_order(async_client):
-    """SSE 事件顺序: token* → result → done"""
+    """SSE 事件顺序：阶段 → 卡片 → 真实 token → result → done。"""
     events = []
     async with async_client.stream(
         "POST", f"{BASE}/api/recommend/stream",
         json={
             "session_id": "sse_smoke_test_001",
             "user_id": "test_user",
-            "message": "推荐一款蓝牙耳机",
+            "message": "推荐通勤充电宝",
         },
     ) as response:
         assert response.status_code == 200
@@ -80,7 +80,7 @@ async def test_sse_event_order(async_client):
 @pytest.mark.asyncio
 async def test_sse_result_fields(async_client):
     """SSE result 事件包含所有必需字段。"""
-    result_data = await _get_sse_result(async_client, "推荐一款蓝牙耳机")
+    result_data = await _get_sse_result(async_client, "推荐通勤充电宝")
     missing = [f for f in RESULT_REQUIRED_FIELDS if f not in result_data]
     assert not missing, f"Missing fields in SSE result: {missing}"
 
@@ -88,7 +88,7 @@ async def test_sse_result_fields(async_client):
 @pytest.mark.asyncio
 async def test_sse_result_has_products(async_client):
     """SSE result 返回商品列表且字段完整。"""
-    result_data = await _get_sse_result(async_client, "性价比高的蓝牙耳机")
+    result_data = await _get_sse_result(async_client, "推荐通勤充电宝")
     products = result_data.get("products", [])
     assert len(products) > 0, "SSE result should return at least 1 product"
 
@@ -99,29 +99,27 @@ async def test_sse_result_has_products(async_client):
 
 @pytest.mark.asyncio
 async def test_sse_result_has_decisions(async_client):
-    """SSE result 的 decision_results 包含评分关键字段。"""
-    result_data = await _get_sse_result(async_client, "200元以内蓝牙耳机")
+    """SSE result 的 decision_results 仅包含用户可理解的卡片结论。"""
+    result_data = await _get_sse_result(async_client, "推荐通勤充电宝")
     decisions = result_data.get("decision_results", [])
     assert len(decisions) > 0, "SSE result should have decision results"
 
     for d in decisions:
         for field in DECISION_FIELDS:
             assert field in d, f"Decision missing field: {field}"
-        assert 0 <= d.get("display_score", -1) <= 10, (
-            f"display_score out of range: {d.get('display_score')}"
-        )
+        assert "final_score" not in d
+        assert "display_score" not in d
 
 
 @pytest.mark.asyncio
-async def test_sse_conversation_id_persists(async_client):
-    """conversation_id 在 result 中返回且不为空。"""
+async def test_sse_guest_does_not_persist_conversation(async_client):
+    """匿名推荐是一次性的，伪造 body user_id 也不能创建历史会话。"""
     result_data = await _get_sse_result(
         async_client, "出差用的充电宝",
         conversation_id=""
     )
     conv_id = result_data.get("conversation_id", "")
-    assert conv_id, "conversation_id should not be empty"
-    assert isinstance(conv_id, str) and len(conv_id) > 0
+    assert conv_id == ""
 
 
 @pytest.mark.asyncio

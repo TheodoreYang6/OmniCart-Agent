@@ -83,29 +83,46 @@ export interface ProductDetail {
 
 // ---- 决策 / 证据 / 追踪 ----
 
-export interface ComponentScore {
+export interface RecommendationScoreDimension {
+  key: 'need_fit' | 'budget_fit' | 'information' | string
+  label: string
+  score: number | null
+  detail: string
+}
+
+/** 当前问题下的可复算适配指数；不是商品绝对质量或检索相似度。 */
+export interface RecommendationScore {
+  version: string
+  label: string
   score: number
-  weight?: number
-  reason?: string
-  [k: string]: unknown
+  match_label: string
+  recommendation_level: string
+  evidence_label: string
+  information_status: string
+  source_types: string[]
+  dimensions: RecommendationScoreDimension[]
+  explanation: string
 }
 
 export interface DecisionResult {
   product_id: string
-  final_score: number
-  display_score: number
-  component_scores?: Record<string, ComponentScore> | null
-  evidence_ids: string[]
+  evidence_ids?: string[]
   risk_factors: string[]
   // 好评率正向信号（如 "12 条评价 92% 好评"），优先于 risk 展示
   positive_signal?: string
-  recommendation_reason: string
+  recommendation_reason?: string
   llm_relevance?: number
   llm_reasoning?: string
   llm_verdict?: string
   recommendation_level: string
-  evidence_confidence: number
-  support_evidence_ids: string[]
+  evidence_confidence?: number
+  support_evidence_ids?: string[]
+  match_label?: string
+  evidence_label?: string
+  why_it_fits?: string
+  caution?: string
+  hard_constraint_status?: string
+  recommendation_score?: RecommendationScore
 }
 
 export interface EvidenceItem {
@@ -128,6 +145,15 @@ export interface TraceStepItem {
   status: string
 }
 
+export interface RetrievalGroup {
+  group_id: string
+  role: string
+  query: string
+  product_ids: string[]
+  status: 'pending' | 'matched' | 'missing' | 'failed'
+  missing_reason?: string
+}
+
 // ---- 推荐请求 / 响应 ----
 
 export interface RecommendRequest {
@@ -139,16 +165,123 @@ export interface RecommendRequest {
   conversation_id?: string
 }
 
+export interface FocusAnalysis {
+  product_id: string
+  title: string
+  brand: string
+  price: number
+  price_range: { min: number; max: number }
+  image_url: string
+  rating: { avg: number | null; count: number }
+  highlights: string[]
+  cautions: string[]
+  suitable_for: string
+  evidence_status: string
+}
+
+export interface ComparisonItem {
+  product_id: string
+  title: string
+  brand: string
+  price: number
+  price_range: { min: number; max: number }
+  image_url: string
+  rating: { avg: number | null; count: number }
+  attributes: Record<string, string>
+  highlights: string[]
+  cautions: string[]
+  suitable_for: string
+  comparison_role?: string
+  evidence_status?: string
+  price_band?: string | null
+}
+
+export interface ComparisonVerdict {
+  text: string
+  winner_id: string | null
+  reasons: string[]
+}
+
+export interface Comparison {
+  dimensions: string[]
+  target: ComparisonItem
+  alternatives: ComparisonItem[]
+  verdict: ComparisonVerdict
+  selection_method?: string
+  judge_status?: 'model' | 'fallback' | string
+}
+
+export type ShopCard =
+  | { kind: 'cart_summary'; payload: CartSummaryPayload }
+  | { kind: 'sku_picker'; payload: SkuPickerPayload }
+  | { kind: 'order_preview'; payload: OrderPreviewPayload }
+  | { kind: 'order_created'; payload: OrderCreatedPayload }
+
+export interface CartItemSummary {
+  cart_item_id: string
+  product_id: string
+  title: string
+  brand: string
+  price: number
+  quantity: number
+  image_url: string
+  sku_id?: string | null
+  sku_label?: string
+  selected?: boolean
+  skus?: Array<{ sku_id: string; label: string; price: number }>
+}
+
+export interface CartSummaryPayload {
+  items: CartItemSummary[]
+  total: number
+  count: number
+}
+
+export interface SkuPickerPayload {
+  product_id: string
+  title: string
+  brand: string
+  image_url: string
+  skus: Array<{ sku_id: string; label: string; price: number }>
+}
+
+export interface CheckoutOrderItem {
+  title: string
+  brand: string
+  price: number
+  quantity: number
+  product_id?: string
+  image_url?: string
+  sku_label?: string
+}
+
+export interface OrderPreviewPayload {
+  items: CheckoutOrderItem[]
+  total: number
+  address?: Record<string, unknown> | null
+  has_address: boolean
+}
+
+export interface OrderCreatedPayload {
+  order_id: string
+  items: CheckoutOrderItem[]
+  total: number
+  eta: string
+}
+
 export interface RecommendResponse {
   session_id: string
   conversation_id: string
   answer: string
   products: Product[]
+  primary_products?: Product[]
   decision_results: DecisionResult[]
   evidence_list: EvidenceItem[]
   trace_steps: TraceStepItem[]
   harness_report?: Record<string, unknown> | null
   visual_result?: Record<string, unknown> | null
+  visual_resolution?: boolean
+  product_resolution?: Record<string, unknown> | null
   fallback_status?: Record<string, unknown> | null
   retrieval_plan?: Record<string, unknown> | null
   sufficiency_report?: Record<string, unknown> | null
@@ -158,14 +291,20 @@ export interface RecommendResponse {
   memory_trace?: Record<string, unknown> | null
   target_product_analysis?: Record<string, unknown> | null
   alternative_products?: Array<Record<string, unknown>> | null
+  analysis_alternatives?: Array<Record<string, unknown>> | null
   comparison_table?: Record<string, unknown> | null
+  comparison_products?: Product[] | null
   cross_category?: Array<Record<string, unknown>> | null
+  focus_analysis?: FocusAnalysis | null
+  comparison?: Comparison | null
   timing?: Record<string, unknown> | null
   needs_clarification?: boolean
   clarification_question?: string
   clarification_options?: Array<Record<string, unknown>> | null
   shop_action?: boolean
   actions?: Array<Record<string, unknown>> | null
+  shop_card?: ShopCard | null
+  retrieval_groups?: RetrievalGroup[]
 }
 
 // ---- 约束引导式推荐 ----
@@ -286,15 +425,31 @@ export interface CheckoutResponse {
   error?: string
 }
 
+export interface CheckoutPreviewResponse {
+  shop_card: ShopCard
+  message: string
+  actions: ChatAction[]
+  total: number
+  has_address: boolean
+}
+
+export interface CheckoutSubmitResponse {
+  shop_card: ShopCard
+  message: string
+  answer: string
+  order_id: string
+  total: number
+}
+
 export interface OrderItem {
-  cart_item_id: string
-  product_id: string
+  cart_item_id?: string
+  product_id?: string
   title: string
   brand: string
   price: number
-  image_url: string
+  image_url?: string
   quantity: number
-  sku_label: string
+  sku_label?: string
 }
 
 export interface Order {
@@ -447,21 +602,18 @@ export interface HealthResponse {
 
 export interface ChatAction {
   type: 'address_form' | 'sku_option' | 'quick_reply' | string
-  label: string
+  label?: string
   product_id?: string
   sku_id?: string
+  route?: 'cart' | 'orders' | 'address' | string
+  cart_item_id?: string
+  quantity?: number
 }
 
 export interface ClarificationOption {
   label: string
   value?: string
   dim?: string
-}
-
-export interface ComparisonTableData {
-  dimensions: string[]
-  target_values: string[]
-  alternative_values: string[][]
 }
 
 export interface RetrievalPlan {

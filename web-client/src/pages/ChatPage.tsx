@@ -1,18 +1,22 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { History, Plus, Sparkles, Mic, ImagePlus, MessageCircleHeart } from 'lucide-react'
-import { useChatStore, type ChatMessage } from '@/store/chatStore'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Brain, History, ImagePlus, Loader2, MessageCircleHeart, Mic, PenLine, Plus, Search, ShieldCheck, Sparkles } from 'lucide-react'
+import { useChatStore } from '@/store/chatStore'
 import { useCartStore } from '@/store/cartStore'
+import { useAuthStore } from '@/store/authStore'
+import { getEffectiveUserId } from '@/store/authStore'
+import { api } from '@/api/client'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { ConversationHistory } from '@/components/chat/ConversationHistory'
-import { AgentInsights, type InsightData } from '@/components/chat/AgentInsights'
 import { ProductSpotlight } from '@/components/product/ProductSpotlight'
-import type { ChatAction, DecisionResult, Product } from '@/api/types'
 import { Modal } from '@/components/ui/Modal'
+import { AddressForm } from '@/components/address/AddressForm'
+import type { AddressCreateRequest, ChatAction, DecisionResult, Product } from '@/api/types'
 import { OmiAppIcon } from '@/components/brand/OmiAppIcon'
 import { OmiHero } from '@/components/brand/OmiHero'
-import { AgentTrail } from '@/components/chat/AgentTrail'
-import { useOmiState, omiExpressionForScore } from '@/hooks/useOmiState'
+import { useOmiState, omiExpressionForMatch } from '@/hooks/useOmiState'
 import { toast } from '@/store/toastStore'
 import { AGENT_NAME, AGENT_TAGLINE } from '@/config'
 
@@ -23,7 +27,31 @@ const SUGGESTIONS = [
   '有没有适合送礼的高性价比零食',
 ]
 
+const EMPTY_ADDRESS: AddressCreateRequest = {
+  name: '',
+  phone: '',
+  province: '',
+  city: '',
+  district: '',
+  detail: '',
+  is_default: false,
+}
+
 const MessageBubble = lazy(() => import('@/components/chat/MessageBubble').then((module) => ({ default: module.MessageBubble })))
+
+/** 流式文本可能刚好停在 Markdown 标记中间；补齐未闭合的粗体标记，避免把 ** 直接露给用户。 */
+function renderStreamingMarkdown(text: string) {
+  const boldMarkers = (text.match(/(?<!\\)\*\*/g) ?? []).length
+  return boldMarkers % 2 === 0 ? text : `${text}**`
+}
+
+function statusIconFor(text: string) {
+  if (/理解|需求|意图/.test(text)) return Brain
+  if (/找|检索|搜索|挑选/.test(text)) return Search
+  if (/比对|比较|筛选/.test(text)) return Sparkles
+  if (/核对|依据|验证/.test(text)) return ShieldCheck
+  return PenLine
+}
 
 export function ChatPage() {
   const navigate = useNavigate()
@@ -42,12 +70,16 @@ export function ChatPage() {
   const setChatScrollTop = useChatStore((s) => s.setChatScrollTop)
 
   const addToCart = useCartStore((s) => s.addToCart)
+  const setCartQuantity = useCartStore((s) => s.setQuantity)
+  const removeCartItem = useCartStore((s) => s.removeItem)
+  const isLoggedIn = useAuthStore((s) => s.isLoggedIn())
   const setCartContext = useCartStore((s) => s.setContext)
   const sessionId = useChatStore((s) => s.sessionId)
 
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [insight, setInsight] = useState<InsightData | null>(null)
-  const [desktopWorkspace, setDesktopWorkspace] = useState(false)
+  const [addressForm, setAddressForm] = useState<AddressCreateRequest>(EMPTY_ADDRESS)
+  const [showAddressForm, setShowAddressForm] = useState(false)
+  const [savingAddress, setSavingAddress] = useState(false)
   // Spotlight：点击聊天内商品卡原地展开评分细则 + AI 总结（不再跳详情页）
   const [spotlight, setSpotlight] = useState<{
     product: Product
@@ -72,34 +104,11 @@ export function ChatPage() {
       }
       setSpotlight({ product: p, decision: d, query: q })
       // 场景②：浏览商品卡 —— 高分好物才给星星眼（避免滥用失去意义）
-      if (omiExpressionForScore(d?.display_score) === 'star') fireOmi('found-good')
+      if (omiExpressionForMatch(d?.recommendation_level) === 'star') fireOmi('found-good')
       return
     }
     navigate(`/product/${productId}`) // 兑底：消息里找不到则进详情页
   }
-  // 思考-行动轨迹（纯视图层累计 loadingMessage 历史，深度思考时展示时间线）
-  const [statusTrail, setStatusTrail] = useState<string[]>([])
-
-  useEffect(() => {
-    const media = window.matchMedia('(min-width: 1024px)')
-    const sync = () => setDesktopWorkspace(media.matches)
-    sync()
-    media.addEventListener('change', sync)
-    return () => media.removeEventListener('change', sync)
-  }, [])
-
-  useEffect(() => {
-    if (!isStreaming) {
-      setStatusTrail([])
-      return
-    }
-    if (loadingMessage) {
-      setStatusTrail((prev) =>
-        prev[prev.length - 1] === loadingMessage ? prev : [...prev.slice(-4), loadingMessage],
-      )
-    }
-  }, [loadingMessage, isStreaming])
-
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -155,8 +164,28 @@ export function ChatPage() {
   const handleAction = async (action: ChatAction) => {
     const type = String(action.type ?? '')
     const label = String(action.label ?? '')
+    if (action.route) {
+      if (action.route === 'cart') navigate('/cart')
+      else if (action.route === 'orders') navigate('/orders')
+      else if (action.route === 'address') navigate('/address')
+      else navigate(`/${action.route}`)
+      return
+    }
     if (type === 'address_form') {
-      navigate('/address')
+      setAddressForm(EMPTY_ADDRESS)
+      setShowAddressForm(true)
+    } else if (type === 'cart_qty' && action.cart_item_id) {
+      const qty = Number(action.quantity ?? 1)
+      if (qty >= 1) {
+        await setCartQuantity(String(action.cart_item_id), qty)
+        toast.success('数量已更新')
+      }
+    } else if (type === 'cart_remove' && action.cart_item_id) {
+      await removeCartItem(String(action.cart_item_id))
+      toast.success('已移出购物车')
+    } else if (type === 'sku_reselect') {
+      toast.info('请在购物车页重新选择规格')
+      navigate('/cart')
     } else if (type === 'sku_option' && action.product_id) {
       // 规格按钮带 product_id → 直连加购 API，省掉一轮 LLM 往返
       const skuId = action.sku_id ? String(action.sku_id) : null
@@ -168,25 +197,34 @@ export function ChatPage() {
     }
   }
 
+  const saveAddress = async () => {
+    if (!addressForm.name.trim() || !addressForm.phone.trim() || !addressForm.detail?.trim()) {
+      toast.info('请填写收货人、手机号和详细地址')
+      return
+    }
+    setSavingAddress(true)
+    try {
+      await api.createAddress(addressForm, getEffectiveUserId())
+      toast.success('地址已保存，可以继续下单了')
+      setShowAddressForm(false)
+    } catch {
+      toast.error('地址保存失败')
+    } finally {
+      setSavingAddress(false)
+    }
+  }
+
   const handleAddToCart = async (p: { product_id: string }) => {
+    if (!isLoggedIn) {
+      toast.info('登录后即可加入购物车')
+      navigate('/login', { state: { from: '/chat' } })
+      return
+    }
     const ok = await addToCart(p.product_id)
     if (ok) {
       fireOmi('added-to-cart')          // 欧米眨眼反馈（1.6s 后自动回落）
       toast.success('已加入购物车')
     }
-  }
-
-  const openInsights = (m: ChatMessage) => {
-    setInsight({
-      products: m.products,
-      decisionResults: m.decisionResults,
-      evidenceList: m.evidenceList,
-      traceSteps: m.traceSteps,
-      retrievalPlan: m.retrievalPlan,
-      sufficiencyReport: m.sufficiencyReport,
-      constraints: m.constraints,
-      harnessReport: m.harnessReport,
-    })
   }
 
   const headerTitle = useMemo(() => `${AGENT_NAME} · 购物智能体`, [])
@@ -197,6 +235,8 @@ export function ChatPage() {
     isStreaming,
     hasStreamingText: !!streamingText,
   })
+  const currentStatus = loadingMessage || `${AGENT_NAME}正在思考…`
+  const StatusIcon = statusIconFor(currentStatus)
 
   return (
     <div className="aurora-bg flex h-full flex-col">
@@ -241,7 +281,7 @@ export function ChatPage() {
                   onProductClick={(id) => openSpotlight(id)}
                   onAddToCart={handleAddToCart}
                   onAskAgent={askAgent}
-                  onOpenInsights={openInsights}
+                  onCompareProduct={(id, title) => askAgent(id, title, true)}
                   onActionClick={handleAction}
                   onOptionClick={send}
                   onPlayTTS={playTTS}
@@ -254,29 +294,32 @@ export function ChatPage() {
               <div className="flex gap-2.5 animate-fade-in">
                 <OmiAppIcon size={38} phase={omiVisual.phase} shape="circle" />
                 <div className="flex min-w-0 max-w-[calc(100%-3rem)] flex-col gap-2">
-                  {/* 思考-行动轨迹（P2 卡片流：完成步打勾、当前步 spinner+光环） */}
-                  {!streamingText && statusTrail.length > 1 && (
-                    <AgentTrail steps={statusTrail} />
-                  )}
                   <div className="glass w-fit max-w-full rounded-tl-md px-4 py-3">
                     {streamingText ? (
-                      <p className="markdown-body whitespace-pre-wrap typing-cursor">
-                        {streamingText}
-                      </p>
+                      <div className="markdown-body typing-cursor">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {renderStreamingMarkdown(streamingText)}
+                        </ReactMarkdown>
+                      </div>
                     ) : (
-                      <div className="flex items-center gap-2.5 text-sm text-brand-700">
-                        <span className="flex gap-1">
-                          <span className="dot-bounce" />
-                          <span className="dot-bounce" />
-                          <span className="dot-bounce" />
+                      <div
+                        key={currentStatus}
+                        aria-live="polite"
+                        className="flex items-center gap-2.5 text-sm text-brand-700 animate-fade-in"
+                      >
+                        <span className="gradient-brand flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white shadow-glow">
+                          <StatusIcon size={16} aria-hidden="true" />
                         </span>
-                        {loadingMessage || `${AGENT_NAME}正在思考…`}
+                        <span>{currentStatus}</span>
+                        <Loader2 size={15} className="shrink-0 animate-spin text-brand-500" aria-hidden="true" />
                       </div>
                     )}
                   </div>
                 </div>
               </div>
             )}
+            {/* 推荐卡已在 SSE 中锁定，但不抢在回答前打断阅读。先完成实时文字，
+                再把同一份受控结果作为完整消息落盘并统一展示。 */}
             <div ref={bottomRef} />
           </div>
         )}
@@ -285,16 +328,6 @@ export function ChatPage() {
       <ChatInput onSend={send} disabled={isStreaming} />
 
       <ConversationHistory open={historyOpen} onClose={() => setHistoryOpen(false)} />
-      <Modal
-        open={!!insight}
-        onClose={() => setInsight(null)}
-        title={`${AGENT_NAME}的推理过程`}
-        variant={desktopWorkspace ? 'right' : 'bottom'}
-        className={desktopWorkspace ? 'max-w-[420px]' : 'sm:max-w-2xl'}
-      >
-        <div className="h-[70vh]">{insight && <AgentInsights data={insight} />}</div>
-      </Modal>
-
       {spotlight && (
         <ProductSpotlight
           product={spotlight.product}
@@ -308,6 +341,18 @@ export function ChatPage() {
           onAddToCart={(id) => handleAddToCart({ product_id: id })}
         />
       )}
+
+      {/* 内联收货地址填写 */}
+      <Modal open={showAddressForm} onClose={() => setShowAddressForm(false)} title="填写收货地址" variant="bottom">
+        <div className="p-5">
+          <AddressForm
+            value={addressForm}
+            onChange={setAddressForm}
+            saving={savingAddress}
+            onSubmit={saveAddress}
+          />
+        </div>
+      </Modal>
     </div>
   )
 }

@@ -276,6 +276,15 @@ class MemCartRepository:
         cart.items = [i for i in cart.items if i.cart_item_id != cart_item_id]
         return len(cart.items) < prev_len
 
+    def batch_remove(self, cart_item_ids: list[str], user_id: str = DEMO_USER_ID) -> int:
+        if not cart_item_ids:
+            return 0
+        cart = self._get_or_create(user_id)
+        ids = set(cart_item_ids)
+        prev_len = len(cart.items)
+        cart.items = [i for i in cart.items if i.cart_item_id not in ids]
+        return prev_len - len(cart.items)
+
     def select_all(self, selected: bool, user_id: str = DEMO_USER_ID) -> bool:
         cart = self._get_or_create(user_id)
         for item in cart.items:

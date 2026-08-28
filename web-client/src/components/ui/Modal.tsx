@@ -28,7 +28,11 @@ export function Modal({
   hideClose,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
   const titleId = useId()
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
   useEffect(() => {
     if (!open) return
     const previousFocus = document.activeElement as HTMLElement | null
@@ -37,8 +41,14 @@ export function Modal({
     const focusable = () => Array.from(panel?.querySelectorAll<HTMLElement>(
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ) ?? [])
+    const initialTarget = () => {
+      const formField = panel?.querySelector<HTMLElement>(
+        'input:not([disabled]), textarea:not([disabled]), select:not([disabled])',
+      )
+      return formField ?? focusable()[0] ?? panel
+    }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
       if (event.key !== 'Tab') return
       const items = focusable()
       if (!items.length) {
@@ -56,19 +66,23 @@ export function Modal({
     }
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
-    requestAnimationFrame(() => (focusable()[0] ?? panel)?.focus())
+    requestAnimationFrame(() => initialTarget()?.focus())
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = previousOverflow
       previousFocus?.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 
   const panelPos =
     variant === 'bottom'
-      ? 'items-end sm:items-center'
+      // Mobile keeps the natural bottom sheet.  On desktop a bottom sheet is
+      // still a compact form dialog, so it must be centred on both axes; using
+      // only ``items-center`` centred the vertical axis while flex kept it
+      // pinned to the left edge.
+      ? 'items-end sm:items-center sm:justify-center'
       : variant === 'right'
         ? 'items-stretch justify-end'
         : 'items-center justify-center'

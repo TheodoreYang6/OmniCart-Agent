@@ -30,18 +30,35 @@ object MockDemoData {
 
     fun buildDemoDecisions(): List<DecisionResult> = listOf(
         DecisionResult(
-            productId = "p_digital_007", finalScore = 0.89, displayScore = 8.9,
-            scoreBreakdown = ScoreBreakdown(0.80, 0.95, 0.90, 0.93, 0.80, 1.0, 0.15),
+            productId = "p_digital_007",
             evidenceIds = listOf("E-MKT-p_digital_007", "R-p_digital_007-0", "R-p_digital_007-1"),
             riskFactors = listOf("价格较高 ¥1899", "仅适配苹果生态"),
             recommendationReason = "Apple旗舰TWS，H3芯片+自适应降噪",
+            recommendationLevel = "strong_recommend",
+            recommendationScore = RecommendationScore(
+                version = "omi_recommendation_v1", score = 91, matchLabel = "高度匹配",
+                evidenceLabel = "证据充分", informationStatus = "资料较完整",
+                dimensions = listOf(
+                    RecommendationScoreDimension("need_fit", "需求契合", 94, "已通过本次需求筛选"),
+                    RecommendationScoreDimension("budget_fit", "预算适配", 86, "处于舒适预算区间"),
+                    RecommendationScoreDimension("information", "资料完整", 86, "资料较完整"),
+                ),
+            ),
         ),
         DecisionResult(
-            productId = "p_digital_009", finalScore = 0.86, displayScore = 8.6,
-            scoreBreakdown = ScoreBreakdown(0.88, 0.90, 0.88, 0.87, 0.75, 1.0, 0.12),
+            productId = "p_digital_009",
             evidenceIds = listOf("E-MKT-p_digital_009", "R-p_digital_009-0"),
             riskFactors = listOf("部分用户反馈佩戴不稳"),
             recommendationReason = "华为旗舰TWS，Hi-Res认证+静谧通话",
+            recommendationLevel = "recommended",
+            recommendationScore = RecommendationScore(
+                version = "omi_recommendation_v1", score = 77, matchLabel = "较匹配",
+                evidenceLabel = "资料较完整", informationStatus = "资料较完整",
+                dimensions = listOf(
+                    RecommendationScoreDimension("need_fit", "需求契合", 76, "符合主要需求，可作备选"),
+                    RecommendationScoreDimension("information", "资料完整", 86, "资料较完整"),
+                ),
+            ),
         ),
     )
 

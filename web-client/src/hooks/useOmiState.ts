@@ -90,10 +90,10 @@ export function useOmiState(input: OmiStateInput) {
   return { visual, fire, feedback }
 }
 
-/** 商品评分 → 卡片场景表情（Spotlight 打开时用；≥9.2 才给星星眼，避免滥用） */
-export function omiExpressionForScore(displayScore?: number): OmiExpression {
-  if (typeof displayScore !== 'number') return 'happy'
-  if (displayScore >= 9.2) return 'star'
-  if (displayScore >= 8.5) return 'happy'
-  return 'thinking'
+/** 匹配结论 → 卡片场景表情。数值评分已退出用户体验，不能再驱动角色反馈。 */
+export function omiExpressionForMatch(level?: string): OmiExpression {
+  if (level === 'strong_recommend') return 'star'
+  if (level === 'recommended') return 'happy'
+  if (level === 'worth_considering' || level === 'cautious') return 'thinking'
+  return 'happy'
 }

@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     # ---- Qwen API（模型名在 model_gateway/model_config.yaml 管理）----
     qwen_api_key: str = Field("", validation_alias="QWEN_API_KEY")
     qwen_base_url: str = Field("https://dashscope.aliyuncs.com/api/v1", validation_alias="QWEN_BASE_URL")
+    asr_model: str = Field("qwen3-asr-flash", validation_alias="OMNICART_ASR_MODEL")
+    asr_timeout: float = Field(30.0, validation_alias="OMNICART_ASR_TIMEOUT")
 
     # ---- DeepSeek API（OpenAI 兼容；文本类能力备选提供商，deepseek* 模型名自动路由）----
     deepseek_api_key: str = Field("", validation_alias="DEEPSEEK_API_KEY")
@@ -90,8 +92,11 @@ class Settings(BaseSettings):
     # 默认 true；仅 deep_think=true 的请求进入 ReAct Loop（深度思考模式），
     # 默认链路仍为 pipeline。关闭可整体禁用深度思考能力。
     enable_agent_loop: bool = Field(True, validation_alias="OMNICART_ENABLE_AGENT_LOOP")
-    agent_loop_max_rounds: int = Field(3, validation_alias="OMNICART_AGENT_LOOP_MAX_ROUNDS")
-    agent_loop_deep_rounds: int = Field(8, validation_alias="OMNICART_AGENT_LOOP_DEEP_ROUNDS")
+    # 常规推荐只允许一次检索/核对后的收敛机会；深度思考保留有限的多步核验。
+    # ``workflow.react.nodes.guard`` 还会施加不可绕过的硬上限，避免环境变量被误配
+    # 成长循环而拖慢整条 SSE 链路。
+    agent_loop_max_rounds: int = Field(2, validation_alias="OMNICART_AGENT_LOOP_MAX_ROUNDS")
+    agent_loop_deep_rounds: int = Field(5, validation_alias="OMNICART_AGENT_LOOP_DEEP_ROUNDS")
     reflect_max_retries: int = Field(1, validation_alias="OMNICART_REFLECT_MAX_RETRIES")
     demo_data_dir: str = Field("data", validation_alias="OMNICART_DEMO_DATA_DIR")
 
@@ -107,6 +112,9 @@ class Settings(BaseSettings):
     # ---- Decision Agent：证据评分 ----
     enable_decision_llm: bool = Field(False, validation_alias="OMNICART_ENABLE_DECISION_LLM")
     decision_llm_timeout: float = Field(3.0, validation_alias="OMNICART_DECISION_LLM_TIMEOUT")
+    # 最终自然语言回答允许短暂的云端波动，避免 6 秒即退回模板。
+    # 仍可通过环境变量按部署 SLA 调低；异常、空回答和 Guard 失败照常降级。
+    response_llm_timeout: float = Field(15.0, validation_alias="OMNICART_RESPONSE_LLM_TIMEOUT")
     enable_evidence_scoring: bool = Field(True, validation_alias="OMNICART_ENABLE_EVIDENCE_SCORING")
     score_version: str = Field("evidence_scoring_v1", validation_alias="OMNICART_SCORE_VERSION")
 
@@ -117,6 +125,18 @@ class Settings(BaseSettings):
     qdrant_url: str = Field("", validation_alias="QDRANT_URL")
     qdrant_collection_name: str = Field("products", validation_alias="QDRANT_COLLECTION_NAME")
     embedding_dimension: int = Field(1024, validation_alias="EMBEDDING_DIMENSION")
+    # V8 separates candidate discovery from evidence.  The legacy chunk index stays
+    # configured for rollback until v8 passes the shadow evaluation gate.
+    discovery_collection_name: str = Field("product_discovery_v8", validation_alias="OMNICART_DISCOVERY_COLLECTION")
+    evidence_collection_name: str = Field("product_evidence_v8", validation_alias="OMNICART_EVIDENCE_COLLECTION")
+    use_discovery_v8: bool = Field(False, validation_alias="OMNICART_USE_DISCOVERY_V8")
+    # V9：工具调用级的多视角商品 Chunk 检索。当前本地集合已完成真实构建和冒烟验证，
+    # 默认启用；环境变量设为 false 可立即回退 V6/V8。
+    v9_chunk_collection_name: str = Field("product_chunks_v9", validation_alias="OMNICART_V9_CHUNK_COLLECTION")
+    use_v9_chunk_retrieval: bool = Field(True, validation_alias="OMNICART_USE_V9_CHUNK_RETRIEVAL")
+    enable_v9_llm_filter: bool = Field(True, validation_alias="OMNICART_ENABLE_V9_LLM_FILTER")
+    v9_rerank_timeout: float = Field(4.0, validation_alias="OMNICART_V9_RERANK_TIMEOUT")
+    v9_filter_timeout: float = Field(8.0, validation_alias="OMNICART_V9_FILTER_TIMEOUT")
     use_chunked_index: bool = Field(False, validation_alias="OMNICART_USE_CHUNKED_INDEX")
     chunked_collection_name: str = Field("product_chunks", validation_alias="OMNICART_CHUNKED_COLLECTION")
 
@@ -213,12 +233,21 @@ CHUNKED_COLLECTION_NAME: str = settings.chunked_collection_name
 
 # 统一 chunk 单集合 + 混合检索开关 (V5)
 CHUNK_COLLECTION_NAME: str = settings.chunk_collection_name
+DISCOVERY_COLLECTION_NAME: str = settings.discovery_collection_name
+EVIDENCE_COLLECTION_NAME: str = settings.evidence_collection_name
+USE_DISCOVERY_V8: bool = settings.use_discovery_v8
+V9_CHUNK_COLLECTION_NAME: str = settings.v9_chunk_collection_name
+USE_V9_CHUNK_RETRIEVAL: bool = settings.use_v9_chunk_retrieval
+ENABLE_V9_LLM_FILTER: bool = settings.enable_v9_llm_filter
+V9_RERANK_TIMEOUT: float = settings.v9_rerank_timeout
+V9_FILTER_TIMEOUT: float = settings.v9_filter_timeout
 ENABLE_HYBRID: bool = settings.enable_hybrid
 ENABLE_RERANK: bool = settings.enable_rerank
 
 # Decision
 ENABLE_DECISION_LLM: bool = settings.enable_decision_llm
 DECISION_LLM_TIMEOUT: float = settings.decision_llm_timeout
+RESPONSE_LLM_TIMEOUT: float = settings.response_llm_timeout
 ENABLE_EVIDENCE_SCORING: bool = settings.enable_evidence_scoring
 SCORE_VERSION: str = settings.score_version
 

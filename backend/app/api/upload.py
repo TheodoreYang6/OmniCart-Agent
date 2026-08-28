@@ -17,7 +17,28 @@ MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
 
 @router.post("/api/upload", response_model=None)
 async def upload(file: UploadFile = File(...)):
-    contents = await file.read()
+    # 提前按 Content-Length 拒绝明显超大文件，避免无谓读取
+    content_length = file.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > MAX_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件过大: {int(content_length) / 1024 / 1024:.1f}MB。最大允许 {MAX_SIZE_MB}MB",
+        )
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_SIZE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件过大: {total / 1024 / 1024:.1f}MB。最大允许 {MAX_SIZE_MB}MB",
+            )
+        chunks.append(chunk)
+    contents = b"".join(chunks)
 
     # 先校验文件头魔数（不受客户端 content-type 欺骗）
     if not validate_image_magic(contents):
@@ -30,12 +51,6 @@ async def upload(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=400,
             detail=f"不支持的文件类型: {file.content_type}。仅支持 JPEG / PNG / WebP / GIF",
-        )
-
-    if len(contents) > MAX_SIZE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件过大: {len(contents) / 1024 / 1024:.1f}MB。最大允许 {MAX_SIZE_MB}MB",
         )
 
     # 生成唯一文件名，保留原始扩展名

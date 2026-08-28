@@ -1,599 +1,392 @@
 <p align="center">
-  <img src="design/app-icon/omnicart-omi-cart-store-512-v1.png" width="148" alt="欧米 · OmniCart Agent" />
+  <img src="design/app-icon/omnicart-omi-cart-store-512-v1.png" width="112" alt="欧米 OmniCart Agent" />
 </p>
 
-<h1 align="center">OmniCart Agent</h1>
+<h1 align="center">欧米 · OmniCart Agent</h1>
 
 <p align="center">
-  <strong>由欧米驱动的多模态电商购物智能体</strong>
-  <br />
-  从自然语言需求、商品检索与证据分析，到购物车、地址和订单的完整购物闭环
+  <strong>一个把“我想买什么”变成可信选择与可执行交易的多模态购物智能体。</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" alt="Python 3.11" />
-  <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=0B1220" alt="React 19" />
-  <img src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" alt="Vite 8" />
-  <img src="https://img.shields.io/badge/PostgreSQL-V011-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/Qdrant-Hybrid-DC244C" alt="Qdrant Hybrid" />
-  <img src="https://img.shields.io/badge/Redis-DB_1-DC382D?logo=redis&logoColor=white" alt="Redis" />
+  <img src="https://img.shields.io/badge/Agent-Controlled%20Shopping-4F6EF7?style=for-the-badge" alt="Controlled Shopping Agent" />
+  <img src="https://img.shields.io/badge/RAG-Product--Centric-0EA5A4?style=for-the-badge" alt="Product Centric RAG" />
+  <img src="https://img.shields.io/badge/Streaming-SSE-F59E0B?style=for-the-badge" alt="SSE" />
+  <img src="https://img.shields.io/badge/Clients-Web%20%2B%20Android-111827?style=for-the-badge" alt="Web and Android" />
 </p>
 
-<p align="center">
-  <a href="#快速开始">快速开始</a> ·
-  <a href="#系统架构">系统架构</a> ·
-  <a href="#功能与页面">功能与页面</a> ·
-  <a href="#api-速查">API</a> ·
-  <a href="#测试与质量门禁">测试</a> ·
-  <a href="DEVELOPMENT.md">开发指南</a>
-</p>
+> 购物推荐不应只是“搜到一堆商品”。欧米以用户需求为起点，受控地完成理解、召回、筛选、核对、解释与交易动作，让推荐结果既有用，也有边界。
 
 ---
 
-## 项目简介
+## 项目愿景
 
-OmniCart Agent 不是只会回答问题的电商客服，而是一个能够理解需求、查找商品、展示证据并执行购物操作的 Agent 系统。
+欧米是面向真实购物场景构建的 Agentic Commerce 系统。它能理解自然语言、图片与语音输入：
 
-用户可以用文字、图片或语音告诉欧米自己的预算、用途、偏好和顾虑。系统会完成意图理解、查询改写、混合检索、语义精排、证据评分和流式生成，并把商品对比、推荐依据、风险提示和可执行操作一起返回。后续对话可以继续完成加购、修改数量、结算和订单查询。
+- 想买什么：把模糊偏好、预算、场景、避雷项拆成可执行的购物计划；
+- 哪些值得看：基于商品身份、规格、说明、FAQ 与评价进行商品级聚合，而不是只返回命中文本块；
+- 为什么推荐：给出适合原因、购买前注意点、资料状态与统一的适配指数；
+- 怎么继续：支持单品“问欧米”、同类横向对比、加购、结算、地址与订单闭环；
+- 能否持续理解：登录用户拥有受控会话上下文与偏好记忆，游客仍可匿名完成一次性推荐。
 
-当前仓库以 **React Web 客户端**为主要开发界面，同时保留 Kotlin + Jetpack Compose Android 客户端。后端由 FastAPI、LangGraph、PostgreSQL、Qdrant 和 Redis 组成，并支持本地 Embedding 与 Reranker 离线推理。
-
-### 当前实现基线
-
-| 模块 | 当前实现 |
-| --- | --- |
-| Web | React 19、TypeScript、Vite 8、React Query、Zustand、Tailwind CSS |
-| Android | Kotlin 2.0、Jetpack Compose、Material 3，`minSdk 26 / targetSdk 35` |
-| API | FastAPI 2.0.0 服务，REST + SSE，默认端口 `8006` |
-| Agent | LangGraph 工作流、动态编排、工具调用、深度思考模式、上下文压缩 |
-| 身份 | Web HttpOnly Cookie、游客签名身份、Android Bearer Token 兼容 |
-| 商品数据 | 8 个一级品类，共 1000 件商品，包含规格、FAQ、评价与派生字段 |
-| PostgreSQL | Alembic V001–V011，保存商品、用户、会话、偏好、购物车、地址和订单 |
-| Qdrant | `product_chunks_v7_hybrid`，1024 维 `dense` + BM25 `bm25` 命名向量 |
-| Redis | 项目独占 DB 1，用于搜索、视觉、改写和工作流缓存 |
-| 本地模型 | `Qwen3-Embedding-0.6B` + `bge-reranker-v2-m3`，支持 CUDA / MPS / CPU |
-| 在线模型 | Qwen Chat / Vision / Omni，文本任务可按模型名路由至 DeepSeek |
-
-> 模型权重、`.env`、虚拟环境和数据库运行数据不会提交到 Git。换电脑后需要按本文重新创建环境并下载模型。
-
----
+这不是一个把模型直接接到商品库上的聊天框，而是一条面向交付质量设计的购物决策链路。
 
 ## 核心能力
 
-### 从对话到购买的完整闭环
+| 能力 | 用户看到的体验 | 系统如何保证可靠 |
+| --- | --- | --- |
+| 常规推荐 | 快速给出首选、备选与简洁购买建议 | 一次受控 `shopping.search`，内部完成计划、召回、重排、闭集筛选与证据整理 |
+| 深度思考 | 复杂问题会逐步显示“正在理解 / 比对 / 核对 / 整理” | 有预算的 Agent Loop 按需调用工具，拦截重复与越权调用，收敛后统一交付 |
+| 精准商品识别 | “iPhone 15”“苹果 15”等表达不会被泛品类淹没 | 品牌、产品线、型号、规格与别名构成商品身份层，先锁定可信范围 |
+| 问欧米 | 聚焦一件商品，获得规格、口碑、风险与适用建议 | `shopping.product_dossier` 只接收已验证商品 ID，生成可追溯的单品档案 |
+| 同类横向对比 | 一键看懂同类商品差异与取舍 | 专用同类对比链路在相同细分类内做去重、价格带与特征对齐 |
+| 拍照识图 | 先说明图中识别到什么，再决定分析或推荐 | 视觉模型只提取身份线索；目录解析器在商品库中闭集匹配，不使用图片向量“猜商品” |
+| 语音购物 | 说出需求后进入与文字相同的推荐流程 | 专用 ASR 转写、音频格式校验与转写质量门控，随后复用同一 SSE 工作流 |
+| 交易闭环 | 加入购物车、下单、地址与订单管理 | 交易类工具与身份解析由服务端约束；游客可推荐，交易操作需要登录 |
 
-用户可以先说“推荐一款 500 元以内的降噪耳机”，再继续说“比较前两个”“把第二个加入购物车”“数量改成 2”“用默认地址下单”。欧米会保持会话上下文，并把自然语言指令转换为真实业务操作。
+## 从一句话到一份购物建议
 
-### 可解释、可追溯的 RAG
+```mermaid
+flowchart LR
+    U[文字 / 图片 / 语音] --> I[输入理解与身份解析]
+    I --> P[Router Plan\n目标 · 约束 · 分组 · 证据关注点]
+    P --> S[shopping.search]
+    S --> R[多视角 Chunk 召回]
+    R --> A[按 product_id 聚合]
+    A --> RR[本地 Reranker]
+    RR --> F[闭集 LLM Filter]
+    F --> E[证据包 + 推荐简报]
+    E --> G[Guard 一致性校验]
+    G --> SSE[SSE 流式交付]
+    SSE --> C[Web / Android]
+```
 
-检索结果不会直接交给大模型自由发挥。系统将商品描述、规格、FAQ、评论和视觉结果转换为证据，推荐结论通过 `evidence_ids` 与原始数据绑定。Decision 与 Verification 层继续检查价格、品牌、风险和证据覆盖，减少商品幻觉与无依据推荐。
+### 1. 先理解任务，而不是急着搜
 
-### Dense + BM25 混合检索
+`Router Plan` 将一次输入变成结构化购物任务：意图、检索分组、每组检索词、实体词、必须满足的条件、偏好、避雷项、证据关注点、回答目标与歧义状态。
 
-Qwen3 Embedding 负责 1024 维语义召回，中文 BM25 稀疏向量补充精确词面信号。Qdrant 使用 `Prefetch + FusionQuery(RRF)` 完成服务端融合，并通过品类、子品类、价格、评分和块类型 payload 索引过滤。混合检索不可用时自动降级为纯 Dense；Qdrant 不可用时仍可降级到本地缓存。
+多目标请求不会被压成一个模糊 Query。例如“想买好吃的好喝的，但不想太有负担”可以被表达为相互独立的零食与饮品分组；任一分组缺失时，系统会如实说明，而不是悄悄漏掉半个需求。
 
-### 本地模型优先
+### 2. 用商品级检索替代“命中一段文本就推荐”
 
-- `Qwen3-Embedding-0.6B`：查询侧使用检索指令前缀，输出 L2 归一化的 1024 维向量。
-- `bge-reranker-v2-m3`：默认 Cross Encoder 精排器。
-- `Qwen3-Reranker-0.6B`：当设置 `OMNICART_RERANKER=qwen3` 时作为兼容回退。
-- 模型按需加载并在服务启动后后台预热，CUDA 与 MPS 使用半精度推理。
+当前主检索使用 **V9 多视角商品 Chunk 索引**。每个 Chunk 都携带商品身份锚点、类目、价格与来源定位，并最终按 `product_id` 聚合：
 
-### 可信身份与跨端兼容
+| Chunk 类型 | 内容 | 在决策中的角色 |
+| --- | --- | --- |
+| `identity` | 标题、品牌、类目、价格、SKU 规格 | 锁定商品身份与硬信息 |
+| `facts` | 可回溯的结构化属性 | 支持规格与约束判断 |
+| `marketing` | 按语义边界切分的商品说明 | 解释核心卖点与使用场景 |
+| `faq` | 官方问答单元 | 回答使用、规格与兼容性问题 |
+| `review` | 原始用户评价片段 | 提供真实体验信号 |
+| `review_aspect` | 可回溯的好评体验 / 使用注意聚合 | 在不淹没上下文的前提下呈现口碑与风险 |
 
-Web 使用签名 HttpOnly Cookie，不再信任请求参数中的 `user_id`。身份解析顺序为：
+一次 `shopping.search` 的执行边界清晰：
 
-1. Bearer Token（Android 与 API 客户端）；
-2. 登录 Cookie；
-3. 游客 Header / Cookie；
-4. 显式开启时才允许旧式 `user_id`。
+```text
+该次工具 Query + Router 子目标
+  → 一次 Query Embedding
+  → Dense / 必要时 Dense + Sparse Chunk 召回
+  → Top 100 Chunk 按商品聚合为 Top 24
+  → 本地 BGE Reranker 压缩至 Top 12
+  → 闭集 LLM Filter
+  → 并行整理证据与评分
+  → 返回受控商品结果
+```
 
-游客可以浏览商品、聊天和使用购物车；订单、地址、偏好等能力要求登录。登录或注册后，游客购物车按 `product_id + sku_id` 合并到用户购物车。
+评论、FAQ 与说明都会参与检索，但不会让一条孤立评论决定商品排序；商品身份、规格和跨来源支持会共同参与聚合。
 
-### 可恢复的前端交互
+### 3. 让 LLM 做擅长的判断，并限制它不该做的事
 
-- SSE 支持 UTF-8 尾块、多行 `data`、异常帧、中止与幂等完成。
-- 历史会话切换、退出登录或新建会话后，旧请求不能回写当前页面。
-- 商品搜索、分类与分页写入 URL，可刷新、返回和分享。
-- 购物车使用逐项 pending、乐观更新、最新意图合并和精确失败回滚。
-- 页面级懒加载、统一错误边界、正式 404、键盘操作和低动效模式均已接入。
+LLM 在欧米中不是不受限制的“裁判”。它只在候选已经缩小后进行闭集决策：
 
----
+- 只能从本次 Top 12 候选中返回商品 ID；
+- 明确区分首选、备选、有条件匹配与排除；
+- 必须考虑预算、硬约束、避雷项和资料缺口；
+- 不得臆造库外商品、型号、价格或健康功效；
+- 非法 JSON、超时或越权 ID 会被服务端校验拦截，并稳定降级到已重排候选。
 
-## 系统架构
+最终结果会进一步收敛为“推荐简报”。正文、主推卡、备选卡、单品分析与证据范围都从同一份简报出发，再经 Guard 校验，避免“说的是 A，卡片却是 B”。
+
+## 两种工作模式，同一份交付标准
+
+| | 常规推荐 | 深度思考 |
+| --- | --- | --- |
+| 适用场景 | 日常选购、明确需求、快速决策 | 多目标、需要反复核对、对比或复杂追问 |
+| 编排方式 | Router 后执行一次受控搜索批次 | Router 与可信范围初始化后进入有限 Agent Loop |
+| 工具调用 | 固定、少而稳 | 按需调用，但受轮次、工具预算与重复签名限制 |
+| 可见过程 | 单个动态进度状态 | 同样只展示用户友好的阶段，不展示思维链、工具参数或 scratchpad |
+| 最终交付 | 首选 / 备选、证据状态、流式自然语言 | 与常规模式相同的推荐简报、卡片协议与 Guard |
+
+深度模式的运行时借鉴了现代 Agent harness 的分层思想，将能力拆为：
+
+```text
+ToolPolicy → ToolExecutor → ToolResult Reducer → StopPolicy
+```
+
+`ToolPolicy` 在调用前校验 schema、权限、锁定商品范围、预算与语义重复；调用后由 Reducer 有序合并候选组、证据和状态补丁。失败只记录为可理解的原因，不会覆盖已经成功的结果。`StopPolicy` 在需求已覆盖、信息不再增益或预算耗尽时强制收敛到回答。
+
+## 多模态不是“多一个上传按钮”
+
+### 图片：实体锁定优先
+
+视觉链路不使用图像 Embedding 去相似搜索商品图。商品图、海报与拍摄环境往往不稳定，图片相似不等于商品身份相同。欧米采用：
+
+```text
+图片预处理 → 视觉实体提取 → VisualCatalogResolver 目录匹配
+  ├─ exact_product：锁定商品，进入单品档案
+  ├─ product_family：展示同系列版本，请用户确认
+  └─ ambiguous / no_match：先说明已识别线索，再进入受约束的同类推荐
+```
+
+目录匹配只使用品牌、商品名、产品线、型号、规格、SKU、类目与别名，排序优先级为“型号精确 > 品牌一致 > 名称/别名相似 > 规格一致 > 类目一致”。因此系统会诚实地区分“已锁定商品”与“未确认具体型号”。
+
+### 语音：转写后走同一条购物链路
+
+语音输入由 `qwen3-asr-flash` 转写，服务端校验真实音频容器、大小与时长，并对不含有效购物语义或带有服务提示污染的结果进行门控。转写成功后，文本会进入和键盘输入完全一致的 SSE 推荐工作流；不会额外分叉一套“语音推荐逻辑”。
+
+## 一份干净、连续、可审计的回答上下文
+
+最终回答模型只从 `ConversationContextAssembler` 获得单一 `AnswerContext`。其优先级如下：
+
+1. 当前用户问题、Router Plan、硬约束与本轮交付目标；
+2. 当前会话检查点：已确认需求、预算/避雷、锁定商品、已做决定与待确认事项；
+3. 最近两个完整的用户—助手回合；
+4. 本轮已校验的推荐简报、证据包与受控卡片范围；
+5. 与本轮相关且未过期的登录用户偏好；
+6. 必要的视觉识别结论等外部事实。
+
+原始工具参数、工具全文、过期候选、ReAct 草稿和 scratchpad 不会被注入最终回答。会话消息是事实源；检查点是可版本化、可重建的上下文投影。这样既能处理“第二款便宜一点”“换个颜色”等连续追问，也能在用户明确换品类时干净地结束旧约束。
+
+## 评分：展示给用户的不是检索分
+
+向量相似度、重排分和 LLM 过滤结论各有用途，但都不应直接冒充“商品质量分”。欧米将它们分离：
+
+- `retrieval_rank`：只用于候选排序；
+- `filter_verdict`：首选 / 备选 / 有条件匹配 / 排除的闭集购物判断；
+- `evidence_status`：资料是否足以支撑当前判断；
+- **欧米适配指数**：基于本次需求契合、预算适配与资料完整度的可复算评分，仅表示“这件商品对这次需求值不值得优先看”。
+
+卡片和详情页同时展示适配指数、文字化匹配标签、证据状态、适合原因与注意点。超预算、硬条件未满足或明确避雷的商品不能被资料多、价格低等信号“冲成高分”。
+
+## 流式交付协议
+
+Web 与 Android 消费同一套公开 SSE 事件语义，后端协议标识为 `chat_event_v1`：
+
+```text
+stage → visual_result → recommendations → focus_analysis / comparison → token → result → done
+```
+
+- `stage`：只输出“正在理解需求 / 正在挑选商品 / 正在核对依据 / 正在整理建议”等可理解状态；
+- `recommendations`：携带首选、备选、评分、证据与分组状态；
+- `focus_analysis` / `comparison`：承载单品档案或同类横向对比；
+- `token`：真实模型输出的增量文本；
+- `result`：包含可持久化的完整受控结果；
+- `done`：标记请求完成。
+
+客户端布局可不同，但操作逻辑一致：图片、短标题、价格、匹配标签、证据状态、适合原因、注意点、问欧米、同类横向对比和购物动作使用同一份数据契约。
+
+## 技术架构
 
 ```mermaid
 flowchart TB
-    subgraph Clients[客户端]
-        Web[React Web<br/>Chat · Shop · Cart · Profile]
-        Android[Android Compose<br/>Bearer Token 兼容]
+    subgraph Clients[体验层]
+      WEB[React + TypeScript + Vite]
+      ANDROID[Android · Kotlin + Compose]
     end
 
-    Web -->|Cookie · REST · SSE| API
-    Android -->|Bearer · REST · SSE| API
-
-    subgraph Backend[FastAPI Backend :8006]
-        API[API / Actor Resolver]
-        Workflow[LangGraph Workflow]
-        Tools[Shopping Tools]
-        Memory[Memory / Context]
-        Verify[Evidence / Verification]
-        Gateway[Model Gateway]
-        API --> Workflow
-        Workflow <--> Tools
-        Workflow <--> Memory
-        Workflow --> Verify
-        Workflow <--> Gateway
+    subgraph API[服务层 · FastAPI]
+      SSE[Agent Stream / SSE]
+      AUTH[身份与会话]
+      COMMERCE[购物车 · 地址 · 结算 · 订单]
+      MEDIA[图片上传 · 语音转写]
     end
 
-    Gateway --> LocalModels[Qwen3 Embedding<br/>BGE Reranker]
-    Gateway --> CloudModels[Qwen / DeepSeek<br/>Chat · Vision · Voice]
-    API --> PostgreSQL[(PostgreSQL)]
-    Workflow --> Qdrant[(Qdrant<br/>Dense + BM25)]
-    Workflow --> Redis[(Redis DB 1)]
+    subgraph Agent[智能体运行时]
+      ROUTER[Router / Entity Resolver]
+      LOOP[Controlled Agent Loop]
+      TOOLS[shopping.search · dossier · compare · commerce]
+      CONTEXT[Conversation Context Assembler]
+      GUARD[Recommendation Guard]
+    end
+
+    subgraph Data[数据与模型]
+      PG[(PostgreSQL\n商品 · 身份 · 会话 · 交易)]
+      QD[(Qdrant\nV9 Product Chunks)]
+      REDIS[(Redis\n短缓存)]
+      MODELS[Chat / Vision / ASR\nEmbedding / Reranker]
+    end
+
+    WEB --> SSE
+    ANDROID --> SSE
+    SSE --> ROUTER --> LOOP --> TOOLS
+    LOOP --> CONTEXT --> GUARD --> SSE
+    TOOLS --> PG
+    TOOLS --> QD
+    TOOLS --> REDIS
+    ROUTER --> MODELS
+    TOOLS --> MODELS
 ```
 
-### Agent 主链路
-
-```text
-Request
-  │
-  ├─ Router ──────────────── 意图、约束、模式与检索计划
-  ├─ Visual（可并行） ────── 图片理解与商品映射
-  ├─ Retrieval ───────────── 语义 / 关键词 / 补充证据召回
-  ├─ Reranker ────────────── BGE 语义精排与商品融合
-  ├─ Evidence Check ──────── 证据充分性检查
-  ├─ Decision ────────────── 多维评分、风险与推荐等级
-  ├─ Response ────────────── 流式回答、商品与操作卡片
-  └─ Guard ───────────────── 品牌、价格、风险和答案一致性校验
-```
-
-对于购物车、地址、订单和库存意图，工作流会调用受身份约束的 Shopping Tools。深度思考请求可以进入多轮 OmniAgent Loop；普通请求继续使用低延迟 Pipeline。
-
-### 代码分层
-
-后端遵循“框架与实现分离”的边界：
-
-| 层 | 目录 | 责任 |
-| --- | --- | --- |
-| Framework | `backend/app/framework/` | 检索、记忆、上下文、工具、技能和编排协议 |
-| Providers | `backend/app/providers/` | 业务召回源、记忆实现、工具实现和外部能力适配 |
-| Agents | `backend/app/agents/` | Router、Visual、Retrieval、Decision、Response、Shop Action |
-| Workflow | `backend/app/workflow/` | LangGraph 状态、节点与主图编排 |
-| Gateway | `backend/app/model_gateway/` | 本地与在线模型路由、超时、重试和降级 |
-| Data | `models/`、`repositories/`、`services/` | ORM、仓储与业务服务 |
-| API | `backend/app/api/` | 认证、商品、对话、购物闭环、语音、评测与可观测接口 |
-
-更完整的边界说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 和 [MODULES.md](MODULES.md)。
-
----
-
-## 功能与页面
-
-### Web 页面
-
-| 路由 | 功能 | 访问要求 |
-| --- | --- | --- |
-| `/chat` | 欧米对话、图片/语音输入、证据、推理和商品分析 | 游客可用 |
-| `/shop` | 商品搜索、分类筛选、分页与 URL 状态恢复 | 游客可用 |
-| `/product/:productId` | 商品详情、AI 总结、加购与聚焦分析 | 游客可用 |
-| `/cart` | 数量、选择、删除、结算摘要与并发安全更新 | 游客可用 |
-| `/profile` | 宽屏个人工作台、订单/地址/偏好摘要 | 游客 / 用户差异展示 |
-| `/orders` | 历史订单 | 需要登录 |
-| `/address` | 收货地址管理 | 需要登录 |
-| `/preferences` | 结构化购物偏好与欧米记忆 | 需要登录 |
-| `/login` | 登录、注册、游客购物车合并与返回路径 | 公开 |
-
-`/brand` 只在 Vite 开发环境注册，用于欧米品牌组件预览；生产构建不会暴露该页面。
-
-### 欧米品牌系统
-
-当前欧米形象统一用于 README、Web 导航、欢迎页、登录页、状态反馈和移动端图标。组件支持空闲、倾听、搜索、思考、说话、成功、加购、下单和错误等状态，并在 `prefers-reduced-motion` 下关闭非必要动画。
-
-最终素材位于：
-
-- `design/app-icon/`：移动应用图标源文件；
-- `design/brand/omi-perch-transparent-v4.png`：当前趴姿欧米透明源图；
-- `web-client/public/brand/`：供浏览器使用的 AVIF、WebP 和 PNG 响应式版本。
-
----
-
-## 快速开始
-
-以下流程是当前项目的主要开发路径：**Windows + Conda + 本地 PostgreSQL / Qdrant / Memurai**。Docker 文件仍保留在仓库中，但不作为本地开发的默认步骤。
-
-### 1. 准备环境
-
-- Git
-- Conda / Miniconda
-- Python 3.11
-- Node.js 20.19+、22.12+ 或当前 LTS
-- PostgreSQL Windows 服务
-- Qdrant Windows x64
-- Memurai Developer 或兼容 Redis 服务
-- NVIDIA GPU 可选；本地模型也可以在 CPU 上运行，但速度会明显降低
-
-### 2. 克隆并安装依赖
-
-```powershell
-git clone https://github.com/TheodoreYang6/OmniCart-Agent.git
-Set-Location OmniCart-Agent
-
-conda create -n omnicart python=3.11 -y
-conda activate omnicart
-python -m pip install -r requirements.txt
-
-Copy-Item .env.example .env
-
-Set-Location web-client
-npm ci
-Set-Location ..
-```
-
-如需 RTX 50 系显卡支持，请根据本机驱动从 PyTorch 官方 CUDA 源安装匹配版本，再验证：
-
-```powershell
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
-```
-
-### 3. 准备本地模型
-
-模型不进入 Git 仓库。默认目录结构为：
-
-```text
-D:\OmniCart-Agent-runtime\models\
-├── Qwen3-Embedding-0.6B\
-└── bge-reranker-v2-m3\
-```
-
-对应 Hugging Face 仓库：
-
-- `Qwen/Qwen3-Embedding-0.6B`
-- `BAAI/bge-reranker-v2-m3`
-
-下载后确认 `.env` 包含：
-
-```dotenv
-OMNICART_MOCK_MODE=false
-OMNICART_USE_LOCAL_MODELS=true
-OMNICART_MODELS_DIR=D:/OmniCart-Agent-runtime/models
-OMNICART_RERANKER=bge
-EMBEDDING_DIMENSION=1024
-```
-
-### 4. 配置本机服务
-
-从模板复制得到的 `.env` 已包含完整键名。必须在本机修改 PostgreSQL 密码和会话密钥：
-
-```dotenv
-OMNICART_SESSION_SECRET=请替换为至少32字节的随机值
-DATABASE_URL=postgresql+asyncpg://omnicart:本机密码@127.0.0.1:5432/omnicart
-QDRANT_URL=http://127.0.0.1:6333
-QDRANT_COLLECTION_NAME=product_chunks_v7_hybrid
-OMNICART_CHUNK_COLLECTION=product_chunks_v7_hybrid
-REDIS_URL=redis://127.0.0.1:6379/1
-```
-
-不要提交 `.env`。仓库只维护不含密钥的 [.env.example](.env.example)。
-
-### 5. 启动本地基础设施
-
-已经完成 PostgreSQL、Qdrant 和 Memurai 安装与配置时，可以双击：
-
-```text
-start-databases.bat
-```
-
-或在 PowerShell 中运行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start-local-infra.ps1
-```
-
-脚本会检查并启动：
-
-| 服务 | 地址 | 数据用途 |
-| --- | --- | --- |
-| PostgreSQL | `127.0.0.1:5432` | 业务数据与用户状态 |
-| Qdrant | `127.0.0.1:6333 / 6334` | Dense / BM25 商品块索引 |
-| Redis / Memurai | `127.0.0.1:6379/1` | 项目缓存 |
-
-该脚本负责启动已安装的服务，不负责下载安装数据库或模型。
-
-### 6. 首次初始化数据
-
-```powershell
-alembic upgrade head
-
-$env:PYTHONPATH = "backend"
-python scripts/seed_postgresql.py
-python scripts/index_product_chunks.py --recreate
-```
-
-`alembic upgrade head` 应到达 V011。种子脚本导入 1000 件商品；分块索引脚本根据 `.env` 创建 V7 混合集合。完整重算 10066 个商品块的本地 Embedding 会花费较长时间，请避免无必要地重复 `--recreate`。
-
-如果已有 V6 Dense 集合，可以使用迁移脚本复用 Dense 向量并补充 BM25：
-
-```powershell
-$env:PYTHONPATH = "backend"
-python scripts/migrate_v6_to_v7_hybrid.py --dry-run
-python scripts/migrate_v6_to_v7_hybrid.py
-```
-
-### 7. 启动项目
-
-一键启动前后端并检查三个本地服务：
-
-```powershell
-conda activate omnicart
-python run.py
-```
-
-也可以分别启动：
-
-```powershell
-# 终端 1：后端
-Set-Location backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8006 --reload
-
-# 终端 2：前端
-Set-Location web-client
-npm run dev
-```
-
-打开：
-
-- Web：<http://127.0.0.1:5173>
-- API 文档：<http://127.0.0.1:8006/docs>
-- 健康检查：<http://127.0.0.1:8006/api/health>
-
-完整模式下健康检查应包含：
-
-```json
-{
-  "status": "ok",
-  "service": "omnicart-agent",
-  "version": "2.0.0",
-  "postgres": "connected",
-  "qdrant": "connected",
-  "redis": "connected"
-}
-```
-
-### 轻量 MOCK 模式
-
-只开发 UI 或 API 契约时，可以在 `.env` 中关闭本地模型并清空外部连接：
-
-```dotenv
-OMNICART_MOCK_MODE=true
-OMNICART_USE_LOCAL_MODELS=false
-DATABASE_URL=
-QDRANT_URL=
-REDIS_URL=
-```
-
-服务会使用 Mock Model 与本地数据降级路径，但登录、持久化、真实向量搜索和完整订单能力需要对应基础设施。
-
----
-
-## 配置说明
-
-### 后端关键变量
-
-| 变量 | 建议值 / 作用 |
+| 层级 | 主要实现 |
 | --- | --- |
-| `OMNICART_HOST` | 后端监听地址，默认 `127.0.0.1` |
-| `OMNICART_PORT` | 后端端口，当前为 `8006` |
-| `OMNICART_SESSION_SECRET` | Cookie 与游客身份签名密钥，必须自行生成 |
-| `OMNICART_CORS_ORIGINS` | 允许携带凭据的明确 Web 来源列表 |
-| `OMNICART_ALLOW_LEGACY_USER_ID` | 是否信任旧式 `user_id`，默认 `false` |
-| `OMNICART_MOCK_MODE` | 使用 Mock Model，完整模式设为 `false` |
-| `OMNICART_USE_LOCAL_MODELS` | 是否启用本地 Embedding / Reranker |
-| `OMNICART_MODELS_DIR` | 两个本地模型的父目录 |
-| `OMNICART_RERANKER` | `bge` 默认；`qwen3` 使用兼容回退 |
-| `DATABASE_URL` | PostgreSQL SQLAlchemy Async URL |
-| `QDRANT_URL` | Qdrant HTTP 地址 |
-| `OMNICART_CHUNK_COLLECTION` | 当前检索集合名 |
-| `OMNICART_ENABLE_HYBRID_RETRIEVAL` | 是否发送 BM25 稀疏查询 |
-| `OMNICART_ENABLE_RERANK` | 是否启用语义精排 |
-| `REDIS_URL` | Redis 连接地址，当前项目使用 DB 1 |
-| `QWEN_API_KEY` | Chat / Vision / Voice 等在线能力密钥，可留空 |
-| `DEEPSEEK_API_KEY` | DeepSeek 兼容文本模型密钥，可留空 |
+| 后端 | Python 3.11+、FastAPI、Pydantic Settings、SQLAlchemy Async、Alembic、LangGraph |
+| 检索 | Qwen Embedding、Qdrant、可选 Sparse / RRF、本地 BGE Reranker、商品级聚合与闭集 LLM Filter |
+| 数据 | PostgreSQL、Redis、Qdrant；商品身份、别名、SKU、RAG 知识与会话检查点分层存储 |
+| Web | React、TypeScript、Vite、Zustand、TanStack Query、Tailwind CSS |
+| Android | Kotlin、Jetpack Compose、Material 3、Retrofit / OkHttp、Coil |
+| 可观测性 | 请求追踪、工具账本、上下文 Manifest、候选范围、Filter、评分、Guard 与降级原因的受控记录 |
 
-完整模板见 [.env.example](.env.example)，强类型定义见 [backend/app/core/config.py](backend/app/core/config.py)。
-
-### 前端变量
-
-复制 `web-client/.env.example` 为 `web-client/.env.local`：
-
-```dotenv
-VITE_API_BASE=
-```
-
-本地开发留空即可，Vite 会把 `/api` 与 `/images` 代理到 `http://127.0.0.1:8006`。生产构建时再设置真实可访问的后端地址。
-
----
-
-## API 速查
-
-FastAPI 自动文档位于 `/docs`。当前应用注册了 17 个 API 路由模块和 60 余个 HTTP 端点，主要入口如下：
-
-| 能力 | 方法与路径 | 说明 |
-| --- | --- | --- |
-| 健康检查 | `GET /api/health` | PostgreSQL、Qdrant、Redis 实际连接状态 |
-| 游客身份 | `POST /api/auth/guest` | 建立签名游客 Cookie 与令牌 |
-| 登录 / 注册 | `POST /api/auth/login`、`POST /api/auth/register` | 建立登录 Cookie并合并游客购物车 |
-| 退出 | `POST /api/auth/logout` | 撤销登录令牌并重新建立游客身份 |
-| 商品列表 | `GET /api/products` | 搜索、分类与分页 |
-| 商品详情 | `GET /api/products/{product_id}` | 商品、规格、FAQ 与评价 |
-| 商品总结 | `POST /api/products/{product_id}/ai-summary` | 流式 AI 商品分析 |
-| 同步推荐 | `POST /api/recommend`、`POST /api/recommend/v2` | 结构化推荐结果 |
-| 流式 Agent | `POST /api/recommend/stream` | SSE 对话、分析与购物动作 |
-| 图片上传 | `POST /api/upload` | 多模态图片输入 |
-| 购物车 | `/api/cart`、`/api/cart/items` | 查询、加购、改量、删除和选择 |
-| 结算 / 订单 | `POST /api/checkout`、`GET /api/orders` | 登录用户购物闭环 |
-| 地址 | `/api/addresses` | 登录用户地址 CRUD |
-| 偏好 | `/api/preferences`、`/api/preferences/entries` | 偏好解析、条目与画像管理 |
-| 会话 | `/api/conversations` | 历史会话、消息与删除 |
-| 语音 | `/api/voice/transcribe`、`/api/voice/tts` | ASR 与 TTS |
-| 评测 | `/api/eval/*`、`/eval` | Agent / RAG 评测与仪表盘 |
-| 可观测 | `/api/observability/*` | Trace 与统计信息 |
-
-前端所有真实请求路径由 `tests/unit/test_frontend_api_contract.py` 与后端路由契约共同校验。
-
----
-
-## 数据与检索
-
-### 商品块结构
-
-每件商品会被拆分为标题描述、规格、FAQ、评论等不同块。每个块携带统一 payload：
-
-- 商品、块与类型标识；
-- 标题、品牌、一级与二级品类；
-- 价格、平均评分、评论数量和负面评论数量；
-- FAQ 问题、评论评分与展示昵称；
-- 可供回答引用的原始文本。
-
-V7 集合为每个块同时保存：
-
-- `dense`：Qwen3 Embedding 生成的 1024 维归一化向量；
-- `bm25`：基于项目语料统计生成的中文稀疏向量。
-
-### 降级策略
-
-| 故障 | 行为 |
-| --- | --- |
-| BM25 或旧集合不兼容 | 自动改用纯 Dense 搜索 |
-| Qdrant 不可用 | 使用本地商品块缓存 |
-| Redis 不可用 | 跳过缓存，直接执行原始能力 |
-| PostgreSQL 未配置 | 部分公开能力使用 JSON / 本地数据模式 |
-| 在线模型超时 | 重试、熔断或模板回答，取决于能力类型 |
-| 本地模型缺失 | 状态检查返回缺失信息，不伪装为已就绪 |
-
----
-
-## 目录结构
+## 仓库结构
 
 ```text
 OmniCart-Agent/
 ├── backend/
 │   ├── app/
-│   │   ├── agents/             # 业务 Agent
-│   │   ├── api/                # FastAPI 路由
-│   │   ├── core/               # 配置、身份与基础设施连接
-│   │   ├── framework/          # RAG / Memory / Context / Tools 框架
-│   │   ├── model_gateway/      # 本地与在线模型网关
-│   │   ├── providers/          # 框架协议的业务实现
-│   │   ├── repositories/       # PostgreSQL / Qdrant 仓储
-│   │   ├── verification/       # 证据与答案一致性守卫
-│   │   └── workflow/           # LangGraph 主工作流
+│   │   ├── agents/                 # Router、检索、决策、回答与视觉 Agent
+│   │   ├── api/                    # SSE、商品、上传、语音、购物与账户 API
+│   │   ├── context/                # 会话检查点与 AnswerContext 组装
+│   │   ├── workflow/react/         # ToolPolicy、运行时、Reducer 与停止策略
+│   │   ├── retrieval/              # V9 Chunk 检索、聚合、重排
+│   │   ├── services/               # Filter、评分、对比、视觉目录解析等
+│   │   └── models/                 # 商品、身份、会话、偏好、交易模型
 │   └── tests/
-├── web-client/                 # React 19 Web 客户端
-│   ├── e2e/                    # Playwright 测试
-│   ├── public/brand/           # 欧米 Web 素材
-│   └── src/                    # 页面、组件、API 与 Store
-├── android-client/             # Kotlin / Jetpack Compose 客户端
-├── alembic/versions/           # V001–V011 数据库迁移
-├── ecommerce_agent_dataset/    # 1000 件商品数据与图片
-├── design/                     # 欧米最终图标与品牌源素材
-├── scripts/                    # 初始化、索引、迁移、评测与运维脚本
-├── tests/                      # 后端单元、集成与契约测试
-├── docs/                       # 架构、ADR、规范与工作记录
-├── .env.example                # 安全配置模板
-├── run.py                      # 前后端一键启动入口
-└── start-databases.bat         # Windows 本地基础设施启动入口
+├── web-client/                     # React Web 客户端
+├── android-client/                 # Jetpack Compose Android 客户端
+├── ecommerce_agent_dataset/        # 原始电商商品数据集
+├── scripts/                        # 建库、索引、评测与运维脚本
+├── alembic/                        # 数据库迁移
+├── docs/                           # 设计、提交与工程文档
+├── docker-compose.yml              # PostgreSQL / Qdrant / Redis / 后端
+└── run.py                          # 本地一键启动器
 ```
 
----
+## 快速开始
 
-## 测试与质量门禁
+### 前置条件
 
-### 后端
+- Python 3.11+
+- Node.js 20+
+- Docker Desktop（推荐，用于 PostgreSQL、Qdrant、Redis）
+- Android Studio（仅 Android 真机/模拟器调试需要）
+- 可用的模型服务密钥；如需本地 Embedding / Reranker，还需准备本地模型目录
+
+### 1. 配置运行环境
 
 ```powershell
-conda activate omnicart
-python -m pytest
-
-# 只运行快速单元测试
-python -m pytest tests/unit backend/tests/unit -q
-
-# 覆盖率
-python -m pytest --cov=backend/app --cov-report=term-missing
+Copy-Item .env.example .env
 ```
 
-### 前端
+在 `.env` 中填写本机 PostgreSQL、模型服务和本地模型路径等配置。不要提交 `.env`、真实密钥或生产数据库连接串。
+
+### 2. 启动基础设施并初始化数据
 
 ```powershell
-Set-Location web-client
+docker compose up -d postgres qdrant redis
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+alembic upgrade head
+python scripts/seed_postgresql.py
+python scripts/build_product_identity_index.py
+```
+
+首次构建或更新 V9 商品索引：
+
+```powershell
+$env:PYTHONPATH = "backend"
+python scripts/index_product_chunks_v9.py --recreate
+```
+
+> 索引构建会调用 Embedding 模型并写入 Qdrant。生产或演示环境中，请先确认 `.env` 的模型与集合配置一致。
+
+### 3. 启动 Web 与后端
+
+一键启动（会检查数据库、复用健康服务并避免 Vite 端口漂移）：
+
+```powershell
+python run.py
+```
+
+或分别启动：
+
+```powershell
+# Terminal A
+cd backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8006 --log-level info
+
+# Terminal B
+cd web-client
+npm install
+npm run dev -- --port 5173
+```
+
+打开 `http://127.0.0.1:5173`，后端健康信息位于 `http://127.0.0.1:8006/api/health`。
+
+### 4. Android 真机联调
+
+Debug 变体默认使用 `http://127.0.0.1:8006/`。USB 连接 Android 设备后执行：
+
+```powershell
+adb reverse tcp:8006 tcp:8006
+```
+
+随后直接用 Android Studio 打开 [`android-client`](android-client) 并运行 `app`。这样手机请求会通过 ADB 反向映射到电脑上的同一后端，无需依赖不稳定的局域网 IP。
+
+## 验证与质量门禁
+
+```powershell
+# 后端
+pytest
+ruff check backend/app backend/tests
+
+# Web
+cd web-client
 npm run typecheck
 npm run lint
 npm run test
-npm run test:coverage
 npm run build
-npm run test:e2e
+
+# Android
+cd ..\android-client
+.\gradlew.bat :app:assembleDebug
 ```
 
-前端覆盖率阈值在 `vite.config.ts` 中统一设置为语句、分支、函数和行均不低于 80%。Playwright 覆盖桌面与移动视口，并使用 axe 检查关键页面的严重可访问性问题。
-
-### 架构与评测
+仓库同时提供围绕检索、实体解析、Agent Loop、记忆、商品身份与 RAG 的脚本化评测入口，例如：
 
 ```powershell
-# Framework / Provider 依赖边界
-python scripts/check_governance.py
-
-# RAG 检索评测
+$env:PYTHONPATH = "backend"
+python scripts/eval_agent_loop.py
+python scripts/eval_memory.py
 python scripts/eval_retrieval.py
-
-# 数据集质量
-python scripts/validate_dataset.py
 ```
 
-提交前至少应通过后端测试、前端 TypeScript、ESLint、Vitest 和生产构建。涉及检索、身份或购物车时，还应运行对应契约测试与 E2E。
+## 关键接口
 
----
-
-## 换一台电脑继续开发
-
-Git 仓库负责同步可复现的代码与必要资产，不同步机器状态。迁移时请按以下清单恢复：
-
-1. 克隆仓库并创建 Python 3.11 Conda 环境；
-2. 使用 `requirements.txt` 与 `web-client/package-lock.json` 安装依赖；
-3. 复制 `.env.example` 为 `.env`，重新填写密钥、密码和模型路径；
-4. 安装或恢复 PostgreSQL、Qdrant、Memurai；
-5. 下载两个本地模型到 `OMNICART_MODELS_DIR`；
-6. 执行 Alembic、商品种子和向量索引脚本；
-7. 运行 `python run.py` 并检查 `/api/health`。
-
-以下内容不会上传，不能通过 `git clone` 恢复：
-
-- `.env` 与任何真实密钥；
-- Conda / `.venv`、`node_modules` 与构建缓存；
-- Hugging Face 模型权重；
-- PostgreSQL、Qdrant、Redis 的本地运行数据；
-- 上传文件、日志、Trace、评测临时结果和浏览器登录态；
-- 个人文档与设计过程中的废弃中间图。
-
----
-
-## 文档索引
-
-| 文档 | 用途 |
+| 接口 | 说明 |
 | --- | --- |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | 开发流程、环境、门禁与常见任务 |
-| [MODULES.md](MODULES.md) | 重要模块职责、入口和修改边界 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | V3 分层架构与 Provider / Registry 设计 |
-| [docs/CONSTITUTION.md](docs/CONSTITUTION.md) | 项目工程约束与长期原则 |
-| [docs/adr/](docs/adr/) | RAG、Memory 和上下文压缩决策记录 |
-| [docs/specs/](docs/specs/) | 检索、查询理解、数据集与编排规范 |
-| [DEPLOY.md](DEPLOY.md) | 可选的服务器与 Docker 部署资料 |
-| [SERVER_OPS.md](SERVER_OPS.md) | 历史服务器运维资料 |
+| `POST /api/recommend/stream` | 主聊天 SSE 接口；支持常规、深度、图片与聚焦分析模式 |
+| `POST /api/upload` | 图片上传与格式校验 |
+| `POST /api/voice/transcribe` | 音频转写；成功后由客户端复用主 SSE 聊天链路 |
+| `GET /api/products` / `GET /api/products/{id}` | 商品浏览与详情 |
+| `GET /api/products/{id}/image` | 商品图片统一兜底接口 |
+| `POST /api/agent/action` | 受控的 Agent 交易动作入口 |
+| `/api/cart`、`/api/checkout`、`/api/orders` | 购物车、结算与订单能力 |
+| `/api/auth/*`、`/api/addresses`、`/api/conversations` | 身份、地址与会话能力 |
+
+完整 API 可在服务启动后访问 `/docs` 查看。
+
+## 设计原则
+
+1. **商品，而不是文本块，是交付单位。** 检索可以命中 Chunk，推荐必须回到商品级事实与证据。
+2. **把模型放在合适的位置。** LLM 用于计划、闭集筛选、自然语言表达与必要的消歧；权限、范围、预算、ID 与最终一致性由系统校验。
+3. **宁可诚实说明缺口，也不编造确定性。** 没有资料就标注信息有限；没有合格结果就解释缺失条件并提供继续筛选方向。
+4. **同一份受控结果，多端一致交付。** Web 与 Android 共享事件语义、卡片协议、评分与购物操作逻辑，仅针对屏幕形态做布局适配。
+5. **记忆服务于当前任务，而不是污染当前回答。** 只注入相关、可追溯、未过期的上下文与偏好，原始工具过程永远留在运行时账本中。
 
 ---
 
 <p align="center">
-  <img src="web-client/public/brand/omi-cart-avatar-256-v2.webp" width="72" alt="欧米头像" />
-  <br />
-  <strong>OmniCart Agent · 让欧米把“找商品”变成一场可以继续追问、可以验证、也可以直接行动的对话。</strong>
+  <strong>欧米 · 让每一次购物对话，都更接近一个值得信任的决定。</strong>
 </p>

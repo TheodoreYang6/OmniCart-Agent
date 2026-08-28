@@ -37,7 +37,6 @@ export function AppLayout() {
   const location = useLocation()
   const username = useAuthStore((s) => s.username)
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn())
-  const effectiveUserId = useAuthStore((s) => s.userId || s.guestId)
   const initialized = useAuthStore((s) => s.initialized)
   const cartCount = useCartStore((s) => s.items.reduce((sum, i) => sum + i.quantity, 0))
   const loadCart = useCartStore((s) => s.loadCart)
@@ -49,8 +48,10 @@ export function AppLayout() {
   }, [sessionId, setContext])
 
   useEffect(() => {
-    if (initialized && effectiveUserId) void loadCart()
-  }, [effectiveUserId, initialized, loadCart])
+    // 购物车是登录用户数据。游客不预拉取，避免每次进入页面都产生 401，
+    // 再被身份恢复逻辑误判成 token 失效。
+    if (initialized && isLoggedIn) void loadCart()
+  }, [initialized, isLoggedIn, loadCart])
 
   const isChat = location.pathname.startsWith('/chat')
   const rootTabs = ['/chat', '/shop', '/cart', '/profile']

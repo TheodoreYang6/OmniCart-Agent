@@ -114,3 +114,27 @@ class TestResponseAgent:
         result = await agent.execute(state)
         assert len(result.answer) > 0
         assert result.trace_steps[-1]["status"] in ("success", "fallback")
+
+    def test_template_explains_each_locked_primary_without_display_scores(self):
+        state = WorkflowState(
+            user_query="想要低糖饮料和零食",
+            retrieved_products=[
+                {"product_id": "tea", "brand": "东方树叶", "title": "0糖乌龙茶", "price": 6,
+                 "product_facts": [{"fact_key": "nutrition.zero_sugar"}]},
+                {"product_id": "snack", "brand": "三只松鼠", "title": "低脂坚果", "price": 29,
+                 "product_facts": [{"fact_key": "nutrition.low_fat"}]},
+            ],
+            primary_product_ids=["tea", "snack"],
+            decision_results=[
+                {"product_id": "tea", "why_it_fits": "有可核对的0糖信息", "final_score": 0.8},
+                {"product_id": "snack", "why_it_fits": "有可核对的低脂信息", "final_score": 0.7},
+            ],
+            retrieval_groups=[
+                {"role": "饮品", "status": "matched", "product_ids": ["tea"]},
+                {"role": "零食", "status": "matched", "product_ids": ["snack"]},
+            ],
+        )
+        answer = ResponseAgent()._generate_template(state)
+        assert "饮品：东方树叶 0糖乌龙茶（¥6）" in answer
+        assert "零食：三只松鼠 低脂坚果（¥29）" in answer
+        assert "有可核对的0糖信息" in answer and "/10" not in answer

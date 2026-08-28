@@ -1,8 +1,8 @@
-"""§5.2 验收：答文与列表强一致 + Loop 规格按钮（spec 混合检索与四bug根治）。
+"""§5.2 验收：答文与列表强一致 + 深度购物动作权限（spec 混合检索与四bug根治）。
 
 这两项是用户直报 bug 的验收口：
 - bug#3 回答与商品列表不一致 → result.products 前 N 必须是回答引用集（同序）
-- bug#4 深度思考下规格按钮消失 → result.actions 必须含 sku_option（带 product_id）
+- bug#4 深度思考下纯购物动作被错误交给自由 Loop → 必须直接走受控交易路由
 """
 
 import json
@@ -25,8 +25,25 @@ def _last_result(raw: str) -> dict:
 
 
 @pytest.mark.integration
-def test_result_products_head_matches_answer_cited_pids():
-    """result.products 前 N 个 == 回答引用集（spec §5.2 答文一致门槛）。"""
+def test_guest_stream_does_not_trust_body_user_id_or_create_history():
+    """匿名 SSE 可推荐，但请求体伪造 user_id 不会获得持久会话。"""
+    client = TestClient(app)
+    with client.stream("POST", "/api/recommend/stream", json={
+        "user_id": "pretend_to_be_a_real_user", "conversation_id": "forged-conversation",
+        "message": "推荐一个保温杯",
+    }) as resp:
+        assert resp.status_code == 200
+        raw = "".join(resp.iter_text())
+
+    result = _last_result(raw)
+    assert result.get("conversation_id", "") == ""
+    assert "event: stage" in raw
+    assert "event: recommendations" in raw or not (result.get("products") or [])
+
+
+@pytest.mark.integration
+def test_recommendation_sections_are_bounded_and_answer_uses_primary_products():
+    """新协议：首选≤3、备选≤6、互不重复，答文只应引用首选。"""
     client = TestClient(app)
     with client.stream("POST", "/api/recommend/stream", json={
         "user_id": "it_cited", "message": "推荐面膜",
@@ -35,19 +52,18 @@ def test_result_products_head_matches_answer_cited_pids():
         raw = "".join(resp.iter_text())
 
     d = _last_result(raw)
+    primary = d.get("primary_products") or []
+    alternatives = d.get("alternative_products") or []
     products = d.get("products") or []
     if not products:
         pytest.skip("检索无结果（依赖向量库），跳过一致性断言")
 
-    # 未被回答引用的商品必须排在被引用商品之后，且标 beyond_answer
-    cited_head = []
-    for p in products:
-        if p.get("beyond_answer"):
-            break
-        cited_head.append(p)
-    assert cited_head, "products 首位不应是 beyond_answer 商品"
-    for p in products[len(cited_head):]:
-        assert p.get("beyond_answer") is True, f"引用集之后的商品未标记: {p.get('product_id')}"
+    assert len(primary) <= 3
+    assert len(alternatives) <= 6
+    primary_ids = {p.get("product_id") for p in primary}
+    alternative_ids = {p.get("product_id") for p in alternatives}
+    assert primary_ids.isdisjoint(alternative_ids)
+    assert products == primary + alternatives
 
     answer = d.get("answer") or ""
     assert answer, "应有回答"
@@ -56,56 +72,28 @@ def test_result_products_head_matches_answer_cited_pids():
     _FALLBACKS = ("没太看懂", "抑或欧米更擅长", "抱歉，没有找到")
     if any(f in answer for f in _FALLBACKS):
         pytest.skip(f"回答为兑底模板（LLM 不可用），已验结构契约: {answer[:24]}")
-    # 回答至少引用 head 中一款（标题前 6 字或品牌）
-    hit = any((p.get("title") or "")[:6] in answer for p in cited_head)
-    assert hit or any((p.get("brand") or "") in answer for p in cited_head), (
-        f"回答未引用置顶商品: {[p.get('title', '')[:12] for p in cited_head]} | {answer[:60]}")
+    # 回答至少引用一款首选，且不能引用任何备选标题。
+    hit = any((p.get("title") or "")[:6] in answer for p in primary)
+    assert hit or any((p.get("brand") or "") in answer for p in primary), (
+        f"回答未引用首选商品: {[p.get('title', '')[:12] for p in primary]} | {answer[:60]}")
+    # 同品牌/同系列商品的前 6 个字经常完全相同（例如同一口红系列不同色号），
+    # 不能把首选标题的共同前缀误判成“回答引用备选”。只检查能和全部首选区分开的
+    # 备选标识；没有可区分标识的同系列变体由卡片而不是文本名称区分。
+    primary_titles = [p.get("title") or "" for p in primary]
+    alternative_markers = []
+    for product in alternatives:
+        title = product.get("title") or ""
+        marker = next((title[:size] for size in (12, 18, 24)
+                       if len(title) >= size and all(title[:size] not in item for item in primary_titles)), "")
+        if marker:
+            alternative_markers.append(marker)
+    assert not any(marker in answer for marker in alternative_markers), (
+        f"回答引用了可区分的备选商品: {[p.get('title', '')[:12] for p in alternatives]} | {answer[:60]}")
 
 
 @pytest.mark.integration
-def test_deep_think_result_carries_sku_option_actions(monkeypatch):
-    """deep_think 加购多规格商品 → result.actions 含带 product_id 的 sku_option。
-
-    不依赖 LLM 自主选工具（实测 LLM 常改走推荐）：直接脚本化工具调用，
-    验证 SSE 层 actions 透传契约（bug#4 的根因就在这条链路上）。
-    """
-    from app.framework.tools import Tool, ToolRegistry, ToolResult, ToolSpec
-
-    sku_actions = [
-        {"type": "sku_option", "label": "30ml ¥720", "sku_id": "s1", "product_id": "p_x"},
-        {"type": "sku_option", "label": "50ml ¥1080", "sku_id": "s2", "product_id": "p_x"},
-    ]
-
-    class _AddTool(Tool):
-        spec = ToolSpec(name="cart.add", category="cart", description="加购")
-
-        async def run(self, ctx, **kw):
-            return ToolResult(message="该商品有 2 个规格，选哪个？",
-                              data={"needs_sku": {"product_id": "p_x"}}, actions=sku_actions)
-
-    reg = ToolRegistry(kind="tool")
-    reg.register(_AddTool())
-
-    class _Gw:
-        def __init__(self):
-            self.n = 0
-
-        async def chat_with_tools(self, *a, **kw):
-            self.n += 1
-            if self.n == 1:
-                return {"content": "", "tool_calls": [
-                    {"id": "1", "name": "cart.add", "arguments": {"product_id": "p_x"}}]}
-            return {"content": "这款有两个规格，点按钮选一下就好啦～", "tool_calls": []}
-
-        async def chat_stream(self, *a, **kw):
-            yield "这款有两个规格，点按钮选一下就好啦～"
-
-        async def chat(self, *a, **kw):
-            return "这款有两个规格，点按钮选一下就好啦～"
-
-    monkeypatch.setattr("app.model_gateway.gateway.get_model_gateway", lambda: _Gw())
-    monkeypatch.setattr("app.providers.tools.get_tool_registry", lambda: reg)
-
+def test_deep_think_shopping_action_requires_login_without_free_loop():
+    """深度思考不授予交易权限，也不让纯加购请求进入自由工具循环。"""
     client = TestClient(app)
     with client.stream("POST", "/api/recommend/stream", json={
         "user_id": "it_sku", "message": "把这个加入购物车", "deep_think": True,
@@ -114,9 +102,7 @@ def test_deep_think_result_carries_sku_option_actions(monkeypatch):
         raw = "".join(resp.iter_text())
 
     d = _last_result(raw)
-    assert d.get("agent_loop") is True, f"未走 Loop 分支: {d.get('agent_loop')}"
+    assert d.get("agent_loop") is not True, "纯购物动作不应进入自由 ReAct Loop"
     actions = d.get("actions") or []
-    assert actions, f"Loop 分支 result 未带 actions（bug#4 回归）: {list(d.keys())}"
-    skus = [a for a in actions if a.get("type") == "sku_option"]
-    assert len(skus) >= 2, actions
-    assert all(a.get("product_id") for a in skus), "sku_option 缺 product_id（前端无法直连加购）"
+    assert any(action.get("type") == "login" for action in actions), actions
+    assert "登录" in (d.get("answer") or "")

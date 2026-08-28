@@ -17,6 +17,8 @@ import type {
   CartResponse,
   CheckoutRequest,
   CheckoutResponse,
+  CheckoutPreviewResponse,
+  CheckoutSubmitResponse,
   ConversationListResponse,
   ConversationMessagesResponse,
   GuideRequest,
@@ -241,6 +243,12 @@ export const api = {
   // ---- 结算 / 订单 ----
   checkout: (req: CheckoutRequest) =>
     request<CheckoutResponse>('/api/checkout', { method: 'POST', body: req }),
+
+  checkoutPreview: (req: CheckoutRequest) =>
+    request<CheckoutPreviewResponse>('/api/checkout/preview', { method: 'POST', body: req }),
+
+  checkoutSubmit: (req: CheckoutRequest) =>
+    request<CheckoutSubmitResponse>('/api/checkout/submit', { method: 'POST', body: req }),
 
   getOrders: (userId: string) =>
     request<OrderListResponse>('/api/orders', { query: { user_id: userId } }),

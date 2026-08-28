@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { useThemeStore } from '@/store/themeStore'
 
 type OmiAppIconPhase = 'idle' | 'thinking' | 'talking'
 
@@ -12,8 +13,7 @@ interface OmiAppIconProps {
 }
 
 /**
- * 欧米移动端图标的 UI 版本。
- * 猫与购物车使用透明素材，底板由主题色生成，因此会自然适配浅色和深色环境。
+ * 欧米移动端图标的 UI 版本。浅、深色品牌标随全局主题成对切换。
  */
 export function OmiAppIcon({
   size = 44,
@@ -23,6 +23,7 @@ export function OmiAppIcon({
   decorative = true,
   label = '欧米购物智能体',
 }: OmiAppIconProps) {
+  const theme = useThemeStore((state) => state.theme)
   return (
     <span
       className={cn(
@@ -38,12 +39,12 @@ export function OmiAppIcon({
       aria-hidden={decorative || undefined}
     >
       <img
-        src="/brand/omi-cart-avatar-256-v2.webp"
+        src={theme === 'dark' ? '/brand/omi-logo-dark.png' : '/brand/omi-logo-light.png'}
         alt=""
         width="256"
         height="256"
         draggable={false}
-        className="relative z-[1] h-[91%] w-[91%] select-none object-contain"
+        className="relative z-[1] h-full w-full select-none object-cover"
       />
     </span>
   )

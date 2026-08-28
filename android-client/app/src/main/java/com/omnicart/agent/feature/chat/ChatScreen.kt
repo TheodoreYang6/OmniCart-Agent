@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
@@ -40,9 +41,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.omnicart.agent.feature.auth.AuthManager
 import com.omnicart.agent.feature.demo.PlusMenuSheet
 import com.omnicart.agent.feature.product.ProductCard
+import com.omnicart.agent.feature.product.ProductImage
 import com.omnicart.agent.feature.product.ProductDetailSheet
 import com.omnicart.agent.feature.upload.ImagePreview
-import com.omnicart.agent.feature.panel.AgentInsightSheet
+import com.omnicart.agent.core.design.OmiLogo
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,14 +83,17 @@ fun ChatScreen(
     val context = LocalContext.current
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var showPlusSheet by remember { mutableStateOf(false) }
-    var showInsight by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
 
     // 自动滚动到底部（新消息 + 流式输出时都触发）
-    LaunchedEffect(uiState.messages.size, uiState.isLoading, uiState.streamingText.length) {
+    LaunchedEffect(uiState.messages.size, uiState.isLoading, uiState.streamingText.length, uiState.recommendationStage) {
         if (uiState.messages.isNotEmpty() || uiState.streamingText.isNotEmpty()) {
-            val target = if (uiState.messages.isNotEmpty()) uiState.messages.size - 1 else 0
+            // Streaming/status entries live after the persistent messages.  Using
+            // messages.size - 1 left the live assistant bubble below the viewport,
+            // which made Android appear not to stream even while tokens arrived.
+            kotlinx.coroutines.delay(24)
+            val target = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
             listState.animateScrollToItem(target)
         }
     }
@@ -179,35 +184,31 @@ fun ChatScreen(
         )
     }
 
-    // The input bar owns IME padding so it lifts with the keyboard without double-spacing the whole screen.
+    // IME 位移由外层 Scaffold 统一承担，让输入栏与底部导航保持同步。
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 顶栏 — 品牌化
-            Surface(color = Primary, tonalElevation = 0.dp) {
+            // 顶栏与 Web 端同样采用清透展台，而不是整块高饱和色条。
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                tonalElevation = 0.dp,
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Surface(shape = RoundedCornerShape(12.dp), color = OnPrimary.copy(alpha = 0.16f)) {
-                        Icon(
-                            Icons.Filled.AutoAwesome,
-                            contentDescription = null,
-                            tint = OnPrimary,
-                            modifier = Modifier.padding(8.dp).size(18.dp),
-                        )
-                    }
+                    OmiLogo(size = 42.dp, contentDescription = "欧米")
                     Spacer(Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "小O AI 导购",
+                            "欧米 · 购物智能体",
                             style = MaterialTheme.typography.titleMedium,
-                            color = OnPrimary,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "帮你比商品、看证据、避风险",
+                            "懂你想买什么，帮你挑得更合适",
                             style = MaterialTheme.typography.labelSmall,
-                            color = OnPrimary.copy(alpha = 0.82f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     // 偏好生效指示
@@ -215,7 +216,7 @@ fun ChatScreen(
                         Spacer(Modifier.width(8.dp))
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = OnPrimary.copy(alpha = 0.18f),
+                            color = MaterialTheme.colorScheme.primaryContainer,
                         ) {
                             Row(
                                 Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -225,13 +226,13 @@ fun ChatScreen(
                                     Icons.Filled.Star,
                                     null,
                                     Modifier.size(12.dp),
-                                    tint = OnPrimary,
+                                    tint = MaterialTheme.colorScheme.primary,
                                 )
                                 Spacer(Modifier.width(4.dp))
                                 Text(
                                     "偏好生效",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = OnPrimary,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 )
                             }
                         }
@@ -242,7 +243,7 @@ fun ChatScreen(
                             Icon(
                                 Icons.Filled.Add,
                                 contentDescription = "新对话",
-                                tint = OnPrimary,
+                                tint = MaterialTheme.colorScheme.primary,
                             )
                         }
                     }
@@ -252,7 +253,7 @@ fun ChatScreen(
                             Icon(
                                 Icons.Filled.Refresh,
                                 contentDescription = "历史聊天",
-                                tint = OnPrimary,
+                                tint = MaterialTheme.colorScheme.primary,
                             )
                         }
                     }
@@ -334,26 +335,54 @@ fun ChatScreen(
                                 }
                                 MessageRole.Assistant -> {
                                     Column {
+                                        var showAlternatives by remember(message.id) { mutableStateOf(false) }
                                         MessageBubble(
                                             text = message.text,
                                             type = BubbleType.Assistant,
                                         )
-                                        // 问问小O对比卡片 (持久化在消息中)
+                                        message.productResolution?.get("label")?.toString()
+                                            ?.takeIf { it.isNotBlank() }?.let { label ->
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.padding(start = 36.dp, top = 6.dp, bottom = 2.dp),
+                                                )
+                                            }
+                                        message.visualResult?.let { visual ->
+                                            VisualRecognitionSummary(visual, modifier = Modifier.padding(start = 36.dp, top = 4.dp))
+                                        }
+                                        // 对比与单品档案是两个明确的交付形态：单品档案不再
+                                        // 被误当成对比表，也不会和通用商品卡重复出现。
                                         if (message.hasComparison) {
                                             Spacer(modifier = Modifier.height(6.dp))
                                             ComparisonCardForMessage(message)
                                         }
-                                        if (message.hasProducts) {
+                                        val focus = message.resolvedFocusAnalysis
+                                        if (focus != null && !message.hasComparison) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            FocusAnalysisCard(
+                                                analysis = focus,
+                                                onCompare = {
+                                                    val productId = focus["product_id"]?.toString().orEmpty()
+                                                    val title = focus["title"]?.toString().orEmpty()
+                                                    if (productId.isNotBlank() && title.isNotBlank()) {
+                                                        viewModel.sendAskDouzai(productId, title, comparison = true)
+                                                    }
+                                                },
+                                            )
+                                        }
+                                        if (message.hasProducts && focus == null && !message.hasComparison) {
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "为你找到 ${message.products.size} 款值得比较的商品",
+                                                text = "欧米为你优先挑了 ${message.products.size} 款",
                                                 style = MaterialTheme.typography.labelLarge,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.padding(start = 36.dp),
                                             )
                                             Spacer(modifier = Modifier.height(4.dp))
                                         }
-                                        message.products.forEachIndexed { index, product ->
+                                        if (focus == null && !message.hasComparison) message.products.forEachIndexed { index, product ->
                                             val decision = message.decisionResults.find {
                                                 it.productId == product.productId
                                             }
@@ -371,24 +400,58 @@ fun ChatScreen(
                                                     onAddToCart = { skuId, skuLabel, skuPrice ->
                                                         viewModel.onAddToCart(product.productId, product.title, skuId, skuLabel, skuPrice)
                                                     },
+                                                    onAskAgent = { viewModel.sendAskDouzai(product.productId, product.title) },
                                                     onScoreDetail = { viewModel.onProductClick(product.productId) },
                                                     modifier = Modifier.padding(start = 36.dp),
                                                 )
                                             }
                                             Spacer(modifier = Modifier.height(8.dp))
                                         }
+                                        if (focus == null && !message.hasComparison && message.recommendationAlternatives.isNotEmpty()) {
+                                            Text(
+                                                text = if (showAlternatives) "收起其他选择" else "再看看其他选择（${message.recommendationAlternatives.size}）",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(start = 36.dp, top = 2.dp, bottom = 6.dp)
+                                                    .clickable { showAlternatives = !showAlternatives },
+                                            )
+                                            if (showAlternatives) {
+                                                message.recommendationAlternatives.forEach { product ->
+                                                    val decision = message.decisionResults.find { it.productId == product.productId }
+                                                    ProductCard(
+                                                        product = product,
+                                                        decisionResult = decision,
+                                                        onClick = { onProductClick(product.productId) },
+                                                        onAddToCart = { skuId, skuLabel, skuPrice ->
+                                                            viewModel.onAddToCart(product.productId, product.title, skuId, skuLabel, skuPrice)
+                                                        },
+                                                        onAskAgent = { viewModel.sendAskDouzai(product.productId, product.title) },
+                                                        onScoreDetail = { viewModel.onProductClick(product.productId) },
+                                                        modifier = Modifier.padding(start = 36.dp, bottom = 8.dp),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (message.needsClarification && message.clarificationOptions.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            ClarificationChips(
+                                                question = message.clarificationQuestion,
+                                                options = message.clarificationOptions,
+                                                onSelect = { viewModel.onQueryChange(it); viewModel.onSend() },
+                                            )
+                                        }
+                                        if (message.actions.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            ShopActionButtons(
+                                                actions = message.actions,
+                                                onAddressForm = onNavigateToAddress,
+                                                onQuickReply = { viewModel.onQueryChange(it); viewModel.onSend() },
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-
-                        // F2-3: 推荐结果摘要 chips — 仅当前回复有商品时，跟随最后一条消息
-                        if (uiState.lastResponse?.products?.isNotEmpty() == true) {
-                            item(key = "summary_${uiState.messages.size}") {
-                                SummaryChips(uiState.lastResponse!!)
-                            }
-                        }
-
 
                         if (uiState.isLoadingConversation) {
                             item(key = "load_conv") {
@@ -417,11 +480,31 @@ fun ChatScreen(
                                     CircularProgressIndicator(modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(
-                                        text = uiState.loadingMessage.ifBlank { "小O正在思考…" },
+                                        text = uiState.loadingMessage.ifBlank { "欧米正在分析…" },
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
+                            }
+                        }
+
+                        // 与 Web 保持同一交付顺序：SSE 的推荐简报仅用于锁定范围，
+                        // 不能在实时文字前抢占出商品卡。图片识别可以给一个轻状态，
+                        // 完整识别信息则随最终消息一并落盘、展示。
+                        uiState.streamingVisualResult?.let { visual ->
+                            item(key = "streaming_visual_result") {
+                                val facts = listOf("brand", "product_name", "product_line", "model", "category")
+                                    .mapNotNull { visual[it]?.toString()?.trim()?.takeIf(String::isNotBlank) }
+                                    .distinct()
+                                val label = uiState.streamingVisualResolution?.get("label")?.toString()
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: if (facts.isNotEmpty()) "已识别图片线索，正在核对商品目录" else "正在核对图片中的商品线索"
+                                AssistChip(
+                                    onClick = {},
+                                    label = { Text(label, maxLines = 1) },
+                                    leadingIcon = { Icon(Icons.Filled.AutoAwesome, null, Modifier.size(15.dp)) },
+                                    modifier = Modifier.padding(start = 36.dp, bottom = 4.dp),
+                                )
                             }
                         }
 
@@ -435,35 +518,6 @@ fun ChatScreen(
                             }
                         }
 
-                        // F2-2: Clarification 引导选项
-                        if (uiState.lastResponse?.needsClarification == true) {
-                            item(key = "clarification") {
-                                ClarificationChips(
-                                    question = uiState.lastResponse!!.clarificationQuestion,
-                                    options = uiState.lastResponse!!.clarificationOptions ?: emptyList(),
-                                    onSelect = { label ->
-                                        viewModel.onQueryChange(label)
-                                        viewModel.onSend()
-                                    },
-                                )
-                            }
-                        }
-
-                        // Shop Action 操作按钮
-                        if (uiState.lastResponse?.shopAction == true && uiState.lastResponse?.actions != null) {
-                            item(key = "shop_actions") {
-                                ShopActionButtons(
-                                    actions = uiState.lastResponse!!.actions!!,
-                                    onAddressForm = {
-                                        onNavigateToAddress()
-                                    },
-                                    onQuickReply = { label ->
-                                        viewModel.onQueryChange(label)
-                                        viewModel.onSend()
-                                    },
-                                )
-                            }
-                        }
 
                         uiState.errorMessage?.let { error ->
                             item(key = "error") {
@@ -529,33 +583,23 @@ fun ChatScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Surface(
-                                shape = RoundedCornerShape(24.dp),
-                                color = Primary.copy(alpha = 0.1f),
-                            ) {
-                                Icon(
-                                    Icons.Filled.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = Primary,
-                                    modifier = Modifier.padding(18.dp).size(34.dp),
-                                )
-                            }
+                            OmiLogo(size = 88.dp, contentDescription = "欧米")
                             Spacer(modifier = Modifier.height(18.dp))
                             Text(
-                                text = "小O",
+                                text = "你好，我是欧米",
                                 style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.onBackground,
                                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "你的 AI 购物决策助手",
+                                text = "你的购物智能体，陪你挑到更合适的商品",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "告诉我预算、场景、设备或上传商品截图\n我会结合证据、评分和风险提示给出建议",
+                                text = "告诉我预算、用途或喜欢的品牌\n也可以上传商品截图，让欧米帮你看一看",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
@@ -585,9 +629,9 @@ fun ChatScreen(
                     enabled = !uiState.isLoading,
                     hasImage = uiState.selectedImageUri != null,
                     isRecording = uiState.isRecording,
-                    fastMode = uiState.fastMode,
-                    onFastModeToggle = { viewModel.toggleFastMode() },
-                    modifier = Modifier.imePadding(),
+                    deepThink = uiState.deepThink,
+                    onDeepThinkToggle = { viewModel.toggleDeepThink() },
+                    modifier = Modifier,
                 )
             }
         }
@@ -595,14 +639,6 @@ fun ChatScreen(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
-
-        // V1-Plus: Agent 洞察面板
-        if (showInsight) {
-            AgentInsightSheet(
-                response = uiState.lastResponse,
-                onDismiss = { showInsight = false },
-            )
-        }
 
         // 全屏语音输入覆盖层
         if (uiState.showVoiceOverlay) {
@@ -668,14 +704,14 @@ fun TargetProductSection(a: Map<String, Any?>) {
     val title = a["title"]?.toString() ?: ""
     val brand = a["brand"]?.toString() ?: ""
     val price = (a["price"] as? Number)?.toDouble() ?: 0.0
-    val score = (a["display_score"] as? Number)?.toDouble() ?: 0.0
     val level = a["recommendation_level"]?.toString() ?: ""
     val levelCN = when (level) {
-        "strong_recommend" -> "强烈推荐"
-        "recommended" -> "值得推荐"
-        "cautious" -> "谨慎考虑"
-        "insufficient_evidence" -> "证据不足"
-        "not_recommended" -> "不推荐"
+        "strong_recommend" -> "高度匹配"
+        "recommended" -> "较匹配"
+        "worth_considering" -> "有条件匹配"
+        "cautious" -> "有条件匹配"
+        "insufficient_evidence" -> "信息有限"
+        "not_recommended" -> "暂不建议优先"
         else -> level
     }
     val suitable = a["suitable_for"] as? List<*> ?: emptyList<Any>()
@@ -696,13 +732,9 @@ fun TargetProductSection(a: Map<String, Any?>) {
             }
             Spacer(Modifier.height(4.dp))
             Row {
-                Text("评分: ${score}/10",
+                Text("欧米判断：$levelCN",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(12.dp))
-                Text("等级: $levelCN",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary)
             }
             if (suitable.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
@@ -732,6 +764,80 @@ fun TargetProductSection(a: Map<String, Any?>) {
                 Spacer(Modifier.height(4.dp))
                 Text(skuAdvice, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** Mobile counterpart of Web's product dossier card.  It is intentionally a
+ * compact decision aid rather than a spreadsheet: identity, who it suits,
+ * cautions, then one explicit comparison action. */
+@Composable
+private fun FocusAnalysisCard(analysis: Map<String, Any?>, onCompare: () -> Unit) {
+    val productId = analysis["product_id"]?.toString().orEmpty()
+    val title = analysis["title"]?.toString().orEmpty()
+    val brand = analysis["brand"]?.toString().orEmpty()
+    val price = (analysis["price"] as? Number)?.toDouble()
+    val imageUrl = analysis["image_url"]?.toString()
+    val suitable = (analysis["suitable_for"] as? List<*>)
+        ?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }.orEmpty()
+    val highlights = (analysis["strengths"] as? List<*>)
+        ?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }.orEmpty()
+    val cautions = (analysis["risks"] as? List<*>)
+        ?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }.orEmpty()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.56f),
+        ),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("欧米的商品分析", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.Top) {
+                ProductImage(
+                    imageUrl = imageUrl,
+                    productId = productId,
+                    contentDescription = title,
+                    modifier = Modifier.size(92.dp),
+                    cornerRadius = 12.dp,
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (brand.isNotBlank()) Text(brand, style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary)
+                    Text(title.ifBlank { "已锁定的商品" }, style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    price?.let { Text("¥${if (it % 1.0 == 0.0) it.toInt() else it}",
+                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error) }
+                    if (suitable.isNotEmpty()) Text("适合：${suitable.take(2).joinToString("、")}",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
+            if (highlights.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("适合你的点：${highlights.take(2).joinToString("；")}", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (cautions.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text("购买前留意：${cautions.take(1).joinToString()}", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onCompare,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("与同类横向对比")
             }
         }
     }
@@ -791,7 +897,129 @@ fun ComparisonCardForMessage(message: ChatMessage) {
                 color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             message.targetProductAnalysis?.let { a -> TargetProductSection(a) }
-            message.comparisonTable?.let { c -> ComparisonTableSection(c, message.alternativeProducts) }
+            message.comparisonTable?.let { c -> ComparisonTableSection(c, message.analysisAlternatives) }
+            message.comparison?.let { comparison -> CanonicalComparisonSection(comparison) }
+        }
+    }
+}
+
+@Composable
+private fun VisualRecognitionSummary(visual: Map<String, Any?>, modifier: Modifier = Modifier) {
+    val pieces = listOf("brand", "product_name", "product_line", "model", "specs", "category")
+        .mapNotNull { visual[it]?.toString()?.trim()?.takeIf(String::isNotBlank) }
+        .distinct()
+    if (pieces.isEmpty()) return
+    Text(
+        text = "图中识别到：${pieces.joinToString(" · ").take(72)}",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun CanonicalComparisonSection(comparison: Map<String, Any?>) {
+    val target = comparison["target"] as? Map<*, *> ?: return
+    val alternatives = comparison["alternatives"] as? List<*> ?: emptyList<Any>()
+    val verdict = comparison["verdict"] as? Map<*, *>
+    val dimensions = (comparison["dimensions"] as? List<*>)
+        ?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }.orEmpty()
+    val winnerId = verdict?.get("winner_id")?.toString().orEmpty()
+    verdict?.get("text")?.toString()?.takeIf { it.isNotBlank() }?.let { text ->
+        Surface(
+            color = MaterialTheme.colorScheme.primary,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text(text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimary)
+                (verdict["reasons"] as? List<*>)?.mapNotNull { it?.toString() }?.take(3)
+                    ?.takeIf { it.isNotEmpty() }?.let { reasons ->
+                        Text(reasons.joinToString(" · "), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f), modifier = Modifier.padding(top = 4.dp))
+                    }
+            }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        listOf(target).plus(alternatives.take(3).mapNotNull { it as? Map<*, *> }).forEachIndexed { index, item ->
+            ComparisonItemCard(
+                item = item,
+                dimensions = dimensions,
+                isWinner = item["product_id"]?.toString() == winnerId,
+                label = if (index == 0) "正在比较" else "备选 ${index}",
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComparisonItemCard(
+    item: Map<*, *>, dimensions: List<String>, isWinner: Boolean, label: String,
+) {
+    val title = item["title"]?.toString().orEmpty()
+    val brand = item["brand"]?.toString().orEmpty()
+    val productId = item["product_id"]?.toString().orEmpty()
+    val price = item["price"]?.toString()?.takeIf { it.isNotBlank() } ?: "—"
+    val image = item["image_url"]?.toString()
+    val attributes = item["attributes"] as? Map<*, *> ?: emptyMap<Any, Any>()
+    val highlights = (item["highlights"] as? List<*>)?.mapNotNull { it?.toString() }.orEmpty()
+    val caution = (item["cautions"] as? List<*>)?.firstOrNull()?.toString().orEmpty()
+    Card(
+        modifier = Modifier.width(236.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(
+            if (isWinner) 2.dp else 1.dp,
+            if (isWinner) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Column {
+            Box {
+                ProductImage(image, title, productId, Modifier.fillMaxWidth().height(142.dp), cornerRadius = 0.dp)
+                Surface(
+                    color = if (isWinner) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                    shape = RoundedCornerShape(bottomEnd = 9.dp),
+                ) {
+                    Text(if (isWinner) "欧米更推荐" else label, Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isWinner) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (brand.isNotBlank()) Text(brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text("¥$price", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error)
+                dimensions.take(4).forEach { dimension ->
+                    val value = attributes[dimension]?.toString()?.takeIf { it.isNotBlank() } ?: "—"
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(dimension, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(value, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+                highlights.take(2).takeIf { it.isNotEmpty() }?.let {
+                    Text("亮点：${it.joinToString("；")}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary, maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+                if (caution.isNotBlank()) Text("留意：$caution", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                item["suitable_for"]?.toString()?.takeIf { it.isNotBlank() }?.let {
+                    Text("怎么选：$it", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
         }
     }
 }
@@ -800,7 +1028,7 @@ fun ComparisonCardForMessage(message: ChatMessage) {
 fun ComparisonCard(response: com.omnicart.agent.core.model.RecommendResponse) {
     val analysis = response.targetProductAnalysis
     val comparison = response.comparisonTable
-    val alternatives = response.alternativeProducts
+    val alternatives = response.analysisAlternatives
 
     if (analysis == null && comparison == null) return
 
@@ -840,7 +1068,7 @@ fun SummaryChips(response: com.omnicart.agent.core.model.RecommendResponse) {
         if (evCount > 0) {
             AssistChip(
                 onClick = {},
-                label = { Text("证据 $evCount 条", style = MaterialTheme.typography.labelSmall) },
+                label = { Text("参考信息 $evCount 条", style = MaterialTheme.typography.labelSmall) },
                 leadingIcon = { Icon(Icons.Filled.AutoAwesome, null, Modifier.size(14.dp)) },
                 modifier = Modifier.height(28.dp),
             )
@@ -1006,4 +1234,3 @@ fun AddressFormDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
-

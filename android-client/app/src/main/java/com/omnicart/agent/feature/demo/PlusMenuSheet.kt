@@ -41,7 +41,7 @@ fun PlusMenuSheet(
                 modifier = Modifier.padding(horizontal = 20.dp),
             )
             Text(
-                "点击即可自动发送，快速体验小O的各项能力",
+                "选一个常见需求，让欧米马上帮你看看",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),

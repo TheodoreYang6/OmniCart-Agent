@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
@@ -34,8 +35,8 @@ fun ChatInputBar(
     enabled: Boolean,
     hasImage: Boolean = false,
     isRecording: Boolean = false,
-    fastMode: Boolean = false,
-    onFastModeToggle: () -> Unit = {},
+    deepThink: Boolean = false,
+    onDeepThinkToggle: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val canSend = queryText.isNotBlank() || hasImage
@@ -52,36 +53,36 @@ fun ChatInputBar(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 快速回答开关
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.height(40.dp),
-            ) {
-                Text("⚡", style = MaterialTheme.typography.labelMedium)
-                Switch(
-                    checked = fastMode,
-                    onCheckedChange = { onFastModeToggle() },
-                    modifier = Modifier.padding(start = 4.dp),
-                )
-            }
-
-            Spacer(modifier = Modifier.width(6.dp))
-
-            // 中间：输入框
+            // 深度思考收进输入框：避免与对话框并排抢占空间。
             OutlinedTextField(
                 value = queryText,
                 onValueChange = onQueryChange,
-                modifier = Modifier.weight(1f).padding(vertical = 2.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 52.dp).padding(vertical = 2.dp),
+                label = if (deepThink) ({ Text("深度思考") }) else null,
+                leadingIcon = {
+                    IconToggleButton(
+                        checked = deepThink,
+                        onCheckedChange = { onDeepThinkToggle() },
+                        modifier = Modifier.size(42.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.AutoAwesome,
+                            contentDescription = if (deepThink) "关闭深度思考" else "开启深度思考",
+                            tint = if (deepThink) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp),
+                        )
+                    }
+                },
                 placeholder = {
                     Text(
-                        "说说想买什么",
+                        if (deepThink) "慢一点想得更周全，告诉欧米你的需求" else "想买什么？问问欧米",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 },
                 enabled = enabled,
                 maxLines = 3,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),

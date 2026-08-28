@@ -16,8 +16,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import com.omnicart.agent.R
-import com.omnicart.agent.core.theme.AiBlueContainer
+import com.omnicart.agent.core.design.omiLogoResource
 
 enum class BubbleType { User, Assistant }
 
@@ -44,8 +43,8 @@ fun MessageBubble(
         ) {
             if (type == BubbleType.Assistant) {
                 Image(
-                    painter = painterResource(id = R.drawable.ic_douzai),
-                    contentDescription = "小O",
+                    painter = painterResource(id = omiLogoResource()),
+                    contentDescription = "欧米",
                     modifier = Modifier
                         .size(28.dp)
                         .clip(RoundedCornerShape(14.dp)),
@@ -61,7 +60,9 @@ fun MessageBubble(
                 },
                 color = when (type) {
                     BubbleType.User -> MaterialTheme.colorScheme.primary
-                    BubbleType.Assistant -> AiBlueContainer
+                    // Do not use the light-theme AI swatch here: in dark mode it
+                    // produced a nearly white bubble with nearly white text.
+                    BubbleType.Assistant -> MaterialTheme.colorScheme.primaryContainer
                 },
                 modifier = Modifier.widthIn(max = 360.dp),
                 tonalElevation = if (type == BubbleType.User) 0.dp else 1.dp,
@@ -73,7 +74,7 @@ fun MessageBubble(
                     color = if (type == BubbleType.User) {
                         MaterialTheme.colorScheme.onPrimary
                     } else {
-                        MaterialTheme.colorScheme.onSurface
+                        MaterialTheme.colorScheme.onPrimaryContainer
                     },
                 )
             }

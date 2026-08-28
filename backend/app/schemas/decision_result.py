@@ -17,6 +17,28 @@ class ScoreBreakdown(BaseModel):
     avoid_tag_penalty: float = 0.0
 
 
+class RecommendationScoreDimension(BaseModel):
+    """用户可见的评分维度；全部可由本轮请求快照确定性重算。"""
+
+    key: str
+    label: str
+    score: int | None = None
+    detail: str = ""
+
+
+class RecommendationScore(BaseModel):
+    version: str = "omi_recommendation_v1"
+    label: str = "欧米适配指数"
+    score: int = 0
+    match_label: str = ""
+    recommendation_level: str = ""
+    evidence_label: str = "信息有限"
+    information_status: str = "资料有限"
+    source_types: list[str] = Field(default_factory=list)
+    dimensions: list[RecommendationScoreDimension] = Field(default_factory=list)
+    explanation: str = ""
+
+
 class DecisionResult(BaseModel):
     product_id: str
     final_score: float = 0.0
@@ -42,4 +64,5 @@ class DecisionResult(BaseModel):
     recommendation_level: str = ""
     hard_constraint_status: str = "pass"
     scoring_debug: dict = Field(default_factory=dict)
-
+    # V9 新展示评分。final_score/display_score 仅保留给旧回退接口，不再下发给客户端。
+    recommendation_score: RecommendationScore | None = None

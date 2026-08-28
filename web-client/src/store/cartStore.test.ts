@@ -20,7 +20,7 @@ const item: CartItem = {
 
 beforeEach(() => {
   vi.restoreAllMocks()
-  useAuthStore.setState({ guestId: 'guest-1', userId: '', initialized: true })
+  useAuthStore.setState({ guestId: '', userId: 'user-1', username: 'tester', initialized: true })
   useCartStore.getState().reset()
 })
 

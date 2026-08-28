@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 
 from app.framework.tools.protocols import Tool, ToolContext, ToolResult, ToolSpec
+from app.services.shop_copy import cart_added, sku_picker
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,38 @@ __all__ = [
     "ClearCartTool",
     "AddToCartTool",
 ]
+
+
+def _cart_summary_card(cart) -> dict:
+    """把购物车状态转成 cart_summary 结构化卡，附带每件商品的规格选项。"""
+    from app.repositories.product_repo import get_product_repo
+
+    repo = get_product_repo()
+    items = []
+    for it in cart.items:
+        product = repo.get_by_id(it.product_id)
+        skus = [s.model_dump() for s in (product.skus or [])] if product else []
+        items.append({
+            "cart_item_id": it.cart_item_id,
+            "product_id": it.product_id,
+            "title": it.title or "",
+            "brand": it.brand or "",
+            "price": float(it.price),
+            "quantity": it.quantity,
+            "image_url": it.image_url or "",
+            "sku_id": it.sku_id,
+            "sku_label": it.sku_label or "",
+            "selected": it.selected,
+            "skus": skus,
+        })
+    return {
+        "kind": "cart_summary",
+        "payload": {
+            "items": items,
+            "total": float(cart.total_price),
+            "count": cart.total_count,
+        },
+    }
 
 
 class ViewCartTool(Tool):
@@ -37,15 +70,12 @@ class ViewCartTool(Tool):
         except Exception:  # noqa: BLE001
             return ToolResult(ok=False, message="暂时无法查看购物车，请去购物车页面查看～")
         if not cart.items:
-            return ToolResult(message="🛒 购物车还是空的～去逛逛商品吧！")
-        lines = ["🛒 你的购物车："]
-        for idx, it in enumerate(cart.items, 1):
-            b = it.brand or ""
-            t = it.title[:50] if it.title else ""
-            lines.append(f"  {idx}. {b} {t} x{it.quantity}  ¥{it.price * it.quantity:.0f}")
-        lines.append(f"\n💰 合计 ¥{cart.total_price:.0f}（{cart.total_count}件）")
-        lines.append("可以对我说「删除第N个」「数量改成N」来管理购物车，说「下单」来结算～")
-        return ToolResult(message="\n".join(lines), data={"count": len(cart.items)})
+            return ToolResult(message="购物车还是空的，去挑点喜欢的商品吧～")
+        shop_card = _cart_summary_card(cart)
+        return ToolResult(
+            message="帮你看了下购物车。",
+            data={"shop_card": shop_card, "needs_llm_summary": True, "count": len(cart.items)},
+        )
 
 
 class RemoveFromCartTool(Tool):
@@ -193,11 +223,28 @@ class AddToCartTool(Tool):
                 sku_actions.append({"type": "sku_option", "label": "默认规格",
                                     "sku_id": "", "product_id": product_id})
                 t = (disp_brand + " " + disp_title)[:50]
+                shop_card = {
+                    "kind": "sku_picker",
+                    "payload": {
+                        "product_id": product_id,
+                        "title": disp_title,
+                        "brand": disp_brand,
+                        "image_url": prod_repo.resolve_image_url(product_id),
+                        "skus": [
+                            {"sku_id": s.sku_id, "label": (
+                                " · ".join(f"{k}:{v}" for k, v in (s.properties or {}).items())
+                                or "默认规格"),
+                             "price": s.price if s.price and s.price > 0 else product.base_price}
+                            for s in skus
+                        ],
+                    },
+                }
                 return ToolResult(
-                    message=f"「{t}」有 {len(skus)} 个规格，选哪个？",
+                    message=sku_picker(t, len(skus)),
                     actions=sku_actions,
                     data={"needs_sku": {"product_id": product_id, "title": disp_title,
-                                        "brand": disp_brand, "base_price": hint_price}},
+                                        "brand": disp_brand, "base_price": hint_price},
+                          "shop_card": shop_card},
                 )
 
             # 指定/单规格/无规格 -> 直接加购
@@ -216,8 +263,16 @@ class AddToCartTool(Tool):
                 image_url=prod_repo.resolve_image_url(product_id), sku_label=sku_label,
             )
             t = (disp_brand + " " + disp_title)[:60]
-            extra = f"（{sku_label}）" if sku_label else ""
-            return ToolResult(message=f"✅ 已把「{t}」{extra}加入购物车～")
+            cart = await get_cart_repo().aget_cart(ctx.user_id)
+            cart_total = float(cart.total_price)
+            cart_count = cart.total_count
+            shop_card = _cart_summary_card(cart)
+            return ToolResult(
+                message=cart_added(t, sku_label, cart_count, cart_total),
+                data={"shop_card": shop_card, "cart_count": cart_count, "cart_total": cart_total,
+                      "needs_llm_summary": True},
+                actions=[{"type": "quick_reply", "label": "去购物车结算", "route": "cart"}],
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning(f"cart.add error: {e}")
             return ToolResult(ok=False, message="加购失败，请去商品页面手动操作～")

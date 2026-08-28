@@ -80,6 +80,7 @@ export function ProductDetailPage() {
             <div className="overflow-hidden rounded-2xl shadow-lift">
               <ProductImage
                 src={images[activeImage]}
+                productId={product.product_id}
                 alt={product.title}
                 rounded="rounded-none"
                 className="aspect-square w-full"
@@ -96,7 +97,7 @@ export function ProductDetailPage() {
                       i === activeImage ? 'border-brand-500 shadow-glow' : 'border-transparent opacity-70 hover:opacity-100',
                     )}
                   >
-                    <ProductImage src={img} rounded="rounded-md" className="h-full w-full" />
+                    <ProductImage src={img} productId={product.product_id} rounded="rounded-md" className="h-full w-full" />
                   </button>
                 ))}
               </div>

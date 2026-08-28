@@ -16,6 +16,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.omnicart.agent.core.design.OmiLogo
 
 @Composable
 fun LoginScreen(
@@ -38,28 +39,23 @@ fun LoginScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(top = 12.dp)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(48.dp))
 
-        // Icon
-        Icon(
-            Icons.Filled.AccountCircle,
-            contentDescription = null,
-            modifier = Modifier.size(72.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
+        OmiLogo(size = 76.dp, contentDescription = "欧米")
         Spacer(Modifier.height(12.dp))
 
         Text(
-            if (uiState.isRegisterMode) "创建账号" else "欢迎回来",
+            if (uiState.isRegisterMode) "创建欧米账号" else "欢迎回来",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            if (uiState.isRegisterMode) "注册小O智能导购账号" else "登录您的小O智能导购账号",
+            if (uiState.isRegisterMode) "让欧米慢慢了解你的购物偏好" else "登录后继续和欧米一起挑好物",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -151,7 +147,7 @@ fun LoginScreen(
             if (uiState.isLoading) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             } else {
-                Text(if (uiState.isRegisterMode) "注册" else "登录", style = MaterialTheme.typography.titleSmall)
+                Text(if (uiState.isRegisterMode) "创建账号" else "继续使用", style = MaterialTheme.typography.titleSmall)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -159,7 +155,7 @@ fun LoginScreen(
         // Toggle mode
         TextButton(onClick = { viewModel.toggleMode() }) {
             Text(
-                if (uiState.isRegisterMode) "已有账号？去登录" else "没有账号？去注册",
+                if (uiState.isRegisterMode) "已有账号？立即登录" else "还没有账号？创建一个",
             )
         }
     }

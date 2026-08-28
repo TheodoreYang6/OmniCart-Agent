@@ -13,7 +13,7 @@ import type {
   RetrievalPlan,
   TraceStepItem,
 } from '@/api/types'
-import { componentLabel, levelStyle, scoreColor } from '@/lib/format'
+import { levelStyle } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 export interface InsightData {
@@ -27,11 +27,11 @@ export interface InsightData {
   harnessReport?: Record<string, unknown> | null
 }
 
-type TabKey = 'trace' | 'score' | 'evidence' | 'plan'
+type TabKey = 'trace' | 'fit' | 'evidence' | 'plan'
 
 const TABS: { key: TabKey; label: string; icon: typeof Route }[] = [
   { key: 'trace', label: '推理轨迹', icon: Route },
-  { key: 'score', label: '决策评分', icon: ListChecks },
+  { key: 'fit', label: '选购建议', icon: ListChecks },
   { key: 'evidence', label: '证据链', icon: FileSearch },
   { key: 'plan', label: '检索计划', icon: Activity },
 ]
@@ -63,7 +63,7 @@ export function AgentInsights({ data }: { data: InsightData }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {tab === 'trace' && <TraceView steps={data.traceSteps} />}
-        {tab === 'score' && <ScoreView results={data.decisionResults} titleOf={titleOf} />}
+        {tab === 'fit' && <FitView results={data.decisionResults} titleOf={titleOf} />}
         {tab === 'evidence' && <EvidenceView list={data.evidenceList} />}
         {tab === 'plan' && (
           <PlanView
@@ -113,27 +113,24 @@ function TraceView({ steps }: { steps: TraceStepItem[] }) {
   )
 }
 
-function ScoreView({
+function FitView({
   results,
   titleOf,
 }: {
   results: DecisionResult[]
   titleOf: (pid: string) => string
 }) {
-  if (!results.length) return <Empty text="暂无评分数据" />
+  if (!results.length) return <Empty text="暂无选购建议" />
   return (
     <div className="space-y-4">
       {results.slice(0, 8).map((r) => {
         const ls = levelStyle(r.recommendation_level)
-        const comps = Object.entries(r.component_scores ?? {}).filter(
-          ([, v]) => typeof v?.score === 'number',
-        )
         return (
           <div key={r.product_id} className="rounded-xl border border-[var(--line)] bg-[var(--card-bg)] p-3">
             <div className="flex items-start justify-between gap-2">
               <p className="line-clamp-1 text-sm font-medium text-ink">{titleOf(r.product_id)}</p>
-              <span className={cn('shrink-0 text-lg font-bold', scoreColor(r.display_score))}>
-                {r.display_score.toFixed(1)}
+              <span className={cn('shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold', ls.bg, ls.text)}>
+                {ls.label}
               </span>
             </div>
             <span
@@ -146,28 +143,11 @@ function ScoreView({
             >
               {ls.label}
             </span>
-            {comps.length > 0 && (
-              <div className="mt-2.5 space-y-1.5">
-                {comps.slice(0, 7).map(([key, v]) => {
-                  const pct = Math.max(0, Math.min(100, (Number(v.score) || 0) * 100))
-                  return (
-                    <div key={key} className="flex items-center gap-2">
-                      <span className="w-16 shrink-0 text-[11px] text-ink-muted">
-                        {componentLabel(key)}
-                      </span>
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-variant)]">
-                        <div
-                          className="h-full rounded-full bg-brand-400"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <span className="w-8 shrink-0 text-right text-[11px] font-medium text-ink-muted">
-                        {(Number(v.score) * 10).toFixed(1)}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
+            {r.why_it_fits && (
+              <p className="mt-2 text-xs leading-snug text-ink-soft">适合原因：{r.why_it_fits}</p>
+            )}
+            {r.caution && (
+              <p className="mt-1 text-xs leading-snug text-ink-muted">购买前留意：{r.caution}</p>
             )}
             {r.risk_factors.length > 0 && (
               <p className="risk-strip mt-2 rounded-md px-2 py-1 text-[11px]">
@@ -202,9 +182,7 @@ function EvidenceView({ list }: { list: EvidenceItem[] }) {
               {typeCn[e.source_type] ?? e.source_type}
             </span>
             <span className="font-mono text-[11px] text-ink-muted">{e.evidence_id}</span>
-            <span className="ml-auto text-[11px] text-ink-muted">
-              可信度 {(e.confidence * 100).toFixed(0)}%
-            </span>
+            <span className="ml-auto text-[11px] text-ink-muted">已核对</span>
           </div>
           <p className="mt-1.5 text-xs leading-snug text-ink-soft">{e.content}</p>
         </div>

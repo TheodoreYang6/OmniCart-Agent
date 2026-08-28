@@ -139,8 +139,11 @@ def test_builtin_governance_unique():
 
     names = [t.spec.name for t in builtin()]
     assert len(names) == len(set(names))  # 名称唯一
-    assert len(names) == 21
+    assert len(names) == 23, names        # 改这个数字前先确认工具是有意增删的
     assert "cart.remove" in names and "shopping.search" in names
+    # 选品工具：卡片与答文候选集的唯一真源，缺了会退回"卡片讲 A、回答讲 B"
+    assert "shopping.display" in names
+    assert "shopping.product_dossier" in names
     assert "order.preview" in names and "order.submit" in names
     assert "order.list" in names and "order.detail" in names
     assert "order.cancel" in names and "order.track" in names and "order.pay" in names

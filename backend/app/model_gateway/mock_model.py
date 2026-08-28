@@ -305,14 +305,21 @@ class MockEmbedding:
     during development when Qwen API is unavailable.
     """
 
-    DIM = 128
+    DEFAULT_DIM = 1024
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], dimensions: int | None = None) -> list[list[float]]:
+        """生成与真实索引维度一致的确定性向量。
+
+        Mock 过去固定 128 维，而本项目 Qdrant 索引是由
+        ``EMBEDDING_DIMENSION`` 决定的 1024 维；这会让开发/测试模式的查询全部
+        因维度不匹配而返回空结果。Mock 必须模拟协议，不应暗中改变向量空间形状。
+        """
+        dimension = max(1, int(dimensions or self.DEFAULT_DIM))
         vectors = []
         for text in texts:
             seed = int(hashlib.md5(text.encode()).hexdigest()[:8], 16)
             rng = random.Random(seed)
-            vectors.append([rng.random() for _ in range(self.DIM)])
+            vectors.append([rng.random() for _ in range(dimension)])
         return vectors
 
 

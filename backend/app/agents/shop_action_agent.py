@@ -423,7 +423,10 @@ class ShopActionAgent:
             from app.repositories.address_repo import get_address_repo
 
             repo = get_address_repo()
-            addrs = await repo._alist(uid) if hasattr(repo, "_alist") else repo.list(uid)
+            if hasattr(repo, "_alist"):
+                addrs = await repo._alist(uid)
+            else:
+                addrs = repo.list(uid)
             return next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"resolve address failed for {uid}: {e}")

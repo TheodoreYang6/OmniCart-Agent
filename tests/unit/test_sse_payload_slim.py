@@ -9,9 +9,11 @@ from app.api.agent_stream import (
     _DESC_MAX,
     _EVIDENCE_CONTENT_MAX,
     _EVIDENCE_MAX,
+    _public_decision_results,
     _slim_evidence,
     _slim_products,
 )
+from app.schemas.workflow import WorkflowState
 
 
 def _card(pid="p1", **extra):
@@ -32,6 +34,7 @@ def _card(pid="p1", **extra):
         "reranker_score": 0.88,
         "avg_rating": 4.7,
         "variant_count": 2,
+        "group_role": "零食",
     }
     base.update(extra)
     return base
@@ -47,8 +50,15 @@ def test_slim_products_keeps_display_fields():
     """前端商品卡与推理面板读取的字段全部保留。"""
     out = _slim_products([_card()])[0]
     for k in ("product_id", "title", "brand", "price", "image_urls", "skus",
-              "avg_rating", "variant_count", "reranker_score", "evidence_ids", "score"):
+              "avg_rating", "variant_count", "reranker_score", "evidence_ids", "score", "group_role"):
         assert k in out, f"展示字段被误删: {k}"
+
+
+def test_slim_products_restores_stable_image_api_for_legacy_candidates():
+    """旧缓存只有 product_id 时，SSE 仍必须给卡片一个可访问的图片地址。"""
+    card = _card(image_urls=[])
+    out = _slim_products([card])[0]
+    assert out["image_urls"] == ["/api/products/p1/image"]
 
 
 def test_slim_products_truncates_description():
@@ -129,3 +139,23 @@ def test_active_reranker_name_matches_use_bge():
 
     name = lb.active_reranker_name()
     assert name == ("bge-reranker-v2-m3" if lb._use_bge() else "Qwen3-Reranker-0.6B")
+
+
+def test_public_decisions_expose_user_labels_not_internal_scores():
+    state = WorkflowState(decision_results=[{
+        "product_id": "p1", "final_score": 0.45, "display_score": 4.5,
+        "component_scores": {"relevance": {"score": 0.45}},
+        "recommendation_level": "strong_recommend", "match_label": "高度匹配",
+        "evidence_label": "证据充分", "why_it_fits": "符合预算", "caution": "核对颜色",
+    }, {
+        "product_id": "hidden", "final_score": 0.99,
+    }])
+
+    public = _public_decision_results(state, [{"product_id": "p1"}], [])
+
+    assert public == [{
+        "product_id": "p1", "recommendation_level": "strong_recommend",
+        "match_label": "高度匹配", "evidence_label": "证据充分",
+        "why_it_fits": "符合预算", "caution": "核对颜色",
+        "risk_factors": [], "hard_constraint_status": "", "recommendation_score": {},
+    }]

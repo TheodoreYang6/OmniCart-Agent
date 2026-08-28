@@ -40,7 +40,8 @@ async def aunderstand_query(query: str, context: str = "") -> dict:
     from app.core.cache import cached, make_key
     from app.core.config import REDIS_CACHE_TTL_REWRITE
 
-    cache_key = make_key("router_intent", query)
+    # 追问必须看本轮上下文；只按 query 缓存会让“便宜点/换一个”错误复用别的会话计划。
+    cache_key = make_key("router_intent", "v9", query, context[-1200:])
 
     async def _do():
         gateway = get_model_gateway()
@@ -72,7 +73,14 @@ def validate_sub_queries(raw_sq) -> list[SubQuery]:
             bh = None
         out.append(SubQuery(role=str(item.get("role") or "")[:20],
                             query=str(item["query"]).strip()[:40],
-                            category=cat, budget_hint=bh))
+                            category=cat, budget_hint=bh,
+                            entity_terms=[str(x)[:40] for x in (item.get("entity_terms") or [])[:8]],
+                            must_constraints=[str(x)[:60] for x in (item.get("must_constraints") or [])[:8]],
+                            soft_preferences=[str(x)[:60] for x in (item.get("soft_preferences") or [])[:8]],
+                            avoid_constraints=[str(x)[:60] for x in (item.get("avoid_constraints") or [])[:8]],
+                            evidence_focus=[str(x)[:30] for x in (item.get("evidence_focus") or [])[:5]],
+                            answer_goal=str(item.get("answer_goal") or "")[:100],
+                            ambiguity=str(item.get("ambiguity") or "")[:120]))
     return out if len(out) >= 2 else []
 
 
@@ -219,6 +227,13 @@ class RouterAgent(BaseAgent):
             top_k=10 if merged.get("intent") == "compare" else (8 if merged.get("avoid") else 5),
             priority="coverage" if merged.get("intent") == "compare" else "balanced",
             sub_queries=validate_sub_queries(merged.get("sub_queries")),
+            entity_terms=[str(x)[:40] for x in (merged.get("entity_terms") or [])[:8]],
+            must_constraints=[str(x)[:60] for x in (merged.get("must_constraints") or merged.get("must_have") or [])[:8]],
+            soft_preferences=[str(x)[:60] for x in (merged.get("soft_preferences") or [])[:8]],
+            avoid_constraints=[str(x)[:60] for x in (merged.get("avoid_constraints") or merged.get("avoid") or [])[:8]],
+            evidence_focus=[str(x)[:30] for x in (merged.get("evidence_focus") or [])[:5]],
+            answer_goal=str(merged.get("answer_goal") or "")[:100],
+            ambiguity=str(merged.get("ambiguity") or "")[:120],
         )
 
         llm_used = "rule+llm" if llm_result else "rule_only"
@@ -243,8 +258,19 @@ class RouterAgent(BaseAgent):
 
         包含: 约束、欧米待答问题、上一轮对话、最近3轮摘要。
         """
+        visual = state.visual_result if isinstance(state.visual_result, dict) else {}
+        visual_parts: list[str] = []
+        if visual and float(visual.get("confidence") or 0) >= 0.35:
+            details = [
+                f"{label}:{visual.get(key)}"
+                for key, label in (("brand", "品牌"), ("product_name", "名称"), ("model", "型号"),
+                                   ("specs", "规格"), ("category", "目录大类"), ("sub_category", "细类"))
+                if visual.get(key)
+            ]
+            if details:
+                visual_parts.append("图片识别到的商品线索（仅作辅助，不要当作用户原话）：" + "；".join(details))
         if not state.conversation_id:
-            return ""
+            return ("## 图片线索\n- " + "\n- ".join(visual_parts) + "\n") if visual_parts else ""
         try:
             from app.services.conversation_service import get_conversation_service
             svc = get_conversation_service()
@@ -306,6 +332,7 @@ class RouterAgent(BaseAgent):
                         aa = t.get("assistant_answer", "")[:80]
                         parts.append(f"  第{i+1}轮 — 用户: 「{uq}」→ 欧米: 「{aa}」")
 
+            parts.extend(visual_parts)
             if parts:
                 return "## 对话上下文\n" + "\n".join(f"- {p}" for p in parts) + "\n"
             return ""

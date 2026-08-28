@@ -54,7 +54,7 @@ fun OrderScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(uiState.orders) { order ->
-                    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Surface)) {
+                    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                         Column(Modifier.padding(14.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(order.orderId, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Primary)

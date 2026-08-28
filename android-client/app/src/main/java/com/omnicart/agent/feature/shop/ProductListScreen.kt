@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.omnicart.agent.feature.product.ProductCard
 import com.omnicart.agent.feature.product.ProductDetailSheet
+import com.omnicart.agent.core.design.OmiLogo
 
 val CATEGORY_OPTIONS = listOf(
     null to "全部",
@@ -33,6 +34,10 @@ val CATEGORY_OPTIONS = listOf(
     "美妆护肤" to "美妆护肤",
     "服饰运动" to "服饰运动",
     "食品饮料" to "食品饮料",
+    "家居用品" to "家居用品",
+    "母婴用品" to "母婴用品",
+    "运动户外" to "运动户外",
+    "个护清洁" to "个护清洁",
 )
 
 @Composable
@@ -69,16 +74,16 @@ fun ProductListScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f), tonalElevation = 0.dp) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Storefront, null, tint = MaterialTheme.colorScheme.primary)
+                    OmiLogo(size = 40.dp, contentDescription = "欧米")
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
                         Text("精选好物", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text(
-                            "已为你收录 ${uiState.totalCount} 件可比价、可追溯商品",
+                            "已为你收录 ${uiState.totalCount} 件好物，慢慢挑，不着急",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -93,7 +98,7 @@ fun ProductListScreen(
                     Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Search, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(8.dp))
-                        Text("去小O页输入需求，获取 AI 个性化推荐", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("告诉欧米你想买什么，帮你缩小选择范围", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -102,6 +107,7 @@ fun ProductListScreen(
             ScrollableTabRow(
                 selectedTabIndex = CATEGORY_OPTIONS.indexOfFirst { it.first == uiState.selectedCategory },
                 edgePadding = 16.dp,
+                containerColor = MaterialTheme.colorScheme.surface,
             ) {
                 CATEGORY_OPTIONS.forEach { (cat, label) ->
                     Tab(selected = uiState.selectedCategory == cat, onClick = { viewModel.selectCategory(cat) },

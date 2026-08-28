@@ -52,11 +52,11 @@ class QwenOmni:
     # ASR: 音频 → 文字（DashScope multimodal API）
     # ============================================================
 
-    async def transcribe(self, audio_bytes: bytes, hint: str = "") -> str:
+    async def transcribe(self, audio_bytes: bytes, hint: str = "", mime_type: str = "audio/wav") -> str:
         """纯转写：音频 → 文字。prompt 要求只输出转写结果。"""
         from app.prompts.gateway_prompts import get_asr_transcribe_prompt
         prompt = hint or get_asr_transcribe_prompt()
-        result = await self._call_multimodal(audio_bytes, prompt, system="")
+        result = await self._call_multimodal(audio_bytes, prompt, system="", audio_mime=mime_type)
         return (result.get("text") or "").strip()
 
     async def transcribe_and_recommend(self, audio_bytes: bytes) -> dict:
@@ -72,11 +72,11 @@ class QwenOmni:
         )
 
     async def _call_multimodal(
-        self, audio_bytes: bytes, text: str, system: str = "",
+        self, audio_bytes: bytes, text: str, system: str = "", audio_mime: str = "audio/wav",
     ) -> dict:
         """DashScope multimodal-generation API — 异步 SSE 流式。"""
         audio_b64 = base64.b64encode(audio_bytes).decode()
-        audio_uri = f"data:audio/wav;base64,{audio_b64}"
+        audio_uri = f"data:{audio_mime};base64,{audio_b64}"
 
         content = [{"text": text}, {"audio": audio_uri}]
         messages = [

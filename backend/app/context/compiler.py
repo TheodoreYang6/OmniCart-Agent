@@ -69,12 +69,14 @@ def compile_context(state: WorkflowState, context_bundle=None) -> str:
             parts.append(f"⚠️ 用户上传了商品图片，识别结果: {', '.join(vis_parts)}。")
             parts.append("拍照识图=搜同款意图。请先介绍同款商品（如有），再横向推荐同类商品。分清'这就是这款👇'和'同类推荐📌'。")
 
-    # 4. 候选商品 — 有视觉结果时传 Top 5（防止识图目标被挤出前3）
-    # bug 修复（spec §3）：以前无图时只给 LLM 前 3 个，而前端渲染 5-20 个
-    # → 回答讲 A/B、卡片列 C/D/E。现提升为 5 且把引用集写回 state，
-    # 由 SSE 层按此集合置顶 products，保证"回答讲的就是卡片列的前几个"。
-    top_n = 5
-    products = state.retrieved_products[:top_n]
+    # 4. 候选商品。若 SSE 已锁定推荐简报，模型只能看到首选 1-3 款，
+    # 防止“正文提到备选、首选卡却是另一批商品”。未锁定时保留旧 Top 5 行为。
+    primary_ids = list(getattr(state, "primary_product_ids", None) or [])
+    if primary_ids:
+        by_id = {p.get("product_id"): p for p in state.retrieved_products}
+        products = [by_id[pid] for pid in primary_ids if pid in by_id]
+    else:
+        products = state.retrieved_products[:5]
     candidate_pids = []
     if products:
         parts.append("\n## 候选商品")
@@ -95,21 +97,37 @@ def compile_context(state: WorkflowState, context_bundle=None) -> str:
                 match_desc = "，基本匹配你的需求"
 
             parts.append(f"{i}. {brand} {title[:50]} — ¥{price}{match_desc}")
+            facts = p.get("product_facts", []) or []
+            if facts:
+                visible = []
+                for fact in facts[:8]:
+                    key = fact.get("fact_key", "")
+                    label = {
+                        "nutrition.zero_sugar": "0糖", "nutrition.low_sugar": "低糖",
+                        "nutrition.zero_fat": "0脂", "nutrition.low_fat": "低脂",
+                        "nutrition.zero_calorie": "0卡", "nutrition.low_calorie": "低卡",
+                        "nutrition.high_protein": "高蛋白",
+                    }.get(key)
+                    if label:
+                        visible.append(label)
+                if visible:
+                    parts.append(f"   可验证属性: {'、'.join(dict.fromkeys(visible))}")
 
-        # 引用集写回 state（spec §3）：SSE 层据此置顶 products，保证答文与列表一致
+        # 引用集写回 state；锁定首选时这恰好是首选 ID，不得再被扩展为长候选列表。
         try:
             state.answer_cited_pids = [p for p in candidate_pids if p]
         except Exception:  # noqa: BLE001 — 写回失败不影响回答生成
             pass
 
-        # 关键证据 (每商品1条，≤100字)
+        # 关键证据：每张首选卡至少有一条，避免第三张卡在文案中变成
+        # “只有标题没有理由”的黑盒推荐。
         if state.evidence_list:
             evidence_lines = []
-            for pid in candidate_pids[:2]:
+            for pid in candidate_pids:
                 product_evs = [e for e in state.evidence_list if e.get("product_id") == pid]
                 if product_evs:
                     for e in product_evs[:1]:
-                        content = e.get("content", "")[:100]
+                        content = e.get("content", "")[:80]
                         if content and "余弦相似度" not in content:
                             evidence_lines.append(f"  [{pid}] {content}")
             if evidence_lines:
@@ -137,8 +155,8 @@ def compile_context(state: WorkflowState, context_bundle=None) -> str:
     # Token 预算安全网：超预算时按比例截断（保留头部：需求/约束/候选，尾部证据先舍）
     result = _enforce_token_budget(result)
 
-    # 写入日志文件供审计
-    _write_audit_log(state, result)
+    # 最终回答已由 ConversationContextAssembler 负责结构化审计；旧编译器不能再
+    # 将完整 prompt 追加写入无限增长的 audit_prompts.log（其中会包含会话内容）。
 
     return result
 
@@ -172,10 +190,10 @@ def _write_audit_log(state: WorkflowState, prompt: str):
         products = []
         for p in state.retrieved_products[:5]:
             pid = p.get("product_id", "")
-            score = ""
+            decision = ""
             for d in state.decision_results:
                 if d.get("product_id") == pid:
-                    score = f"{d.get('display_score',0)}/10 {d.get('recommendation_level','')}"
+                    decision = d.get("match_label") or d.get("recommendation_level", "")
                     break
             products.append({
                 "id": pid,
@@ -183,7 +201,7 @@ def _write_audit_log(state: WorkflowState, prompt: str):
                 "brand": p.get("brand", ""),
                 "price": p.get("price", 0),
                 "reranker": round(p.get("reranker_score", 0), 3),
-                "score": score,
+                "decision": decision,
             })
 
         entry = {

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="欧米">
+  <rect width="512" height="512" rx="128" fill="#0B1630"/>
+  <g fill="none" stroke="#F6FAFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M159 244l-10-88q-2-20 17-9l53 34q37-18 74 0l53-34q19-11 17 9l-10 88q31 31 20 88-12 61-107 68-95-7-107-68-11-57 20-88Z"/>
+    <path d="M159 343h194l14 59H183l-15-59Z"/>
+    <path d="M136 325h38"/>
+  </g>
+  <g fill="#5DE1E6">
+    <circle cx="203" cy="267" r="15"/><circle cx="309" cy="267" r="15"/><circle cx="256" cy="304" r="9"/>
+    <circle cx="211" cy="422" r="13"/><circle cx="331" cy="422" r="13"/>
+  </g>
+  <path d="M222 304q34 25 68 0" fill="none" stroke="#5DE1E6" stroke-width="10" stroke-linecap="round"/>
+</svg>

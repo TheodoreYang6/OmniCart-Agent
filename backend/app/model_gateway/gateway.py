@@ -148,6 +148,10 @@ class ModelGateway:
 
         provider 缺 chat_with_tools（如 local 后端）或异常时返空结果，
         调用方（ToolDispatcher）按 no_match 降级，不阻断主链。
+
+        工具名的线路协议转换（点号不合 DeepSeek 的 name 规则）由 provider 层负责，
+        见 ``qwen_chat.generate_with_tools`` —— 那是唯一拼 HTTP 请求体的地方，
+        而 mock/local provider 按内部名匹配脚本，不能被改名。
         """
         cfg = self._capabilities.get(capability, {})
         model = cfg.get("model", "qwen3.7-flash-2026-07-15")

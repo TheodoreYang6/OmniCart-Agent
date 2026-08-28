@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Minus, Plus, ShoppingCart, Trash2 } from 'lucide-react'
 import { useCartStore } from '@/store/cartStore'
@@ -10,8 +10,10 @@ import { toast } from '@/store/toastStore'
 import { formatPrice } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Modal } from '@/components/ui/Modal'
+import { ShopActionCard } from '@/components/chat/ShopActionCard'
 import { useAuthStore } from '@/store/authStore'
-import type { CartItem } from '@/api/types'
+import type { CartItem, CheckoutPreviewResponse, CheckoutSubmitResponse } from '@/api/types'
 
 export function CartPage() {
   const navigate = useNavigate()
@@ -24,13 +26,15 @@ export function CartPage() {
   const toggleSelectAll = useCartStore((s) => s.toggleSelectAll)
   const setQuantity = useCartStore((s) => s.setQuantity)
   const removeItem = useCartStore((s) => s.removeItem)
-  const checkout = useCartStore((s) => s.checkout)
-  const checkoutMessage = useCartStore((s) => s.checkoutMessage)
-  const dismissCheckout = useCartStore((s) => s.dismissCheckoutMessage)
+  const previewCheckout = useCartStore((s) => s.previewCheckout)
+  const submitCheckout = useCartStore((s) => s.submitCheckout)
   const pendingIds = useCartStore((s) => s.pendingIds)
   const isSelectAllPending = useCartStore((s) => s.isSelectAllPending)
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn())
   const [deleteTarget, setDeleteTarget] = useState<CartItem | null>(null)
+  const [preview, setPreview] = useState<CheckoutPreviewResponse | null>(null)
+  const [result, setResult] = useState<CheckoutSubmitResponse | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   const selected = items.filter((i) => i.selected)
   const totalPrice = selected.reduce((sum, i) => sum + i.price * i.quantity, 0)
@@ -38,15 +42,6 @@ export function CartPage() {
 
   // 场景③：下单完成 —— 欧米得意态瞬时浮层（1.6s 自动消失，不打断跳转）
   const [orderCheer, setOrderCheer] = useState(false)
-
-  useEffect(() => {
-    if (checkoutMessage) {
-      setOrderCheer(true)
-      const t = setTimeout(() => setOrderCheer(false), 1600)
-      toast.success('下单成功')
-      return () => clearTimeout(t)
-    }
-  }, [checkoutMessage])
 
   const handleCheckout = async () => {
     if (selected.length === 0) {
@@ -58,13 +53,22 @@ export function CartPage() {
       navigate('/login', { state: { from: '/cart' } })
       return
     }
-    const msg = await checkout()
-    if (msg) {
-      setTimeout(() => {
-        dismissCheckout()
-        navigate('/orders')
-      }, 800)
+    const data = await previewCheckout()
+    if (data) {
+      setPreview(data)
     }
+  }
+
+  const confirmCheckout = async () => {
+    setSubmitting(true)
+    const data = await submitCheckout()
+    setSubmitting(false)
+    if (!data) return
+    setPreview(null)
+    setResult(data)
+    setOrderCheer(true)
+    toast.success('下单成功')
+    setTimeout(() => setOrderCheer(false), 1600)
   }
 
   return (
@@ -217,6 +221,41 @@ export function CartPage() {
         </div>
       )}
       <ConfirmDialog open={!!deleteTarget} title="移出购物车" description={`确定将“${deleteTarget?.title ?? ''}”移出购物车吗？`} onClose={() => setDeleteTarget(null)} onConfirm={async () => { if (!deleteTarget) return; await removeItem(deleteTarget.cart_item_id); setDeleteTarget(null) }} />
+
+      {/* 结算确认弹窗 */}
+      <Modal open={!!preview} onClose={() => setPreview(null)} title="确认订单" variant="center" className="sm:max-w-lg">
+        {preview && (
+          <div className="space-y-4">
+            <ShopActionCard card={preview.shop_card} />
+            {!preview.has_address && (
+              <p className="text-sm text-amber-600 dark:text-amber-300">还没有收货地址，请先填写后再结算。</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setPreview(null); navigate('/address') }} className="rounded-xl border border-[var(--field-border)] px-4 py-2 text-sm text-ink-soft transition hover:bg-[var(--surface-variant)]">修改地址</button>
+              <button
+                onClick={confirmCheckout}
+                disabled={submitting || !preview.has_address}
+                className="btn-primary px-5 py-2 text-sm disabled:opacity-50"
+              >
+                {submitting ? '提交中…' : '确认下单'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* 下单结果弹窗 */}
+      <Modal open={!!result} onClose={() => setResult(null)} title="下单成功" variant="center" className="sm:max-w-lg">
+        {result && (
+          <div className="space-y-4">
+            <ShopActionCard card={result.shop_card} />
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-soft">{result.answer || result.message}</p>
+            <div className="flex justify-end">
+              <button onClick={() => { setResult(null); navigate('/orders') }} className="btn-primary px-5 py-2 text-sm">查看订单</button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

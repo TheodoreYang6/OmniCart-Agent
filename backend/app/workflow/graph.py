@@ -25,7 +25,9 @@ from app.core.cache import cached, make_key, cache_set
 from app.core.config import REDIS_CACHE_TTL_WORKFLOW
 import json
 import logging
+
 _log = logging.getLogger(__name__)
+_MEMORY_RECALL_TIMEOUT_SECONDS = 1.5
 
 # 全局单例 — Agent 经 AgentManager 注册表装配（替换硬编码 import + new），
 # repo 通过 factory 注入，PG/JSON 自动切换。节点函数仍用 _router/_visual/... 引用，逻辑不变。
@@ -50,6 +52,7 @@ def get_response_agent():
 def get_response_guard():
     """暴露 ResponseGuard 单例 — 真流式路径流完后补跑 harness 检查。"""
     return _guard
+
 
 # 可注册路由表（spec §六）：条件边通过名称查找路由函数，支持业务侧覆盖/扩展。
 _ROUTES: dict = {}
@@ -83,29 +86,33 @@ MAX_SUPERVISOR_STEPS = 16
 
 async def _node_router(state: WorkflowState) -> WorkflowState:
     t0 = time.perf_counter()
-
-    # 有图片时：Router 和 Visual 并行（两者无依赖）
-    visual_task = None
-    if state.image_url:
-        visual_task = asyncio.create_task(_visual.parse(state.image_url, state.user_query))
-
     state = await _router.execute(state)
     state.timing["router_ms"] = round((time.perf_counter() - t0) * 1000)
 
-    # 等待并行 Visual 结果
-    if visual_task:
-        try:
-            state._visual_prefetch = await visual_task
-        except Exception:
-            state._visual_prefetch = None
+    # 视觉节点已经在 Router 之前产出结构化结果。只把足够可靠的目录大类
+    # 作为 Router 的补充约束，绝不改写用户原始 Query 或覆盖用户明确说出的品类。
+    visual = state.visual_result or {}
+    if isinstance(visual, dict) and float(visual.get("confidence") or 0) >= 0.55:
+        visual_category = str(visual.get("category") or "")
+        valid_categories = {"数码电子", "美妆护肤", "服饰运动", "食品饮料", "家居用品", "母婴用品", "运动户外", "个护清洁"}
+        if visual_category in valid_categories:
+            if not state.constraints.category:
+                state.constraints.category = visual_category
+                state.retrieval_plan.category = visual_category
+            if not state.constraints.sub_category and visual.get("sub_category"):
+                state.constraints.sub_category = str(visual["sub_category"])
+                state.retrieval_plan.sub_category = state.constraints.sub_category
 
     # Memory Lite: 约束合并 → context_snapshot (ConversationService 统一管理)
     conv_svc = get_conversation_service()
     if state.conversation_id:
         try:
-            state.constraints = await conv_svc.merge_constraints(
-                state.conversation_id, state.constraints
-            )
+            # “问欧米”已经由可信 product_id 锁定了单品。它的默认任务是介绍
+            # 当前商品，而不是重新执行上一轮的购物任务；继承旧预算/旧品类会
+            # 把一件正常商品错误标为“未满足本次预算或品类条件”。用户若明确
+            # 提出预算、对比或替代，Router 已会把它写进本轮 constraints。
+            if state.retrieval_scope != "exact_product":
+                state.constraints = await conv_svc.merge_constraints(state.conversation_id, state.constraints)
             await conv_svc.set_last_context(
                 state.conversation_id,
                 query=state.user_query,
@@ -116,9 +123,10 @@ async def _node_router(state: WorkflowState) -> WorkflowState:
 
     # Memory-aware：从 MemoryBank 召回长期偏好 → used_memories，供 Decision 评分消费（spec §四）。
     # 无 user_id / 该品类无偏好条目时为空 → 评分不变（评测 demo 用户无条目，指标不回退）。
-    # Phase 3 A2A：动态编排模式下（run_workflow 已绑请求级黑板 ContextVar），
-    # 召回改后台任务发布 memories.ready，与检索/精排并行；
-    # Decision 消费前 wait_for（超时降级空）。legacy 模式（无黑板）保持内联 await。
+    # 动态编排模式同样发布 memories.ready，但召回本身在 Router 以内以严格的
+    # 请求级 deadline 完成。此前把任务放到后台、只在 Decision 等待，会因 LangGraph
+    # 节点上下文切换或检索耗时变化导致“慢偏好偶尔被采纳、快偏好偶尔丢失”。
+    # 真实召回通常远低于 1.5 秒；超时直接空降级，换取确定性与不污染评分。
     from app.framework.blackboard import current_board
 
     bb = current_board()
@@ -133,15 +141,17 @@ async def _node_router(state: WorkflowState) -> WorkflowState:
             conversation_id=state.conversation_id or "",
         )
         if bb is not None:
-            async def _recall_bg():
-                try:
-                    mems = await recall_used_memories(**_recall_kwargs)
-                except Exception as e:  # noqa: BLE001
-                    _log.debug(f"used_memories recall skipped: {e}")
-                    mems = []
-                await bb.publish("memories.ready", {"memories": mems or []}, producer="router")
-
-            bb.spawn(_recall_bg())
+            try:
+                state.used_memories = await asyncio.wait_for(
+                    recall_used_memories(**_recall_kwargs), timeout=_MEMORY_RECALL_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                _log.debug("used_memories recall timed out")
+                state.used_memories = []
+            except Exception as e:  # noqa: BLE001
+                _log.debug(f"used_memories recall skipped: {e}")
+                state.used_memories = []
+            await bb.publish("memories.ready", {"memories": state.used_memories or []}, producer="router")
         else:
             try:
                 state.used_memories = await recall_used_memories(**_recall_kwargs)
@@ -160,79 +170,44 @@ async def _node_visual(state: WorkflowState) -> WorkflowState:
         state.timing["visual_ms"] = 0
         return state
 
-    # 优先用 Router 并行预取的结果
-    result = getattr(state, '_visual_prefetch', None)
-    if result is not None:
-        delattr(state, '_visual_prefetch')
-    else:
-        result = await _visual.parse(state.image_url, state.user_query)
+    # 视觉只在此节点执行一次。Router、实体解析和最终答案复用这份结果。
+    result = await _visual.parse(state.image_url, state.user_query_original or state.user_query)
     if result:
         # 归一化为 dict（缓存命中返回 VisualResult，反序列化器已修复）
         vr = result if isinstance(result, dict) else result.model_dump()
         state.visual_result = vr
         p_name = vr.get("product_name", "") or ""
         p_brand = vr.get("brand", "") or ""
-        p_cat = vr.get("category", "") or ""
-        p_price = vr.get("price")
+        p_model = vr.get("model", "") or ""
         p_specs = vr.get("specs", "") or ""
         p_conf = vr.get("confidence", 0) or 0
+        try:
+            from app.services.visual_catalog_resolver import VisualCatalogResolver
 
-        # 视觉信息注入：高置信度精确匹配，低置信度引导搜索
-        if p_conf >= 0.2:
-            extra_info = [x for x in [p_name, p_brand, p_cat, p_specs] if x]
-            if extra_info:
-                state.user_query = f"{state.user_query} {' '.join(extra_info)}"
-
-            # ① 品类覆盖：以视觉为准，无条件清空旧约束防止泄漏
-            mapped_cat = _map_visual_category(p_cat) if p_cat else ""
-            if mapped_cat:
-                state.constraints.category = mapped_cat
-                state.constraints.sub_category = p_cat or ""
-            # 有视觉结果时清空旧场景/预算（防止上一轮泄漏）
-            state.constraints.scenario = None
-            state.constraints.scenario_keywords = []
-            state.constraints.budget_min = None
-            state.constraints.budget_max = None
-
-            # ② 精确匹配：仅高置信度(≥0.5)执行，低置信度跳过（同类推荐即可）
-            if p_conf >= 0.5:
-                try:
-                    from app.core.database import get_session_sync
-                    from app.models.product import ProductModel
-                    from sqlalchemy import select, or_, func
-                    factory = get_session_sync()
-                    if factory:
-                        async with factory() as session:
-                            conditions = []
-                            if p_brand and len(p_brand) >= 2 and not (p_brand.isascii() and len(p_brand) <= 3 and p_brand.isalpha()):
-                                conditions.append(ProductModel.brand.ilike(f"%{p_brand}%"))
-                            for window in [3, 2]:
-                                for i in range(len(p_name) - window + 1):
-                                    kw = p_name[i:i + window]
-                                    if kw and len(kw) >= 2:
-                                        conditions.append(ProductModel.title.ilike(f"%{kw}%"))
-                            if conditions:
-                                result = await session.execute(
-                                    select(ProductModel.product_id)
-                                    .where(or_(*conditions))
-                                    .limit(5)
-                                )
-                                pids = [row[0] for row in result.fetchall()]
-                                state.visual_matched_pids = pids[:2]
-                except Exception:
-                    pass
+            resolution = await VisualCatalogResolver().resolve(vr)
+            state.product_resolution = resolution.payload
+            state.retrieval_scope = resolution.payload.get("retrieval_scope", "broad")
+            state.resolved_product_ids = list(resolution.payload.get("resolved_product_ids") or [])
+            if resolution.payload.get("match_type") in {"exact_product", "product_family"}:
+                state.retrieved_products = resolution.products
+                state.evidence_list = resolution.evidence
+                state.visual_matched_pids = list(state.resolved_product_ids)
+        except Exception as exc:  # catalog matching is an enhancement, never an image-upload failure
+            _log.warning("visual catalog resolution degraded: %s", exc)
 
         # 记录 trace
         step_num = len(state.trace_steps) + 1
-        state.trace_steps.append({
-            "step_id": f"T{step_num:03d}",
-            "agent_name": "Visual Agent (Qwen-VL)",
-            "action": "image_parse",
-            "input_summary": state.image_url[-30:],
-            "output_summary": f"product={p_name}, brand={p_brand}, confidence={p_conf}",
-            "latency_ms": 0,
-            "status": "success" if p_conf > 0 else "fallback",
-        })
+        state.trace_steps.append(
+            {
+                "step_id": f"T{step_num:03d}",
+                "agent_name": "Visual Agent (Qwen-VL)",
+                "action": "image_parse",
+                "input_summary": state.image_url[-30:],
+                "output_summary": f"product={p_name}, brand={p_brand}, model={p_model}, confidence={p_conf}",
+                "latency_ms": 0,
+                "status": "success" if p_conf > 0 else "fallback",
+            }
+        )
         state.timing["visual_ms"] = round((time.perf_counter() - t0) * 1000)
     return state
 
@@ -240,47 +215,134 @@ async def _node_visual(state: WorkflowState) -> WorkflowState:
 def _map_visual_category(cat: str) -> str:
     mapping = {
         # 美妆护肤
-        "精华": "美妆护肤", "面霜": "美妆护肤", "防晒": "美妆护肤", "粉底": "美妆护肤",
-        "粉底液": "美妆护肤", "口红": "美妆护肤", "唇釉": "美妆护肤", "面膜": "美妆护肤",
-        "洁面": "美妆护肤", "化妆水": "美妆护肤", "爽肤水": "美妆护肤", "眼霜": "美妆护肤",
-        "卸妆": "美妆护肤", "眉笔": "美妆护肤", "蜜粉": "美妆护肤", "散粉": "美妆护肤",
-        "护肤品": "美妆护肤", "彩妆": "美妆护肤",
+        "精华": "美妆护肤",
+        "面霜": "美妆护肤",
+        "防晒": "美妆护肤",
+        "粉底": "美妆护肤",
+        "粉底液": "美妆护肤",
+        "口红": "美妆护肤",
+        "唇釉": "美妆护肤",
+        "面膜": "美妆护肤",
+        "洁面": "美妆护肤",
+        "化妆水": "美妆护肤",
+        "爽肤水": "美妆护肤",
+        "眼霜": "美妆护肤",
+        "卸妆": "美妆护肤",
+        "眉笔": "美妆护肤",
+        "蜜粉": "美妆护肤",
+        "散粉": "美妆护肤",
+        "护肤品": "美妆护肤",
+        "彩妆": "美妆护肤",
         # 数码电子
-        "手机": "数码电子", "智能手机": "数码电子", "电脑": "数码电子", "笔记本": "数码电子",
-        "笔记本电脑": "数码电子", "耳机": "数码电子", "真无线耳机": "数码电子", "蓝牙耳机": "数码电子",
-        "充电宝": "数码电子", "移动电源": "数码电子", "平板": "数码电子", "平板电脑": "数码电子",
-        "充电器": "数码电子", "数据线": "数码电子", "键盘": "数码电子", "鼠标": "数码电子",
-        "音箱": "数码电子", "手表": "数码电子",
+        "手机": "数码电子",
+        "智能手机": "数码电子",
+        "电脑": "数码电子",
+        "笔记本": "数码电子",
+        "笔记本电脑": "数码电子",
+        "耳机": "数码电子",
+        "真无线耳机": "数码电子",
+        "蓝牙耳机": "数码电子",
+        "充电宝": "数码电子",
+        "移动电源": "数码电子",
+        "平板": "数码电子",
+        "平板电脑": "数码电子",
+        "充电器": "数码电子",
+        "数据线": "数码电子",
+        "键盘": "数码电子",
+        "鼠标": "数码电子",
+        "音箱": "数码电子",
+        "手表": "数码电子",
         # 服饰运动
-        "T恤": "服饰运动", "短袖": "服饰运动", "短袖T恤": "服饰运动", "速干T恤": "服饰运动",
-        "跑鞋": "服饰运动", "跑步鞋": "服饰运动", "篮球鞋": "服饰运动", "运动鞋": "服饰运动",
-        "徒步鞋": "服饰运动", "登山鞋": "服饰运动", "裤子": "服饰运动", "运动长裤": "服饰运动",
-        "运动短裤": "服饰运动", "户外裤": "服饰运动", "瑜伽裤": "服饰运动", "紧身裤": "服饰运动",
-        "卫衣": "服饰运动", "背包": "服饰运动", "双肩包": "服饰运动", "帽子": "服饰运动",
+        "T恤": "服饰运动",
+        "短袖": "服饰运动",
+        "短袖T恤": "服饰运动",
+        "速干T恤": "服饰运动",
+        "跑鞋": "服饰运动",
+        "跑步鞋": "服饰运动",
+        "篮球鞋": "服饰运动",
+        "运动鞋": "服饰运动",
+        "徒步鞋": "服饰运动",
+        "登山鞋": "服饰运动",
+        "裤子": "服饰运动",
+        "运动长裤": "服饰运动",
+        "运动短裤": "服饰运动",
+        "户外裤": "服饰运动",
+        "瑜伽裤": "服饰运动",
+        "紧身裤": "服饰运动",
+        "卫衣": "服饰运动",
+        "背包": "服饰运动",
+        "双肩包": "服饰运动",
+        "帽子": "服饰运动",
         "棒球帽": "服饰运动",
         # 食品饮料
-        "零食": "食品饮料", "坚果": "食品饮料", "饮料": "食品饮料", "咖啡": "食品饮料",
-        "速溶咖啡": "食品饮料", "茶叶": "食品饮料", "茶饮": "食品饮料", "牛奶": "食品饮料",
-        "酸奶": "食品饮料", "气泡水": "食品饮料", "碳酸饮料": "食品饮料", "功能饮料": "食品饮料",
-        "方便面": "食品饮料", "方便食品": "食品饮料", "调味品": "食品饮料", "酱油": "食品饮料",
-        "矿泉水": "食品饮料", "可乐": "食品饮料",
+        "零食": "食品饮料",
+        "坚果": "食品饮料",
+        "饮料": "食品饮料",
+        "咖啡": "食品饮料",
+        "速溶咖啡": "食品饮料",
+        "茶叶": "食品饮料",
+        "茶饮": "食品饮料",
+        "牛奶": "食品饮料",
+        "酸奶": "食品饮料",
+        "气泡水": "食品饮料",
+        "碳酸饮料": "食品饮料",
+        "功能饮料": "食品饮料",
+        "方便面": "食品饮料",
+        "方便食品": "食品饮料",
+        "调味品": "食品饮料",
+        "酱油": "食品饮料",
+        "矿泉水": "食品饮料",
+        "可乐": "食品饮料",
         # 家居用品
-        "保温杯": "家居用品", "水杯": "家居用品", "四件套": "家居用品", "床品": "家居用品",
-        "枕头": "家居用品", "被子": "家居用品", "毛巾": "家居用品", "收纳盒": "家居用品",
-        "锅具": "家居用品", "炒锅": "家居用品", "餐具": "家居用品", "砧板": "家居用品",
-        "台灯": "家居用品", "香薰": "家居用品", "花瓶": "家居用品",
+        "保温杯": "家居用品",
+        "水杯": "家居用品",
+        "四件套": "家居用品",
+        "床品": "家居用品",
+        "枕头": "家居用品",
+        "被子": "家居用品",
+        "毛巾": "家居用品",
+        "收纳盒": "家居用品",
+        "锅具": "家居用品",
+        "炒锅": "家居用品",
+        "餐具": "家居用品",
+        "砧板": "家居用品",
+        "台灯": "家居用品",
+        "香薰": "家居用品",
+        "花瓶": "家居用品",
         # 母婴用品
-        "纸尿裤": "母婴用品", "尿不湿": "母婴用品", "奶瓶": "母婴用品", "奶嘴": "母婴用品",
-        "婴儿推车": "母婴用品", "安全座椅": "母婴用品", "婴儿湿巾": "母婴用品",
-        "婴儿床": "母婴用品", "绘本": "母婴用品", "积木": "母婴用品",
+        "纸尿裤": "母婴用品",
+        "尿不湿": "母婴用品",
+        "奶瓶": "母婴用品",
+        "奶嘴": "母婴用品",
+        "婴儿推车": "母婴用品",
+        "安全座椅": "母婴用品",
+        "婴儿湿巾": "母婴用品",
+        "婴儿床": "母婴用品",
+        "绘本": "母婴用品",
+        "积木": "母婴用品",
         # 运动户外
-        "帐篷": "运动户外", "睡袋": "运动户外", "登山杖": "运动户外", "瑜伽垫": "运动户外",
-        "哑铃": "运动户外", "跳绳": "运动户外", "篮球": "运动户外", "足球": "运动户外",
-        "羽毛球拍": "运动户外", "泳镜": "运动户外", "滑板": "运动户外",
+        "帐篷": "运动户外",
+        "睡袋": "运动户外",
+        "登山杖": "运动户外",
+        "瑜伽垫": "运动户外",
+        "哑铃": "运动户外",
+        "跳绳": "运动户外",
+        "篮球": "运动户外",
+        "足球": "运动户外",
+        "羽毛球拍": "运动户外",
+        "泳镜": "运动户外",
+        "滑板": "运动户外",
         # 个护清洁
-        "洗发水": "个护清洁", "护发素": "个护清洁", "沐浴露": "个护清洁", "身体乳": "个护清洁",
-        "牙膏": "个护清洁", "牙刷": "个护清洁", "洗衣液": "个护清洁", "吹风机": "个护清洁",
-        "剃须刀": "个护清洁", "卫生巾": "个护清洁",
+        "洗发水": "个护清洁",
+        "护发素": "个护清洁",
+        "沐浴露": "个护清洁",
+        "身体乳": "个护清洁",
+        "牙膏": "个护清洁",
+        "牙刷": "个护清洁",
+        "洗衣液": "个护清洁",
+        "吹风机": "个护清洁",
+        "剃须刀": "个护清洁",
+        "卫生巾": "个护清洁",
     }
     # 模糊匹配：子串命中即可
     for k, v in mapping.items():
@@ -292,15 +354,152 @@ def _map_visual_category(cat: str) -> str:
 @register_capability("retrieval")
 async def _node_retrieval(state: WorkflowState) -> WorkflowState:
     t0 = time.perf_counter()
-    result = await _retrieval.execute(state)
+    # 商品聚焦入口会带着由 catalog id 解析出的受信任范围进入图。这里直接
+    # 复用该范围，避免再跑一轮向量/BM25 后才覆盖结果；也保证后续节点永远
+    # 看不到范围外的候选。
+    locked_ids = list(state.resolved_product_ids or [])
+    if state.retrieval_scope in {"exact_product", "product_family"} and locked_ids:
+        locked = [p for p in (state.retrieved_products or []) if p.get("product_id") in locked_ids]
+        if locked:
+            state.retrieved_products = locked
+            state.evidence_list = [e for e in (state.evidence_list or []) if e.get("product_id") in set(locked_ids)]
+            state.visual_matched_pids = locked_ids
+            state.trace_steps.append(
+                {
+                    "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                    "agent_name": "Product Entity Resolver",
+                    "action": "reuse_catalog_identity_lock",
+                    "input_summary": (state.user_query_original or state.user_query)[:80],
+                    "output_summary": f"{state.retrieval_scope}: {locked_ids}",
+                    "latency_ms": 0,
+                    "status": "success",
+                }
+            )
+            state.timing["retrieval_ms"] = 0
+            return state
+    # 精准身份召回与语义检索并行：身份层只看名称/品牌/型号别名，
+    # 不允许营销文案或配件描述决定“用户指定了什么商品”。
+    from app.services.product_entity_resolver import ProductEntityResolver
+
+    # VisualCatalogResolver already made the only allowed image→catalog decision.
+    # A no-match/ambiguous image may guide category retrieval through Router, but
+    # must never be reinterpreted here by the generic text entity resolver.
+    visual_resolution = state.product_resolution or {}
+    visual = {} if visual_resolution.get("source") == "visual_catalog" else (
+        state.visual_result.model_dump() if hasattr(state.visual_result, "model_dump") else (state.visual_result or {})
+    )
+    identity_query = state.user_query_original or state.user_query
+    # V9 单品/系列命中先锁定再检索：无需为本该跳过的泛推荐工具生成 embedding、
+    # rerank 与 Filter。旧链路保留并行解析以维持原有吞吐。
+    from app.core.config import USE_V9_CHUNK_RETRIEVAL
+    if USE_V9_CHUNK_RETRIEVAL:
+        try:
+            early_resolution = await ProductEntityResolver().resolve(identity_query, visual)
+        except Exception as exc:
+            _log.warning("v9 product identity resolution degraded: %s", exc)
+            early_resolution = None
+        if early_resolution is not None:
+            payload = early_resolution.payload
+            # Keep an honest visual no-match/ambiguous explanation when the text
+            # resolver has no stronger identity evidence.  Otherwise the later
+            # generic resolver erases the image result before the client sees it.
+            prior_visual_resolution = state.product_resolution if (state.product_resolution or {}).get("source") == "visual_catalog" else None
+            if prior_visual_resolution and payload.get("match_type") in {"no_match", "ambiguous"}:
+                payload = prior_visual_resolution
+            state.product_resolution = payload
+            state.retrieval_scope = payload.get("retrieval_scope", "broad")
+            state.resolved_product_ids = list(payload.get("resolved_product_ids") or [])
+            if payload.get("match_type") in {"exact_product", "product_family"}:
+                state.retrieved_products = early_resolution.products
+                state.evidence_list = early_resolution.evidence
+                state.visual_matched_pids = list(state.resolved_product_ids)
+                state.structured_retrieval_report = {"version": "v9", "identity_locked": True}
+                state.trace_steps.append({"step_id": f"T{len(state.trace_steps) + 1:03d}",
+                                          "agent_name": "Product Entity Resolver", "action": "catalog_identity_lock",
+                                          "input_summary": identity_query[:80],
+                                          "output_summary": f"{payload.get('match_type')}: {state.resolved_product_ids}",
+                                          "latency_ms": 0, "status": "success"})
+                # 唯一精确主体不再进入泛检索：普通模式与深度模式共用 dossier
+                # 工具，确保规格/FAQ/评价/风险都来自一个可信单品档案。
+                if payload.get("match_type") == "exact_product" and len(state.resolved_product_ids) == 1:
+                    from app.workflow.react.runtime import ToolRuntime
+
+                    state.focus_product_id = state.resolved_product_ids[0]
+                    await ToolRuntime.execute_batch(state, [{
+                        "id": "identity_dossier", "name": "shopping.product_dossier",
+                        "args": {"product_id": state.focus_product_id, "focus": "overview"},
+                    }])
+                state.timing["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
+                return state
+            if payload.get("match_type") == "ambiguous":
+                state.needs_clarification = True
+                state.clarification_question = payload.get("label", "你想确认的是哪一款商品？")
+                state.clarification_options = []
+                state.retrieved_products, state.evidence_list = [], []
+                return state
+    if USE_V9_CHUNK_RETRIEVAL:
+        resolver_task = asyncio.get_running_loop().create_future()
+        resolver_task.set_result(early_resolution)
+    else:
+        resolver_task = asyncio.create_task(ProductEntityResolver().resolve(identity_query, visual))
+    # 普通模式也走与 ReAct 相同的受控工具执行器：一个 shopping.search 批次，
+    # 不启动 LLM loop。身份层没有锁定主体时才需要向量检索。
+    if USE_V9_CHUNK_RETRIEVAL:
+        from app.workflow.react.runtime import ToolRuntime
+
+        result = await ToolRuntime.run_normal_search(state)
+    else:
+        result = await _retrieval.execute(state)
+    try:
+        resolution = await resolver_task
+    except Exception as exc:  # 身份层不可用时绝不阻断泛推荐
+        _log.warning("product identity resolution degraded: %s", exc)
+        resolution = None
+
+    if resolution is not None:
+        payload = resolution.payload
+        match_type = payload.get("match_type", "no_match")
+        state.product_resolution = payload
+        state.retrieval_scope = payload.get("retrieval_scope", "broad")
+        state.resolved_product_ids = list(payload.get("resolved_product_ids") or [])
+        # RetrievalAgent normally returns the same WorkflowState, but copy the
+        # protocol fields to its returned value as well to keep that contract explicit.
+        result.product_resolution = state.product_resolution
+        result.retrieval_scope = state.retrieval_scope
+        result.resolved_product_ids = state.resolved_product_ids
+        if match_type in {"exact_product", "product_family"}:
+            # 解析成功后的范围是硬边界：后续 rerank/decision/response 只能看到它。
+            result.retrieved_products = resolution.products
+            result.evidence_list = resolution.evidence
+            state.visual_matched_pids = list(state.resolved_product_ids)
+            state.trace_steps.append(
+                {
+                    "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                    "agent_name": "Product Entity Resolver",
+                    "action": "catalog_identity_lock",
+                    "input_summary": identity_query[:80],
+                    "output_summary": f"{match_type}: {state.resolved_product_ids}",
+                    "latency_ms": 0,
+                    "status": "success",
+                }
+            )
+        elif match_type == "ambiguous":
+            # 不让泛检索替用户猜产品线；Response 节点只会交付澄清问题。
+            result.retrieved_products = []
+            result.evidence_list = []
+            state.needs_clarification = True
+            state.clarification_question = payload.get("label", "你想确认的是哪一款商品？")
+            state.clarification_options = []
     # RAG trace: 记录 embedding 搜索结果
     try:
         from app.observability.rag_logger import RagTrace
+
         _rag = RagTrace(session_id=state.session_id or "", query=state.user_query)
         _rag.set_embedding(
             query_vec=[],  # 向量在检索内部，不暴露
             candidates=result.retrieved_products or [],
             latency_ms=round((time.perf_counter() - t0) * 1000),
+            retrieval_mode=(result.structured_retrieval_report or {}).get("version", "legacy"),
         )
         state._rag_trace = _rag
     except Exception:
@@ -321,11 +520,9 @@ async def _node_retrieval(state: WorkflowState) -> WorkflowState:
     if exclude_tags and result.retrieved_products:
         before = len(result.retrieved_products)
         result.retrieved_products = [
-            p for p in result.retrieved_products
-            if not any(
-                tag.lower() in (p.get("title", "") + p.get("brand", "")).lower()
-                for tag in exclude_tags
-            )
+            p
+            for p in result.retrieved_products
+            if not any(tag.lower() in (p.get("title", "") + p.get("brand", "")).lower() for tag in exclude_tags)
         ]
         filtered = before - len(result.retrieved_products)
         if filtered:
@@ -336,6 +533,17 @@ async def _node_retrieval(state: WorkflowState) -> WorkflowState:
         state.user_query = state.user_query_original
         state.user_query_original = None
     result.timing["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
+    # A single-target request still owns a group.  This makes the state contract
+    # identical for normal/deep and single/compound retrieval, and prevents a
+    # later ReAct tool call from treating the shared list as scratch storage.
+    if not result.retrieval_groups and result.retrieved_products:
+        result.retrieval_groups = [{
+            "group_id": "g1", "role": "推荐商品", "query": result.user_query,
+            "hard_constraints": result.structured_retrieval_report or {},
+            "product_ids": [p.get("product_id") for p in result.retrieved_products if p.get("product_id")],
+            "evidence_product_ids": list({e.get("product_id") for e in result.evidence_list if e.get("product_id")}),
+            "status": "matched", "missing_reason": "",
+        }]
     return result
 
 
@@ -379,8 +587,11 @@ async def _node_compare_retrieval(state: WorkflowState) -> WorkflowState:
         # 子查询命中里只保留与目标词相关的头部（品牌/型号词命中标题才算目标命中）
         tgt_low = tgt.lower()
         tokens = [w for w in tgt_low.replace("的", " ").split() if w] or [tgt_low]
-        hits = [p for p in res.retrieved_products
-                if any(w in (p.get("brand", "") + p.get("title", "")).lower() for w in tokens)]
+        hits = [
+            p
+            for p in res.retrieved_products
+            if any(w in (p.get("brand", "") + p.get("title", "")).lower() for w in tokens)
+        ]
         others = [p for p in res.retrieved_products if p not in hits]
         per_target.append(hits + others)
         counts[tgt] = len(hits)
@@ -398,11 +609,9 @@ async def _node_compare_retrieval(state: WorkflowState) -> WorkflowState:
     state.retrieved_products = trim_for_grid(merged[:12])
     # 目标命中商品钉顶（复用精确匹配机制：reranker/decision 均会保持其在前），
     # 否则后续重排会把目标挤出生成 prompt 的候选 top-N → LLM 看不到命中商品（复测实锤）
-    hit_pids = [lst[0].get("product_id", "") for lst, tgt in zip(per_target, targets)
-                if lst and counts.get(tgt, 0) > 0]
+    hit_pids = [lst[0].get("product_id", "") for lst, tgt in zip(per_target, targets) if lst and counts.get(tgt, 0) > 0]
     if hit_pids:
-        state.visual_matched_pids = list(dict.fromkeys(
-            (state.visual_matched_pids or []) + [p for p in hit_pids if p]))
+        state.visual_matched_pids = list(dict.fromkeys((state.visual_matched_pids or []) + [p for p in hit_pids if p]))
         for p in state.retrieved_products:
             if p.get("product_id") in hit_pids:
                 p["reranker_score"] = max(p.get("reranker_score", 0), 0.95)
@@ -420,8 +629,7 @@ async def _node_compare_retrieval(state: WorkflowState) -> WorkflowState:
     for tgt in targets:
         n = counts.get(tgt, 0)
         lines.append(f"- 「{tgt}」库内命中 {n} 件" + ("（未找到，请明确告知用户无法对比此目标）" if n == 0 else ""))
-    state.context_prompt = (state.context_prompt or "") + \
-        "\n[对比检索结果（已逐目标验证）]\n" + "\n".join(lines)
+    state.context_prompt = (state.context_prompt or "") + "\n[对比检索结果（已逐目标验证）]\n" + "\n".join(lines)
 
     from app.framework.blackboard import current_board as _cb
 
@@ -429,15 +637,17 @@ async def _node_compare_retrieval(state: WorkflowState) -> WorkflowState:
     if bb is not None:
         await bb.publish("compare.targets_retrieved", {"counts": counts}, producer="compare_retrieval")
 
-    state.trace_steps.append({
-        "step_id": f"T{len(state.trace_steps) + 1:03d}",
-        "agent_name": "Compare Retrieval (multi-target)",
-        "action": "parallel_target_retrieval",
-        "input_summary": f"targets={targets}",
-        "output_summary": f"counts={counts}, merged={len(state.retrieved_products)}",
-        "latency_ms": round((time.perf_counter() - t0) * 1000),
-        "status": "success" if any(counts.values()) else "fallback",
-    })
+    state.trace_steps.append(
+        {
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": "Compare Retrieval (multi-target)",
+            "action": "parallel_target_retrieval",
+            "input_summary": f"targets={targets}",
+            "output_summary": f"counts={counts}, merged={len(state.retrieved_products)}",
+            "latency_ms": round((time.perf_counter() - t0) * 1000),
+            "status": "success" if any(counts.values()) else "fallback",
+        }
+    )
     state.timing["compare_retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
     return state
 
@@ -455,6 +665,65 @@ async def _node_multi_query_retrieval(state: WorkflowState) -> WorkflowState:
     if len(sub_queries) < 2:
         return await _node_retrieval(state)
 
+    # V9 将所有 Router 独立目标收进同一受控 shopping.search 批次：每个调用在
+    # 隔离快照内执行，再由 ToolRuntime 按 Router 顺序归并。不要再为每个目标启动
+    # 一条嵌套工作流，否则工具账本、去重策略和预算都会脱离主请求。
+    from app.core.config import USE_V9_CHUNK_RETRIEVAL
+    if USE_V9_CHUNK_RETRIEVAL:
+        from app.workflow.react.runtime import ToolRuntime
+
+        await ToolRuntime.run_normal_search(state)
+        by_pid = {str(p.get("product_id") or ""): p for p in (state.retrieved_products or [])}
+        groups_by_id = {
+            str(g.get("group_id") if isinstance(g, dict) else g.group_id): g
+            for g in (state.retrieval_groups or [])
+        }
+        per_group: list[list[dict]] = []
+        counts: dict[str, int] = {}
+        for index, sq in enumerate(sub_queries, 1):
+            role = sq.role or sq.query
+            group = groups_by_id.get(f"plan:{index}")
+            product_ids = (group.get("product_ids") if isinstance(group, dict) else getattr(group, "product_ids", [])) or []
+            products = [dict(by_pid[pid]) for pid in product_ids if pid in by_pid]
+            for product in products:
+                product["group_role"] = role
+            per_group.append(products)
+            counts[role] = len(products)
+
+        merged: list[dict] = []
+        seen: set[str] = set()
+        for offset in range(max((len(items) for items in per_group), default=0)):
+            for items in per_group:
+                if offset < len(items):
+                    pid = str(items[offset].get("product_id") or "")
+                    if pid and pid not in seen:
+                        seen.add(pid)
+                        merged.append(items[offset])
+        state.retrieved_products = trim_for_grid(merged[:12])
+        top_pids = [items[0].get("product_id", "") for items in per_group if items]
+        if top_pids:
+            state.visual_matched_pids = list(dict.fromkeys((state.visual_matched_pids or []) + top_pids))
+            for product in state.retrieved_products:
+                if product.get("product_id") in top_pids:
+                    product["reranker_score"] = max(product.get("reranker_score", 0), 0.95)
+        kept = {p.get("product_id") for p in state.retrieved_products}
+        state.evidence_list = [e for e in (state.evidence_list or []) if e.get("product_id") in kept]
+        missing = [role for role, count in counts.items() if count == 0]
+        stat = " ".join(f"{role}:{count}件" for role, count in counts.items())
+        miss_note = ("；" + "、".join(f"「{role}」未找到符合条件的商品" for role in missing) + "，回答时须如实说明") if missing else ""
+        state.context_prompt = (state.context_prompt or "") + f"\n[分组检索] {stat}{miss_note}"
+        state.trace_steps.append({
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": "Multi-Query Retrieval (tool batch)",
+            "action": "parallel_group_retrieval",
+            "input_summary": f"groups={[sq.role or sq.query for sq in sub_queries]}",
+            "output_summary": f"counts={counts}, merged={len(state.retrieved_products)}",
+            "latency_ms": round((time.perf_counter() - t0) * 1000),
+            "status": "success" if any(counts.values()) else "fallback",
+        })
+        state.timing["multi_query_retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
+        return state
+
     async def _retrieve_group(sq):
         sub = state.model_copy(deep=True)
         sub.user_query = sq.query
@@ -467,22 +736,34 @@ async def _node_multi_query_retrieval(state: WorkflowState) -> WorkflowState:
             sub.retrieval_plan.category = sq.category
         if sq.budget_hint:
             sub.constraints.budget_max = sq.budget_hint
+        # 子目标的 Router 约束必须和 query 一起进入 V9 工具签名；否则多目标会
+        # 错误共享主目标的偏好/避雷条件。
+        sub.retrieval_plan.entity_terms = list(sq.entity_terms or [])
+        sub.retrieval_plan.must_constraints = list(sq.must_constraints or [])
+        sub.retrieval_plan.soft_preferences = list(sq.soft_preferences or [])
+        sub.retrieval_plan.avoid_constraints = list(sq.avoid_constraints or [])
+        sub.retrieval_plan.evidence_focus = list(sq.evidence_focus or [])
+        sub.retrieval_plan.answer_goal = sq.answer_goal or sub.retrieval_plan.answer_goal
+        sub.retrieval_plan.ambiguity = sq.ambiguity or sub.retrieval_plan.ambiguity
         sub.retrieval_plan.sub_queries = []  # 子路不再递归拆分
         sub.retrieval_plan.top_k = max(4, state.retrieval_plan.top_k // len(sub_queries))
         return await _node_retrieval(sub)
 
-    results = await asyncio.gather(*[_retrieve_group(sq) for sq in sub_queries],
-                                   return_exceptions=True)
+    results = await asyncio.gather(*[_retrieve_group(sq) for sq in sub_queries], return_exceptions=True)
 
     per_group: list[list[dict]] = []
     counts: dict[str, int] = {}
     merged_ev: list[dict] = []
+    group_records = []
+    candidate_groups, candidate_trace, evidence_packs = [], [], {}
     for sq, res in zip(sub_queries, results):
         role = sq.role or sq.query
         if isinstance(res, Exception):
             _log.warning(f"multi_query group failed: {role}: {res}")
             per_group.append([])
             counts[role] = 0
+            group_records.append({"group_id": f"g{len(group_records) + 1}", "role": role,
+                                  "query": sq.query, "status": "failed", "missing_reason": "检索暂时失败"})
             continue
         prods = res.retrieved_products or []
         for p in prods:
@@ -490,6 +771,17 @@ async def _node_multi_query_retrieval(state: WorkflowState) -> WorkflowState:
         per_group.append(prods)
         counts[role] = len(prods)
         merged_ev.extend(res.evidence_list or [])
+        candidate_groups.extend(getattr(res, "candidate_groups", []) or [])
+        candidate_trace.extend(getattr(res, "candidate_trace", []) or [])
+        evidence_packs.update(getattr(res, "evidence_packs", {}) or {})
+        report = getattr(res, "structured_retrieval_report", {}) or {}
+        group_records.append({
+            "group_id": f"g{len(group_records) + 1}", "role": role, "query": sq.query,
+            "hard_constraints": report, "product_ids": [p.get("product_id") for p in prods if p.get("product_id")],
+            "evidence_product_ids": list({e.get("product_id") for e in (res.evidence_list or []) if e.get("product_id")}),
+            "status": "matched" if prods else "missing",
+            "missing_reason": "未找到同时满足当前条件的商品" if not prods else "",
+        })
 
     merged: list[dict] = []
     seen: set[str] = set()
@@ -501,11 +793,14 @@ async def _node_multi_query_retrieval(state: WorkflowState) -> WorkflowState:
                     seen.add(pid)
                     merged.append(lst[i])
     state.retrieved_products = trim_for_grid(merged[:12])
+    state.retrieval_groups = group_records
+    state.candidate_groups = candidate_groups
+    state.candidate_trace = candidate_trace
+    state.evidence_packs = evidence_packs
     # 每组 top1 钉顶（复用 compare 修复机制，防全局重排把某一组挤出生成 prompt 窗口）
     top_pids = [lst[0].get("product_id", "") for lst in per_group if lst]
     if top_pids:
-        state.visual_matched_pids = list(dict.fromkeys(
-            (state.visual_matched_pids or []) + [p for p in top_pids if p]))
+        state.visual_matched_pids = list(dict.fromkeys((state.visual_matched_pids or []) + [p for p in top_pids if p]))
         for p in state.retrieved_products:
             if p.get("product_id") in top_pids:
                 p["reranker_score"] = max(p.get("reranker_score", 0), 0.95)
@@ -521,27 +816,28 @@ async def _node_multi_query_retrieval(state: WorkflowState) -> WorkflowState:
     # 分组命中统计 → Response 分组回答依据（缺货组必须如实说明）
     stat = " ".join(f"{r}:{n}件" for r, n in counts.items())
     missing = [r for r, n in counts.items() if n == 0]
-    miss_note = ("；" + "、".join(f"「{r}」未找到符合条件的商品" for r in missing)
-                 + "，回答时须如实说明") if missing else ""
-    state.context_prompt = (state.context_prompt or "") + \
-        f"\n[分组检索] {stat}{miss_note}"
+    miss_note = (
+        ("；" + "、".join(f"「{r}」未找到符合条件的商品" for r in missing) + "，回答时须如实说明") if missing else ""
+    )
+    state.context_prompt = (state.context_prompt or "") + f"\n[分组检索] {stat}{miss_note}"
 
     from app.framework.blackboard import current_board as _cb2
 
     bb = _cb2()
     if bb is not None:
-        await bb.publish("multi_query.groups_retrieved", {"counts": counts},
-                         producer="multi_query_retrieval")
+        await bb.publish("multi_query.groups_retrieved", {"counts": counts}, producer="multi_query_retrieval")
 
-    state.trace_steps.append({
-        "step_id": f"T{len(state.trace_steps) + 1:03d}",
-        "agent_name": "Multi-Query Retrieval (grouped)",
-        "action": "parallel_group_retrieval",
-        "input_summary": f"groups={[sq.role or sq.query for sq in sub_queries]}",
-        "output_summary": f"counts={counts}, merged={len(state.retrieved_products)}",
-        "latency_ms": round((time.perf_counter() - t0) * 1000),
-        "status": "success" if any(counts.values()) else "fallback",
-    })
+    state.trace_steps.append(
+        {
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": "Multi-Query Retrieval (grouped)",
+            "action": "parallel_group_retrieval",
+            "input_summary": f"groups={[sq.role or sq.query for sq in sub_queries]}",
+            "output_summary": f"counts={counts}, merged={len(state.retrieved_products)}",
+            "latency_ms": round((time.perf_counter() - t0) * 1000),
+            "status": "success" if any(counts.values()) else "fallback",
+        }
+    )
     state.timing["multi_query_retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
     return state
 
@@ -551,6 +847,11 @@ async def _node_reranker(state: WorkflowState) -> WorkflowState:
     """Qwen Reranker 精排：对语义检索结果进行语义重排序"""
     t0 = time.perf_counter()
     products = state.retrieved_products
+    if (state.structured_retrieval_report or {}).get("version") == "v9":
+        # V9 的 shopping.search 已完成 Top24→Top12 本地 BGE 精排。再次精排不仅
+        # 浪费一次本地模型，还会打乱 LLM Filter 已确认的主选/备选顺序。
+        state.timing["rerank_ms"] = 0
+        return state
     # lite 档：跳过 Reranker LLM 调用（P2-1：state.mode 替代 [FAST_MODE] 字符串嵌 prompt）
     if state.mode == "lite":
         state.timing["rerank_ms"] = 0
@@ -574,15 +875,17 @@ async def _node_reranker(state: WorkflowState) -> WorkflowState:
         # 记录 trace
         step_num = len(state.trace_steps) + 1
         top3 = [f"{p.get('reranker_score', 0):.3f}" for p in state.retrieved_products[:3]]
-        state.trace_steps.append({
-            "step_id": f"T{step_num:03d}",
-            "agent_name": "Qwen Reranker",
-            "action": "semantic_rerank",
-            "input_summary": f"{len(products)} candidates",
-            "output_summary": f"reranked, top3 scores: {top3}",
-            "latency_ms": 0,
-            "status": "success",
-        })
+        state.trace_steps.append(
+            {
+                "step_id": f"T{step_num:03d}",
+                "agent_name": "Qwen Reranker",
+                "action": "semantic_rerank",
+                "input_summary": f"{len(products)} candidates",
+                "output_summary": f"reranked, top3 scores: {top3}",
+                "latency_ms": 0,
+                "status": "success",
+            }
+        )
     except Exception as e:
         _log.warning(f"Reranker unavailable, falling back to raw retrieval scores: {e}")
 
@@ -611,19 +914,27 @@ async def _node_decision(state: WorkflowState) -> WorkflowState:
 
     _bb = _cb()
     if _bb is not None and not state.used_memories:
-        _art = await _bb.wait_for("memories.ready", timeout=1.5)
+        _art = await _bb.wait_for("memories.ready", timeout=_MEMORY_RECALL_TIMEOUT_SECONDS)
         if _art:
             state.used_memories = _art.content.get("memories", []) or []
     state = await _decision.execute(state)
     # 按 final_score 排序，但视觉精确匹配商品始终排在最前
-    if state.decision_results and state.retrieved_products:
+    if state.decision_results and state.retrieved_products and (state.structured_retrieval_report or {}).get("version") != "v9":
         ranked = {r["product_id"]: i for i, r in enumerate(state.decision_results)}
         visual_pids = set(state.visual_matched_pids or [])
-        state.retrieved_products.sort(key=lambda p: (
-            0 if p.get("product_id") in visual_pids else 1,  # 精确匹配优先
-            ranked.get(p.get("product_id", ""), 999)          # 同组内按分数排
-        ))
+        state.retrieved_products.sort(
+            key=lambda p: (
+                0 if p.get("product_id") in visual_pids else 1,  # 精确匹配优先
+                ranked.get(p.get("product_id", ""), 999),  # 同组内按分数排
+            )
+        )
         state.evidence_list.sort(key=lambda e: ranked.get(e.get("product_id", ""), 999))
+    # Final response (both /v2 and SSE) only reads RecommendationBrief.  Build
+    # it immediately after Decision so the non-stream graph cannot accidentally
+    # feed a response model an empty primary-product scope.
+    from app.services.recommendation_brief import build_recommendation_brief
+
+    build_recommendation_brief(state)
     # Memory Lite: 结构化商品列表存入 context_snapshot (供 FollowUpEngine 指代解析)
     if state.conversation_id and state.retrieved_products:
         try:
@@ -631,12 +942,14 @@ async def _node_decision(state: WorkflowState) -> WorkflowState:
             for p in state.retrieved_products[:10]:
                 pid = p.get("product_id", "")
                 if pid:
-                    structured.append({
-                        "product_id": pid,
-                        "title": p.get("title", "")[:60],
-                        "brand": p.get("brand", ""),
-                        "price": p.get("price", 0),
-                    })
+                    structured.append(
+                        {
+                            "product_id": pid,
+                            "title": p.get("title", "")[:60],
+                            "brand": p.get("brand", ""),
+                            "price": p.get("price", 0),
+                        }
+                    )
             if structured:
                 conv_svc = get_conversation_service()
                 await conv_svc.set_last_products(state.conversation_id, structured)
@@ -669,16 +982,19 @@ def _node_evidence_check(state: WorkflowState) -> WorkflowState:
     t0 = time.perf_counter()
     state.sufficiency_report = _evidence_checker.check(state)
     step_num = len(state.trace_steps) + 1
-    state.trace_steps.append({
-        "step_id": f"T{step_num:03d}",
-        "agent_name": "Evidence Sufficiency Checker",
-        "action": "evidence_check",
-        "input_summary": f"{state.sufficiency_report.get('total_evidence', 0)} evidence items",
-        "output_summary": "sufficient" if state.sufficiency_report.get("sufficient")
-                          else f"missing: {state.sufficiency_report.get('missing_types', [])}",
-        "latency_ms": 0,
-        "status": "pass" if state.sufficiency_report.get("sufficient") else "insufficient",
-    })
+    state.trace_steps.append(
+        {
+            "step_id": f"T{step_num:03d}",
+            "agent_name": "Evidence Sufficiency Checker",
+            "action": "evidence_check",
+            "input_summary": f"{state.sufficiency_report.get('total_evidence', 0)} evidence items",
+            "output_summary": "sufficient"
+            if state.sufficiency_report.get("sufficient")
+            else f"missing: {state.sufficiency_report.get('missing_types', [])}",
+            "latency_ms": 0,
+            "status": "pass" if state.sufficiency_report.get("sufficient") else "insufficient",
+        }
+    )
     state.timing["evidence_check_ms"] = round((time.perf_counter() - t0) * 1000)
     return state
 
@@ -725,15 +1041,17 @@ async def _node_planner(state: WorkflowState) -> WorkflowState:
     elapsed = round((time.perf_counter() - t0) * 1000)
     _pname = "Planner (llm)" if plan.meta.get("planner") == "llm" else "Planner (rule)"
     _trigger = f", trigger={plan.meta['trigger']}" if plan.meta.get("trigger") else ""
-    state.trace_steps.append({
-        "step_id": f"T{len(state.trace_steps) + 1:03d}",
-        "agent_name": _pname,
-        "action": "plan_generation",
-        "input_summary": f"intent={state.intent}, image={bool(state.image_url)}{_trigger}",
-        "output_summary": f"steps={[s.capability for s in plan.steps]} | {plan.rationale}",
-        "latency_ms": elapsed,
-        "status": "success",
-    })
+    state.trace_steps.append(
+        {
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": _pname,
+            "action": "plan_generation",
+            "input_summary": f"intent={state.intent}, image={bool(state.image_url)}{_trigger}",
+            "output_summary": f"steps={[s.capability for s in plan.steps]} | {plan.rationale}",
+            "latency_ms": elapsed,
+            "status": "success",
+        }
+    )
     state.timing["plan_ms"] = elapsed
     return state
 
@@ -745,48 +1063,66 @@ async def _dispatch_capability(step, state: WorkflowState) -> WorkflowState:
     # 真流式模式（P0-2）：response 步交由 SSE 层 generate_stream 边生成边推，
     # 这里只记 completed；compare 命中提示/工具步回填都在 context_prompt 中被其消费
     if cap == "response" and (state.plan or {}).get("stream_response"):
-        state.trace_steps.append({
-            "step_id": f"T{len(state.trace_steps) + 1:03d}",
-            "agent_name": "Supervisor", "action": "dispatch",
-            "input_summary": cap, "output_summary": "deferred to SSE stream",
-            "latency_ms": 0, "status": "skipped",
-        })
+        state.trace_steps.append(
+            {
+                "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                "agent_name": "Supervisor",
+                "action": "dispatch",
+                "input_summary": cap,
+                "output_summary": "deferred to SSE stream",
+                "latency_ms": 0,
+                "status": "skipped",
+            }
+        )
         return state
 
     # 短路：无检索结果时跳过 decision（对齐 legacy has_results 语义；response 自带空结果模板）
     if cap == "decision" and not state.retrieved_products:
-        state.trace_steps.append({
-            "step_id": f"T{len(state.trace_steps) + 1:03d}",
-            "agent_name": "Supervisor", "action": "dispatch",
-            "input_summary": cap, "output_summary": "skipped: no retrieved products",
-            "latency_ms": 0, "status": "skipped",
-        })
+        state.trace_steps.append(
+            {
+                "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                "agent_name": "Supervisor",
+                "action": "dispatch",
+                "input_summary": cap,
+                "output_summary": "skipped: no retrieved products",
+                "latency_ms": 0,
+                "status": "skipped",
+            }
+        )
         return state
 
     if cap.startswith("tool:"):
-        tool_name = cap[len("tool:"):]
+        tool_name = cap[len("tool:") :]
         from app.framework.tools import ToolContext
         from app.providers.tools import get_tool_registry
 
-        ctx = ToolContext(user_id=state.user_id, session_id=state.session_id,
-                          conversation_id=state.conversation_id,
-                          args_raw=state.user_query, state=state)
+        ctx = ToolContext(
+            user_id=state.user_id,
+            session_id=state.session_id,
+            conversation_id=state.conversation_id,
+            args_raw=state.user_query,
+            state=state,
+        )
         res = await get_tool_registry().invoke(tool_name, {}, ctx)  # trace 自动进 skill_executions
         # Phase 6-B2：工具步结果回填上下文，供后续 response 步骤合成回答
         if res.message:
-            state.context_prompt = (state.context_prompt or "") + \
-                f"\n[工具 {tool_name} 结果]\n{res.message[:400]}"
+            state.context_prompt = (state.context_prompt or "") + f"\n[工具 {tool_name} 结果]\n{res.message[:400]}"
         return state
 
     fn = get_capability(cap)
     if fn is None:
         _log.warning(f"unknown capability in plan: {cap}")
-        state.trace_steps.append({
-            "step_id": f"T{len(state.trace_steps) + 1:03d}",
-            "agent_name": "Supervisor", "action": "dispatch",
-            "input_summary": cap, "output_summary": "skipped: unknown capability",
-            "latency_ms": 0, "status": "skipped",
-        })
+        state.trace_steps.append(
+            {
+                "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                "agent_name": "Supervisor",
+                "action": "dispatch",
+                "input_summary": cap,
+                "output_summary": "skipped: unknown capability",
+                "latency_ms": 0,
+                "status": "skipped",
+            }
+        )
         return state
 
     result = fn(state)
@@ -826,8 +1162,7 @@ async def _node_supervisor(state: WorkflowState) -> WorkflowState:
         # Phase 3 A2A：每步完成发布 <capability>.done 事件（供未来跨 Agent 订阅消费）
         if bb is not None:
             for s in ready:
-                await bb.publish(f"{s.capability}.done", {"step_id": s.step_id},
-                                 producer="supervisor")
+                await bb.publish(f"{s.capability}.done", {"step_id": s.step_id}, producer="supervisor")
     return state
 
 
@@ -838,8 +1173,9 @@ def _requeue(state: WorkflowState, capabilities: list) -> None:
     prev: list = []
     for i, cap in enumerate(capabilities):
         sid = f"r{state.reflect_count}_{base + i}_{cap.replace('tool:', 'tool_')}"
-        steps.append({"step_id": sid, "capability": cap, "depends_on": list(prev),
-                      "parallel_group": None, "optional": False})
+        steps.append(
+            {"step_id": sid, "capability": cap, "depends_on": list(prev), "parallel_group": None, "optional": False}
+        )
         prev = [sid]
     state.plan["steps"] = steps
 
@@ -865,13 +1201,13 @@ async def _node_reflect(state: WorkflowState) -> WorkflowState:
     if state.reflect_count < max_reflects:
         if not passed:
             state.reflect_count += 1
-            state.context_prompt = (state.context_prompt or "") + \
-                "\n[纠正] 只能引用候选列表内的商品/品牌/价格，禁止编造"
+            state.context_prompt = (
+                state.context_prompt or ""
+            ) + "\n[纠正] 只能引用候选列表内的商品/品牌/价格，禁止编造"
             state.answer = ""
             _requeue(state, ["response"])
             route, reason = "supervisor", "guard_failed -> regenerate"
-        elif (not state.retrieved_products and state.intent != "chitchat"
-              and state.reflect_count == 0):
+        elif not state.retrieved_products and state.intent != "chitchat" and state.reflect_count == 0:
             state.reflect_count += 1
             state.retrieval_plan.top_k += 5
             _requeue(state, ["retrieval", "reranker", "evidence_check", "decision", "response"])
@@ -884,26 +1220,30 @@ async def _node_reflect(state: WorkflowState) -> WorkflowState:
     bb = _cb()
     if bb is not None and route == "end":
         state.timing["a2a_events"] = len(bb.history)
-        state.trace_steps.append({
-            "step_id": f"T{len(state.trace_steps) + 1:03d}",
-            "agent_name": "Blackboard (A2A)",
-            "action": "a2a_summary",
-            "input_summary": f"{len(bb.history)} artifacts",
-            "output_summary": f"topics={bb.topics()}",
-            "latency_ms": 0,
-            "status": "success",
-        })
+        state.trace_steps.append(
+            {
+                "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                "agent_name": "Blackboard (A2A)",
+                "action": "a2a_summary",
+                "input_summary": f"{len(bb.history)} artifacts",
+                "output_summary": f"topics={bb.topics()}",
+                "latency_ms": 0,
+                "status": "success",
+            }
+        )
 
     elapsed = round((time.perf_counter() - t0) * 1000)
-    state.trace_steps.append({
-        "step_id": f"T{len(state.trace_steps) + 1:03d}",
-        "agent_name": "Reflect",
-        "action": "self_check",
-        "input_summary": f"passed={passed}, products={len(state.retrieved_products)}",
-        "output_summary": f"route={route} ({reason}), reflect_count={state.reflect_count}",
-        "latency_ms": elapsed,
-        "status": "success" if passed else "fallback",
-    })
+    state.trace_steps.append(
+        {
+            "step_id": f"T{len(state.trace_steps) + 1:03d}",
+            "agent_name": "Reflect",
+            "action": "self_check",
+            "input_summary": f"passed={passed}, products={len(state.retrieved_products)}",
+            "output_summary": f"route={route} ({reason}), reflect_count={state.reflect_count}",
+            "latency_ms": elapsed,
+            "status": "success" if passed else "fallback",
+        }
+    )
     state.timing["reflect_ms"] = state.timing.get("reflect_ms", 0) + elapsed
     return state
 
@@ -933,12 +1273,17 @@ def _traced(name: str, fn):
             out = await result if asyncio.iscoroutine(result) else result
         except Exception:
             try:
-                state.trace_steps.append({
-                    "step_id": f"T{len(state.trace_steps) + 1:03d}",
-                    "agent_name": name, "action": "node",
-                    "input_summary": (state.user_query or "")[:40], "output_summary": "exception",
-                    "latency_ms": round((time.perf_counter() - t0) * 1000), "status": "failed",
-                })
+                state.trace_steps.append(
+                    {
+                        "step_id": f"T{len(state.trace_steps) + 1:03d}",
+                        "agent_name": name,
+                        "action": "node",
+                        "input_summary": (state.user_query or "")[:40],
+                        "output_summary": "exception",
+                        "latency_ms": round((time.perf_counter() - t0) * 1000),
+                        "status": "failed",
+                    }
+                )
                 state.timing.setdefault(f"{name}_ms", round((time.perf_counter() - t0) * 1000))
             except Exception:  # noqa: BLE001 — 观测失败绝不覆盖业务异常
                 pass
@@ -966,15 +1311,16 @@ def build_workflow() -> StateGraph:
     workflow.add_node("response", _traced("response", _node_response))
     workflow.add_node("guard", _traced("guard", _node_guard))
 
-    workflow.set_entry_point("router")
-
-    workflow.add_conditional_edges("router", get_route("router_next"),
-                                   {"visual": "visual", "retrieval": "retrieval", "response": "response"})
-    workflow.add_edge("visual", "retrieval")
+    workflow.set_entry_point("visual")
+    workflow.add_edge("visual", "router")
+    workflow.add_conditional_edges(
+        "router", get_route("router_next"), {"visual": "retrieval", "retrieval": "retrieval", "response": "response"}
+    )
     workflow.add_edge("retrieval", "reranker")
     workflow.add_edge("reranker", "evidence_check")
-    workflow.add_conditional_edges("evidence_check", get_route("has_results"),
-                                   {"decision": "decision", "response": "response"})
+    workflow.add_conditional_edges(
+        "evidence_check", get_route("has_results"), {"decision": "decision", "response": "response"}
+    )
     workflow.add_edge("decision", "response")
     workflow.add_edge("response", "guard")
     workflow.add_edge("guard", END)
@@ -1011,14 +1357,14 @@ def get_workflow_no_response():
         wf.add_node("reranker", _traced("reranker", _node_reranker))
         wf.add_node("evidence_check", _traced("evidence_check", _node_evidence_check))
         wf.add_node("decision", _traced("decision", _node_decision))
-        wf.set_entry_point("router")
-        wf.add_conditional_edges("router", get_route("router_next"),
-                                 {"visual": "visual", "retrieval": "retrieval", "response": END})
-        wf.add_edge("visual", "retrieval")
+        wf.set_entry_point("visual")
+        wf.add_edge("visual", "router")
+        wf.add_conditional_edges(
+            "router", get_route("router_next"), {"visual": "retrieval", "retrieval": "retrieval", "response": END}
+        )
         wf.add_edge("retrieval", "reranker")
         wf.add_edge("reranker", "evidence_check")
-        wf.add_conditional_edges("evidence_check", get_route("has_results"),
-                                 {"decision": "decision", "response": END})
+        wf.add_conditional_edges("evidence_check", get_route("has_results"), {"decision": "decision", "response": END})
         wf.add_edge("decision", END)
         _compiled_no_response = wf.compile()
     return _compiled_no_response
@@ -1027,19 +1373,20 @@ def get_workflow_no_response():
 def build_dynamic_workflow() -> StateGraph:
     """Phase 4+5 动态图：router -> planner -> supervisor -> reflect -> (supervisor | END)。
 
-    legacy build_workflow 保持不变；由 ENABLE_DYNAMIC_ORCHESTRATION 切换（默认关）。
+    legacy build_workflow 保持不变；由 ENABLE_DYNAMIC_ORCHESTRATION 切换（config.py 里默认 True）。
     """
     wf = StateGraph(WorkflowState)
+    wf.add_node("visual", _traced("visual", _node_visual))
     wf.add_node("router", _traced("router", _node_router))
     wf.add_node("planner", _traced("planner", _node_planner))
     wf.add_node("supervisor", _traced("supervisor", _node_supervisor))
     wf.add_node("reflect", _traced("reflect", _node_reflect))
-    wf.set_entry_point("router")
+    wf.set_entry_point("visual")
+    wf.add_edge("visual", "router")
     wf.add_edge("router", "planner")
     wf.add_edge("planner", "supervisor")
     wf.add_edge("supervisor", "reflect")
-    wf.add_conditional_edges("reflect", get_route("reflect_next"),
-                             {"supervisor": "supervisor", "end": END})
+    wf.add_conditional_edges("reflect", get_route("reflect_next"), {"supervisor": "supervisor", "end": END})
     return wf
 
 
@@ -1067,10 +1414,12 @@ def build_dynamic_workflow_no_response() -> StateGraph:
     guard 由 SSE 层流完后补跑（agent_stream 真流式段）；重生成式纠错另立课题。
     """
     wf = StateGraph(WorkflowState)
+    wf.add_node("visual", _traced("visual", _node_visual))
     wf.add_node("router", _traced("router", _node_router))
     wf.add_node("planner", _traced("planner", _node_planner_stream))
     wf.add_node("supervisor", _traced("supervisor", _node_supervisor))
-    wf.set_entry_point("router")
+    wf.set_entry_point("visual")
+    wf.add_edge("visual", "router")
     wf.add_edge("router", "planner")
     wf.add_edge("planner", "supervisor")
     wf.add_edge("supervisor", END)
@@ -1087,12 +1436,20 @@ def get_dynamic_workflow_no_response():
     return _compiled_dynamic_no_response
 
 
-async def run_workflow(user_query: str, image_url: str | None = None, session_id: str = "",
-                      user_id: str = "", conversation_id: str = "", enable_checkpoint: bool = True,
-                      prefill_state: WorkflowState | None = None,
-                      context_prompt: str = "", no_response: bool = False,
-                      fast_mode: bool = False, use_cache: bool = True,
-                      mode: str = "") -> WorkflowState:
+async def run_workflow(
+    user_query: str,
+    image_url: str | None = None,
+    session_id: str = "",
+    user_id: str = "",
+    conversation_id: str = "",
+    enable_checkpoint: bool = True,
+    prefill_state: WorkflowState | None = None,
+    context_prompt: str = "",
+    no_response: bool = False,
+    fast_mode: bool = False,
+    use_cache: bool = True,
+    mode: str = "",
+) -> WorkflowState:
     # P2-1 三档派发：mode 显式优先；fast_mode 旧参数映射 lite（兼容存量调用方）
     resolved_mode = mode or ("lite" if fast_mode else "standard")
     if no_response:
@@ -1100,32 +1457,57 @@ async def run_workflow(user_query: str, image_url: str | None = None, session_id
         from app.core.config import ENABLE_DYNAMIC_ORCHESTRATION as _dyn_nr
 
         # mode=max 作为动态编排的按请求灰度入口（比全局 flag 更细粒度）
-        wf = get_dynamic_workflow_no_response() if (_dyn_nr or resolved_mode == "max") \
-            else get_workflow_no_response()
+        wf = get_dynamic_workflow_no_response() if (_dyn_nr or resolved_mode == "max") else get_workflow_no_response()
     else:
         from app.core.config import ENABLE_DYNAMIC_ORCHESTRATION
 
-        wf = get_dynamic_workflow() if (ENABLE_DYNAMIC_ORCHESTRATION or resolved_mode == "max") \
-            else get_workflow()
+        wf = get_dynamic_workflow() if (ENABLE_DYNAMIC_ORCHESTRATION or resolved_mode == "max") else get_workflow()
 
     # 全链路 trace：为本次请求设置共享 trace_id（session_id 作为关联键），
     # 使 Router/Retrieval/Reranker/Decision/Response 的 LLM span 串成一条链路。
     from app.observability.request_context import ensure_trace_id
+
     ensure_trace_id(session_id)
 
     # ---- Workflow 级缓存（与 checkpoint 解耦）：相同 query + image 在 TTL 内直接返回 ----
     # key 含 context_prompt 摘要：同 query 不同会话上下文（追问/偏好）不串结果；
     # 含 mode：lite/standard/max 不同档链路结果不互串
-    cache_key = make_key("workflow", user_query, image_url or "noimg", user_id, session_id,
-                         resolved_mode, (context_prompt or "")[:120])
+    cache_key = make_key(
+        "workflow", user_query, image_url or "noimg", user_id, session_id, resolved_mode, (context_prompt or "")[:120]
+    )
     if not use_cache:
-        state = await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt, resolved_mode)
+        state = await _run_uncached(
+            user_query,
+            image_url,
+            session_id,
+            user_id,
+            conversation_id,
+            wf,
+            enable_checkpoint,
+            prefill_state,
+            context_prompt,
+            resolved_mode,
+        )
     else:
+
         async def _do_run():
-            return await _run_uncached(user_query, image_url, session_id, user_id, conversation_id, wf, enable_checkpoint, prefill_state, context_prompt, resolved_mode)
+            return await _run_uncached(
+                user_query,
+                image_url,
+                session_id,
+                user_id,
+                conversation_id,
+                wf,
+                enable_checkpoint,
+                prefill_state,
+                context_prompt,
+                resolved_mode,
+            )
 
         state = await cached(
-            cache_key, REDIS_CACHE_TTL_WORKFLOW, _do_run,
+            cache_key,
+            REDIS_CACHE_TTL_WORKFLOW,
+            _do_run,
             serializer=lambda v: json.dumps(v.model_dump(), ensure_ascii=False, default=str),
             deserializer=lambda s: WorkflowState(**json.loads(s)),
         )
@@ -1137,21 +1519,41 @@ async def run_workflow(user_query: str, image_url: str | None = None, session_id
     return state
 
 
-async def _run_uncached(user_query: str, image_url: str | None, session_id: str,
-                        user_id: str, conversation_id: str, wf, enable_checkpoint: bool,
-                        prefill_state: WorkflowState | None = None,
-                        context_prompt: str = "", mode: str = "standard") -> WorkflowState:
+async def _run_uncached(
+    user_query: str,
+    image_url: str | None,
+    session_id: str,
+    user_id: str,
+    conversation_id: str,
+    wf,
+    enable_checkpoint: bool,
+    prefill_state: WorkflowState | None = None,
+    context_prompt: str = "",
+    mode: str = "standard",
+) -> WorkflowState:
     # P2-1：mode 显式字段替代 "[FAST_MODE]" 嵌 prompt 的 magic string
     if prefill_state is not None:
         state = prefill_state
+        # Prefills carry constraints or a trusted product scope, not request
+        # identity. Preserve the caller's authenticated/session context so the
+        # resulting state remains usable by memory, observability and SSE.
+        state.session_id = session_id or state.session_id
+        state.user_id = user_id or state.user_id
+        state.conversation_id = conversation_id or state.conversation_id
         state.user_query = user_query
         state.image_url = image_url
         state.context_prompt = context_prompt
         state.mode = mode
     else:
-        state = WorkflowState(session_id=session_id or "", user_id=user_id, conversation_id=conversation_id,
-                              user_query=user_query, image_url=image_url, context_prompt=context_prompt,
-                              mode=mode)
+        state = WorkflowState(
+            session_id=session_id or "",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_query=user_query,
+            image_url=image_url,
+            context_prompt=context_prompt,
+            mode=mode,
+        )
 
     if enable_checkpoint and state.session_id:
         try:
@@ -1191,6 +1593,5 @@ async def _run_uncached(user_query: str, image_url: str | None, session_id: str,
             ckpt.save(result.session_id, "guard", result)
         except Exception as e:
             _log.debug(f"Checkpoint save skipped: {e}")
-
 
     return result

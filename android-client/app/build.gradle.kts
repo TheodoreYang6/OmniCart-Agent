@@ -28,7 +28,9 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            buildConfigField("String", "BASE_URL", "\"http://8.137.187.54:8006/\"")
+            // 真机调试通过 adb reverse 映射到电脑端 8006，IP 切换、热点切换或
+            // Windows 防火墙都不会再让 App 绑定一条过期的局域网地址。
+            buildConfigField("String", "BASE_URL", "\"http://127.0.0.1:8006/\"")
         }
         release {
             isMinifyEnabled = true
@@ -53,6 +55,23 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+}
+
+// Android Studio Run 会触发 installDebug。安装完成后自动建立 USB 调试端口映射：
+// 手机上的 127.0.0.1:8006 → 开发机的 127.0.0.1:8006。
+// adb 不可用时不使构建失败；此时仍可用 release 配置的线上服务。
+tasks.configureEach {
+    if (name.startsWith("install") && name.endsWith("Debug")) {
+        doLast {
+            val adb = File(android.sdkDirectory, "platform-tools/adb.exe")
+            if (adb.isFile) {
+                exec {
+                    commandLine(adb.absolutePath, "reverse", "tcp:8006", "tcp:8006")
+                    isIgnoreExitValue = true
+                }
+            }
+        }
     }
 }
 

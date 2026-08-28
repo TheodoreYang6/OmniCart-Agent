@@ -1,5 +1,7 @@
 """Cart & Checkout Schemas"""
 
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 
 DEMO_USER_ID = "demo_user_001"
@@ -36,7 +38,11 @@ class Cart(BaseModel):
 
     @property
     def total_price(self) -> float:
-        return sum(item.price * item.quantity for item in self.items if item.selected)
+        total = sum(
+            (Decimal(str(item.price)) * item.quantity for item in self.items if item.selected),
+            Decimal("0"),
+        )
+        return float(total.quantize(Decimal("0.01")))
 
     @property
     def total_count(self) -> int:

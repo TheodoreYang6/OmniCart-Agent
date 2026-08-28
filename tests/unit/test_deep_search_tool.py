@@ -7,6 +7,12 @@ from app.providers.tools.shopping import SearchProductsTool
 from app.schemas.workflow import WorkflowState
 
 
+@pytest.fixture(autouse=True)
+def _use_legacy_subpipeline(monkeypatch):
+    """本文件验证的是 legacy _deep_search 子管线；V9 有独立测试覆盖。"""
+    monkeypatch.setattr("app.core.config.USE_V9_CHUNK_RETRIEVAL", False)
+
+
 async def test_deep_search_returns_products_and_writes_state():
     state = WorkflowState(user_id="u1")
     ctx = ToolContext(user_id="u1", state=state)

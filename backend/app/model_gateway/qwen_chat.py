@@ -36,6 +36,58 @@ def _compat_base() -> str:
     return base + "/compatible-mode/v1"
 
 
+
+def _to_wire_tools(tools: list[dict]) -> tuple[list[dict], dict[str, str]]:
+    """内部工具名 -> 线路安全名，并返回反查表。
+
+    内部命名约定是 ``namespace.action``（cart.add / shopping.search），可读性好且与
+    ToolRegistry、治理校验、前端契约一致，不该为迁就某个供应商去改。但 DeepSeek 的
+    ``/chat/completions`` 要求 ``function.name`` 匹配 ``^[a-zA-Z0-9_-]+$``，带点的名字
+    会让整个请求被 400 拒绝（"Invalid 'tools[0].function.name': string does not match
+    pattern"），function calling 链路整体不可用。
+
+    点换成双下划线（``cart.add`` -> ``cart__add``）：双下划线在内部命名里不出现，
+    反查无歧义；单下划线会与 ``cart.update_qty`` 这类名字混淆。
+    """
+    mapping: dict[str, str] = {}
+    wire: list[dict] = []
+    for tool in tools:
+        fn = tool.get("function") or {}
+        name = fn.get("name", "")
+        if "." not in name:
+            wire.append(tool)
+            continue
+        safe = name.replace(".", "__")
+        mapping[safe] = name
+        wire.append({**tool, "function": {**fn, "name": safe}})
+    return wire, mapping
+
+
+def _to_wire_messages(messages: list[dict], wire_to_internal: dict[str, str]) -> list[dict]:
+    """把历史 assistant 消息里的 tool_calls 名字也换成线路名。
+
+    多轮 ReAct 会把上一轮的 ``tool_calls`` 回填进 messages。只转 tools 不转历史消息，
+    供应商会因为 ``tool_calls[].function.name`` 不在已声明工具里而报错。
+    """
+    if not wire_to_internal:
+        return messages
+    internal_to_wire = {v: k for k, v in wire_to_internal.items()}
+    out: list[dict] = []
+    for msg in messages:
+        calls = msg.get("tool_calls")
+        if not calls:
+            out.append(msg)
+            continue
+        new_calls = []
+        for call in calls:
+            fn = call.get("function") or {}
+            name = fn.get("name", "")
+            if name in internal_to_wire:
+                call = {**call, "function": {**fn, "name": internal_to_wire[name]}}
+            new_calls.append(call)
+        out.append({**msg, "tool_calls": new_calls})
+    return out
+
 class QwenChat:
     def __init__(self, model: str = "qwen-plus", temperature: float = 0.7, max_tokens: int = 2048):
         # deepseek* 模型名 → DeepSeek 端点（OpenAI 兼容）；其余仍走 Qwen
@@ -118,16 +170,24 @@ class QwenChat:
         """OpenAI function-calling：tools 透传 + tool_choice=auto。
 
         返回 {"content": str, "tool_calls": [{"id", "name", "args": dict}]}。
+
+        工具名在此做线路转换（见 ``_to_wire_tools``）：内部用 ``namespace.action``
+        命名，而 DeepSeek 的 ``/chat/completions`` 要求 ``function.name`` 匹配
+        ``^[a-zA-Z0-9_-]+$``，带点的名字会让整个请求被 400 拒绝。
+        转换只能放在这里 —— 再往上放会改到 mock/local provider，而它们按内部名
+        匹配确定性脚本。
         """
         client = _get_client()
-        full_messages = ([{"role": "system", "content": system}] if system else []) + messages
+        wire_tools, wire_to_internal = _to_wire_tools(tools)
+        full_messages = ([{"role": "system", "content": system}] if system else []) + \
+            _to_wire_messages(messages, wire_to_internal)
         resp = await client.post(
             f"{self._base_url}/chat/completions",
             headers=self._headers(),
             json={
                 "model": self._model,
                 "messages": full_messages,
-                "tools": tools,
+                "tools": wire_tools,
                 "tool_choice": "auto",
                 "temperature": self._temperature,
                 "max_tokens": self._max_tokens,
@@ -135,7 +195,13 @@ class QwenChat:
             },
         )
         resp.raise_for_status()
-        return self._parse_tool_message(resp.json())
+        parsed = self._parse_tool_message(resp.json())
+        # 回程：线路名换回带点的内部名，调用方无感
+        for call in parsed.get("tool_calls") or []:
+            name = call.get("name", "")
+            if name in wire_to_internal:
+                call["name"] = wire_to_internal[name]
+        return parsed
 
     async def generate_stream(self, prompt: str, system: str = "") -> AsyncGenerator[str, None]:
         """流式生成 — 每个增量 token 到达即 yield。"""

@@ -14,7 +14,6 @@ export interface StreamRequest {
   mode?: string
   target_product_id?: string | null
   allow_same_category_comparison?: boolean
-  fast_mode?: boolean
   exec_mode?: string
   deep_think?: boolean
 }
@@ -27,6 +26,8 @@ export interface StreamHandlers {
   onResult?: (result: RecommendResponse) => void
   onError?: (message: string) => void
   onDone?: (reason: StreamFinishReason) => void
+  /** All protocol v1 events, including early cards/visual/comparison payloads. */
+  onEvent?: (type: string, payload: unknown) => void
 }
 
 function messageFromData(data: string, fallback: string): string {
@@ -84,8 +85,11 @@ export function connectStream(
       let buffer = ''
 
       const dispatch = (event: ParsedSseEvent) => {
+        let payload: unknown = event.data
+        try { payload = JSON.parse(event.data) } catch { /* plain heartbeat/text */ }
+        handlers.onEvent?.(event.type, payload)
         if (event.type === 'token') handlers.onToken?.(messageFromData(event.data, ''))
-        else if (event.type === 'status') handlers.onStatus?.(messageFromData(event.data, ''))
+        else if (event.type === 'status' || event.type === 'stage') handlers.onStatus?.(messageFromData(event.data, ''))
         else if (event.type === 'result') {
           try { handlers.onResult?.(JSON.parse(event.data) as RecommendResponse) }
           catch { handlers.onError?.('服务返回了无效的结果数据') }

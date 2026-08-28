@@ -1,10 +1,10 @@
-import { useId, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { Plus, Star } from 'lucide-react'
 import type { DecisionResult, Product } from '@/api/types'
 import { ProductImage } from '@/components/ui/ProductImage'
 import { Omi } from '@/components/brand/Omi'
 import { formatPrice } from '@/lib/utils'
-import { levelStyle, scoreColorOnScrim } from '@/lib/format'
+import { levelStyle } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 interface ProductCardProps {
@@ -15,6 +15,8 @@ interface ProductCardProps {
   className?: string
   /** 聚光 hover：光斑跟随鼠标（仅 ShopPage 开启，reduced-motion 下 CSS 层自动禁用） */
   spotlightHover?: boolean
+  /** 同类横向比较只展示商品事实，不把“是否适合当前需求”的内部决策分当成商品质量。 */
+  showDecisionMeta?: boolean
   onClick?: () => void
   onAddToCart?: () => void
   onAskAgent?: () => void
@@ -31,44 +33,6 @@ export function StarRating({ rating, size = 12 }: { rating: number; size?: numbe
           className={i < full ? 'fill-amber-400 text-amber-400' : 'fill-[var(--field-border)] text-[var(--field-border)]'}
         />
       ))}
-    </span>
-  )
-}
-
-/** 决策分环形进度（SVG stroke-dasharray，零依赖） */
-/** 置信度环配色（P3）：按推荐档位给色，一眼区分“多确信” */
-const RING_COLORS: Record<string, [string, string]> = {
-  strong_recommend: ['#10B981', '#34D399'], // emerald — 强推
-  recommended: ['#256BFF', '#38BDF8'], // brand — 推荐
-  worth_considering: ['#0EA5E9', '#7DD3FC'], // sky — 值得考虑
-  cautious: ['#94A3B8', '#CBD5E1'], // slate — 谨慎
-}
-
-function ScoreRing({ score, level }: { score: number; level?: string }) {
-  const pct = Math.max(0, Math.min(1, score / 10))
-  const r = 9
-  const c = 2 * Math.PI * r
-  const [c1, c2] = RING_COLORS[level ?? ''] ?? RING_COLORS.recommended
-  const gid = `${useId().replace(/:/g, '')}-score-gradient`
-  return (
-    <span className="relative inline-flex h-7 w-7 items-center justify-center">
-      <svg width="28" height="28" viewBox="0 0 28 28" className="-rotate-90">
-        <circle cx="14" cy="14" r={r} fill="none" stroke="rgba(255,255,255,0.28)" strokeWidth="3" />
-        <circle
-          cx="14" cy="14" r={r} fill="none"
-          stroke={`url(#${gid})`} strokeWidth="3" strokeLinecap="round"
-          strokeDasharray={`${c * pct} ${c}`}
-        />
-        <defs>
-          <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor={c1} />
-            <stop offset="1" stopColor={c2} />
-          </linearGradient>
-        </defs>
-      </svg>
-      <span className={cn('absolute text-[9px] font-bold', scoreColorOnScrim(score))}>
-        {score.toFixed(1)}
-      </span>
     </span>
   )
 }
@@ -94,15 +58,16 @@ export function ProductCard({
   variant = 'grid',
   className,
   spotlightHover = false,
+  showDecisionMeta = true,
   onClick,
   onAddToCart,
   onAskAgent,
 }: ProductCardProps) {
   const price = product.price
   const [adding, setAdding] = useState(false)
-  const score = decision?.display_score ?? 0
   const level = decision?.recommendation_level ?? ''
   const ls = levelStyle(level)
+  const recommendationScore = decision?.recommendation_score
   const rating = product.avg_rating ?? 0
   const isFeature = variant === 'feature'
 
@@ -135,19 +100,24 @@ export function ProductCard({
       <div className="relative overflow-hidden">
         <ProductImage
           src={product.image_urls?.[0]}
+          productId={product.product_id}
           alt={product.title}
           rounded="rounded-none"
           className="aspect-square w-full transition-transform duration-500 group-hover:scale-105"
         />
         {/* 底部渐变遮罩（hover 浮现） */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-        {decision && score > 0 && (
-          // 恒深药丸：角标压在恒浅色商品图上，不能跟主题翻转
-          <div className="absolute left-2 top-2 rounded-full bg-slate-900/70 p-0.5 shadow-card backdrop-blur">
-            <ScoreRing score={score} level={level} />
-          </div>
+        {showDecisionMeta && recommendationScore && (
+          <span
+            className="absolute left-2 top-2 inline-flex items-baseline gap-1 rounded-md bg-slate-950/78 px-2 py-1 text-white shadow-card backdrop-blur"
+            title={recommendationScore.explanation}
+          >
+            <span className="text-[10px] font-medium text-white/75">欧米指数</span>
+            <span className="text-sm font-bold tabular-nums">{recommendationScore.score}</span>
+          </span>
         )}
-        {level && (
+        {/* 指数之外仍保留清晰的匹配结论；数值不代表商品绝对质量。 */}
+        {showDecisionMeta && level && (
           // 同样压在恒浅色商品图上：用恒深药丸 + 白字 + 档位色小点，
           // 而不用 levelStyle 的主题色（深色下其半透底会在白图上发淡）
           <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-card backdrop-blur">
@@ -185,9 +155,19 @@ export function ProductCard({
           )}
         </div>
 
-        {decision?.recommendation_reason && variant === 'chat' && (
+        {showDecisionMeta && decision?.recommendation_reason && variant === 'chat' && (
           <p className="mt-1.5 line-clamp-2 text-xs leading-snug text-ink-muted">
             {decision.recommendation_reason}
+          </p>
+        )}
+
+        {showDecisionMeta && recommendationScore && variant === 'chat' && (
+          <p className="mt-1.5 line-clamp-1 text-[11px] text-ink-muted" title={recommendationScore.explanation}>
+            {recommendationScore.dimensions
+              .filter((item) => item.score !== null)
+              .slice(0, 3)
+              .map((item) => `${item.label} ${item.score}`)
+              .join(' · ')}
           </p>
         )}
 
@@ -198,12 +178,12 @@ export function ProductCard({
           </p>
         )}
 
-        {decision?.positive_signal && (
+        {showDecisionMeta && decision?.positive_signal && (
           <p className="mt-1.5 line-clamp-1 rounded-md bg-emerald-50 px-2 py-1 text-[11px] text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
             👍 {decision.positive_signal}
           </p>
         )}
-        {!decision?.positive_signal && decision?.risk_factors && decision.risk_factors.length > 0 && (
+        {showDecisionMeta && !decision?.positive_signal && decision?.risk_factors && decision.risk_factors.length > 0 && (
           <p className="risk-strip mt-1.5 line-clamp-1 rounded-md px-2 py-1 text-[11px]">
             ⚠ {decision.risk_factors[0]}
           </p>

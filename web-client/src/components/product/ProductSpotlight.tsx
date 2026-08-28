@@ -3,18 +3,17 @@
  *
  * 交互：点击聊天内商品卡不再跳详情页，而是原地放大浮起 + 背景虚化，
  * 从卡片侧边展开版面（桌面左右分栏 / 移动端底部抽屉）。
- * 内容区依次渐入：① 评分细则（校准分 + 标签 + 各维度条 + 好评率/风险）
+ * 内容区依次渐入：① 面向用户的选购建议（匹配结论、原因、注意点）
  * ② AI 小总结（流式打字机，结合会话上下文异步生成）。
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { X, ExternalLink, ShoppingCart, Loader2 } from 'lucide-react'
+import { X, ExternalLink, ShoppingCart } from 'lucide-react'
 import type { DecisionResult, Product } from '@/api/types'
 import { api } from '@/api/client'
 import { OmiAvatar } from '@/components/brand/Omi'
-import { omiExpressionForScore } from '@/hooks/useOmiState'
-import { resolveImageUrl } from '@/config'
-import { COMPONENT_LABELS, componentLabel, levelStyle, scoreColor, scoreColorOnScrim } from '@/lib/format'
+import { ProductImage } from '@/components/ui/ProductImage'
+import { levelStyle } from '@/lib/format'
 import { cn, formatPrice } from '@/lib/utils'
 
 interface ProductSpotlightProps {
@@ -27,30 +26,6 @@ interface ProductSpotlightProps {
   onAddToCart?: (productId: string) => void
 }
 
-/** 单个维度评分条 */
-function ScoreBar({ label, score, weight }: { label: string; score: number; weight?: number }) {
-  const pct = Math.max(0, Math.min(100, score * 100))
-  return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between text-xs">
-        <span className="text-ink-soft">
-          {label}
-          {weight ? <span className="ml-1 text-[10px] text-ink-muted">权重 {Math.round(weight * 100)}%</span> : null}
-        </span>
-        <span className={cn('font-semibold tabular-nums', scoreColor(score * 10))}>
-          {(score * 10).toFixed(1)}
-        </span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full meter-track">
-        <div
-          className="h-full rounded-full gradient-brand transition-all duration-700 ease-out dark:shadow-[0_0_6px_rgba(77,139,255,0.55)]"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  )
-}
-
 export function ProductSpotlight({
   product,
   decision,
@@ -59,7 +34,7 @@ export function ProductSpotlight({
   onOpenDetail,
   onAddToCart,
 }: ProductSpotlightProps) {
-  const [phase, setPhase] = useState(0) // 0 入场 → 1 评分区 → 2 总结区
+  const [phase, setPhase] = useState(0) // 0 入场 → 1 建议区 → 2 总结区
   const [summary, setSummary] = useState('')
   const [summaryLoading, setSummaryLoading] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
@@ -101,7 +76,7 @@ export function ProductSpotlight({
           ctrl.signal,
         )
       } catch {
-        if (!acc) setSummary('欧米暂时没法生成总结，可以先看看下面的评分细则～')
+        if (!acc) setSummary('我先根据已经核对到的商品信息给你一些建议，更细的问题可以随时再问我～')
       } finally {
         setSummaryLoading(false)
       }
@@ -109,11 +84,8 @@ export function ProductSpotlight({
     return () => ctrl.abort()
   }, [product.product_id, query])
 
-  const score = decision?.display_score ?? 0
   const level = levelStyle(decision?.recommendation_level ?? '')
-  const comps = Object.entries(decision?.component_scores ?? {}).filter(
-    ([k, v]) => v && typeof v.score === 'number' && k in COMPONENT_LABELS,
-  )
+  const recommendationScore = decision?.recommendation_score
   const image = product.image_urls?.[0]
 
   return (
@@ -153,24 +125,13 @@ export function ProductSpotlight({
         {/* 左：放大的商品卡 */}
         <div className="flex shrink-0 flex-col gap-3 p-5 sm:w-[42%]">
           <div className="relative overflow-hidden rounded-2xl bg-[var(--surface-sunken)]">
-            {image ? (
-              <img
-                src={resolveImageUrl(image)}
-                alt={product.title}
-                className="aspect-square w-full object-cover"
-              />
-            ) : (
-              <div className="aspect-square w-full bg-[var(--surface-sunken)]" />
-            )}
-            {score > 0 && (
-              // 角标压在恒浅色商品图上 → 恒深药丸 + 恒亮字，不跟主题翻转
-              <div className="absolute left-3 top-3 flex h-12 w-12 flex-col items-center justify-center rounded-full bg-slate-900/75 shadow-lift backdrop-blur-sm">
-                <span className={cn('text-base font-extrabold leading-none', scoreColorOnScrim(score))}>
-                  {score.toFixed(1)}
-                </span>
-                <span className="text-[9px] text-white/70">评分</span>
-              </div>
-            )}
+            <ProductImage
+              src={image}
+              productId={product.product_id}
+              alt={product.title}
+              rounded="rounded-none"
+              className="aspect-square w-full"
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -212,7 +173,7 @@ export function ProductSpotlight({
           </div>
         </div>
 
-        {/* 右：评分细则 + AI 总结（依次渐入）*/}
+        {/* 右：选购建议 + AI 总结（依次渐入）*/}
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-[var(--panel-border)] panel-sunken p-5 sm:border-l sm:border-t-0">
           <div
             className={cn(
@@ -220,21 +181,68 @@ export function ProductSpotlight({
               phase >= 1 ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0',
             )}
           >
-            <h3 className="mb-3 text-sm font-bold text-ink">评分细则</h3>
-            {comps.length > 0 ? (
-              <div className="space-y-2.5">
-                {comps.map(([key, v]) => (
-                  <ScoreBar
-                    key={key}
-                    label={componentLabel(key)}
-                    score={Number(v.score) || 0}
-                    weight={typeof v.weight === 'number' ? v.weight : undefined}
+            {recommendationScore && (
+              <div
+                className="mb-3 rounded-xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-3"
+                title={recommendationScore.explanation}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-semibold text-ink">欧米适配指数</span>
+                  <span className="text-xl font-extrabold tabular-nums text-brand-700 dark:text-brand-100">
+                    {recommendationScore.score}
+                    <span className="ml-0.5 text-xs font-medium text-ink-muted">/100</span>
+                  </span>
+                </div>
+                <div
+                  className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[var(--surface-variant)]"
+                  role="progressbar"
+                  aria-valuenow={recommendationScore.score}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="欧米适配指数"
+                >
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-400 transition-[width] duration-700"
+                    style={{ width: `${Math.min(100, Math.max(0, recommendationScore.score ?? 0))}%` }}
                   />
-                ))}
+                </div>
+                <p className="mt-1.5 text-[11px] leading-snug text-ink-soft">
+                  {recommendationScore.match_label} · {recommendationScore.evidence_label}
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {recommendationScore.dimensions
+                    .filter((item) => item.score !== null)
+                    .map((item) => (
+                      <div key={item.key} className="flex items-center gap-2">
+                        <span className="w-16 shrink-0 text-[10px] text-ink-muted">{item.label}</span>
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-variant)]">
+                          <div
+                            className="h-full rounded-full bg-brand-500/70 dark:bg-brand-300/70"
+                            style={{ width: `${Math.min(100, Math.max(0, item.score ?? 0))}%` }}
+                          />
+                        </div>
+                        <span className="w-8 shrink-0 text-right text-[10px] tabular-nums text-ink-soft">
+                          {item.score}
+                        </span>
+                      </div>
+                    ))}
+                </div>
               </div>
-            ) : (
-              <p className="text-xs text-ink-muted">本次未产出细分评分</p>
             )}
+            <h3 className="mb-3 text-sm font-bold text-ink">选购建议</h3>
+            {decision?.why_it_fits && (
+              <p className="rounded-xl bg-[var(--panel-bg)] p-2.5 text-xs leading-relaxed text-ink-soft">
+                为什么适合：{decision.why_it_fits}
+              </p>
+            )}
+            {decision?.caution && (
+              <p className="mt-2 rounded-xl bg-[var(--surface-variant)] p-2.5 text-xs leading-relaxed text-ink-soft">
+                购买前留意：{decision.caution}
+              </p>
+            )}
+            <p className="mt-2 text-xs text-ink-muted">
+              信息状态：{decision?.evidence_label || '信息有限'}
+            </p>
 
             {(decision?.positive_signal || (decision?.risk_factors?.length ?? 0) > 0) && (
               <div className="mt-3 flex flex-wrap gap-1.5">
@@ -258,7 +266,7 @@ export function ProductSpotlight({
             )}
           </div>
 
-          {/* AI 小总结 */}
+          {/* 受控商品档案驱动的 LLM 补充解读 */}
           <div
             className={cn(
               'mt-5 transition-all duration-500',
@@ -266,18 +274,27 @@ export function ProductSpotlight({
             )}
           >
             <h3 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-ink">
-              {/* 场景②：浏览卡片 —— 欧米按评分给表情（≥9.2 星星眼） */}
-              <OmiAvatar size={20} expression={omiExpressionForScore(decision?.display_score)} />
-              欧米的商品分析
+              <OmiAvatar size={20} expression="happy" />
+              欧米的补充分析
             </h3>
             {summaryLoading && !summary ? (
-              <div className="space-y-2">
-                <div className="h-3 w-full animate-pulse rounded bg-[var(--surface-variant)]" />
-                <div className="h-3 w-5/6 animate-pulse rounded bg-[var(--surface-variant)]" />
-                <div className="h-3 w-3/4 animate-pulse rounded bg-[var(--surface-variant)]" />
-                <p className="flex items-center gap-1.5 pt-1 text-[11px] text-ink-muted">
-                  <Loader2 size={11} className="animate-spin" /> 欧米正在结合你的需求分析…
-                </p>
+              <div className="flex items-start gap-3">
+                <OmiAvatar size={28} phase="thinking" className="shrink-0" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-ink-soft">
+                    欧米正在为你总结
+                    <span className="ml-0.5 inline-flex gap-0.5" aria-hidden>
+                      <span className="h-1 w-1 animate-bounce rounded-full bg-brand-400" />
+                      <span className="h-1 w-1 animate-bounce rounded-full bg-brand-400" style={{ animationDelay: '120ms' }} />
+                      <span className="h-1 w-1 animate-bounce rounded-full bg-brand-400" style={{ animationDelay: '240ms' }} />
+                    </span>
+                  </p>
+                  <div className="space-y-1.5">
+                    <div className="h-2.5 w-full animate-pulse rounded-full bg-[var(--surface-variant)]" />
+                    <div className="h-2.5 w-5/6 animate-pulse rounded-full bg-[var(--surface-variant)]" />
+                    <div className="h-2.5 w-3/4 animate-pulse rounded-full bg-[var(--surface-variant)]" />
+                  </div>
+                </div>
               </div>
             ) : (
               <p className="whitespace-pre-wrap text-xs leading-relaxed text-ink-soft">

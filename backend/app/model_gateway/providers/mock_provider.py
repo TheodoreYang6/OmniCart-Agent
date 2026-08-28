@@ -62,7 +62,7 @@ class MockModelProvider:
     async def embed(self, *, texts: list[str], model: str, dimensions: int,
                     is_query: bool = False) -> list[list[float]]:
         # MOCK 忽略 is_query（确定性哈希向量与查询/文档无关）
-        return MockEmbedding().embed(texts)
+        return MockEmbedding().embed(texts, dimensions=dimensions)
 
     async def vision(
         self,

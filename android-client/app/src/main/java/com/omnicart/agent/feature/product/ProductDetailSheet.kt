@@ -21,9 +21,8 @@ import com.omnicart.agent.core.theme.*
 
 enum class DetailTab(val label: String) {
     Recommend("推荐"),
-    Evidence("证据"),
-    Score("评分"),
-    Trace("链路"),
+    Evidence("参考"),
+    Fit("选购建议"),
     Skill("技能"),
     Harness("验证"),
 }
@@ -78,8 +77,7 @@ fun ProductDetailSheet(
                 when (selectedTab) {
                     DetailTab.Recommend -> RecommendTab(product, decisionResult, effectivePrice)
                     DetailTab.Evidence -> EvidenceTab(evidenceList)
-                    DetailTab.Score -> ScoreTab(decisionResult)
-                    DetailTab.Trace -> TraceTab(traceSteps)
+                    DetailTab.Fit -> FitTab(decisionResult)
                     DetailTab.Skill -> SkillTab()
                     DetailTab.Harness -> HarnessTab(harnessReport)
                 }
@@ -110,7 +108,7 @@ fun ProductDetailSheet(
                         }
                     }
                 }
-                Surface(color = Surface, tonalElevation = 4.dp) {
+                Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -186,21 +184,20 @@ private fun RecommendTab(product: Product, decision: DecisionResult?, displayPri
 private fun EvidenceTab(evidenceList: List<Map<String, Any?>>) {
     Column(modifier = Modifier.padding(16.dp)) {
         if (evidenceList.isEmpty()) {
-            Text("暂无证据数据", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("暂无参考信息", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             return@Column
         }
-        Text("证据列表 (${evidenceList.size}条)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text("参考信息 (${evidenceList.size}条)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(12.dp))
         evidenceList.take(15).forEach { ev ->
             val type = ev["source_type"]?.toString() ?: "unknown"
             val content = ev["content"]?.toString() ?: ""
-            val confidence = (ev["confidence"] as? Number)?.toDouble() ?: 0.0
             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
                 Column(Modifier.padding(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(typeLabel(type), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        Text("置信度 ${"%.0f".format(confidence * 100)}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("已核对", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(content, style = MaterialTheme.typography.bodySmall, maxLines = 4)
@@ -211,65 +208,33 @@ private fun EvidenceTab(evidenceList: List<Map<String, Any?>>) {
 }
 
 @Composable
-private fun ScoreTab(decision: DecisionResult?) {
+private fun FitTab(decision: DecisionResult?) {
     Column(modifier = Modifier.padding(16.dp)) {
-        if (decision == null) { Text("暂无评分数据", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); return@Column }
+        if (decision == null) { Text("暂无选购建议", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); return@Column }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("综合评分", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text("${decision.displayScore} / 10", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("匹配情况", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(decision.matchLabel.ifBlank { "值得比较" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         }
         Spacer(Modifier.height(16.dp))
-        val bd = decision.scoreBreakdown
-        ScoreBar("预算匹配", bd?.budgetFit ?: 0.0)
-        ScoreBar("场景匹配", bd?.scenarioFit ?: 0.0)
-        ScoreBar("规格匹配", bd?.specMatch ?: 0.0)
-        ScoreBar("评论置信度", bd?.reviewConfidence ?: 0.0)
-        ScoreBar("语义相关度", bd?.visualSimilarity ?: 0.0)
-        ScoreBar("性价比", bd?.availabilityScore ?: 0.0)
-        ScoreBar("风险惩罚", -(bd?.riskPenalty ?: 0.0))
-    }
-}
-
-@Composable
-private fun ScoreBar(label: String, value: Double) {
-    val absValue = kotlin.math.abs(value).coerceIn(0.0, 1.0)
-    val color = when { value < 0 -> MaterialTheme.colorScheme.error; absValue >= 0.8 -> MaterialTheme.colorScheme.primary; absValue >= 0.5 -> MaterialTheme.colorScheme.tertiary; else -> MaterialTheme.colorScheme.error }
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label, style = MaterialTheme.typography.bodySmall)
-            Text("%.2f".format(value), style = MaterialTheme.typography.labelSmall, color = color)
+        if (decision.whyItFits.isNotBlank()) {
+            Text("为什么适合", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text(decision.whyItFits, style = MaterialTheme.typography.bodyMedium)
         }
-        Spacer(Modifier.height(2.dp))
-        LinearProgressIndicator(progress = { absValue.toFloat() }, modifier = Modifier.fillMaxWidth(), color = color, trackColor = MaterialTheme.colorScheme.surfaceVariant)
-    }
-}
-
-@Composable
-private fun TraceTab(traceSteps: List<Map<String, Any?>>) {
-    Column(modifier = Modifier.padding(16.dp)) {
-        if (traceSteps.isEmpty()) { Text("暂无 Agent 链路数据", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); return@Column }
-        Text("Agent 执行链路", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(12.dp))
-        traceSteps.forEach { step ->
-            val agent = step["agent_name"]?.toString() ?: "?"
-            val action = step["action"]?.toString() ?: ""
-            val status = step["status"]?.toString() ?: "pending"
-            val latency = (step["latency_ms"] as? Number)?.toInt() ?: 0
-            val output = step["output_summary"]?.toString() ?: ""
-            val statusColor = when (status) { "success" -> MaterialTheme.colorScheme.primary; "failed" -> MaterialTheme.colorScheme.error; else -> MaterialTheme.colorScheme.onSurfaceVariant }
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
-                Surface(Modifier.padding(top = 6.dp).size(8.dp), shape = MaterialTheme.shapes.extraSmall, color = statusColor) {}
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(agent, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                        Text("${latency}ms", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (action.isNotEmpty()) Text(action, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (output.isNotEmpty()) Text(output, style = MaterialTheme.typography.bodySmall, maxLines = 2)
-                }
-            }
+        if (decision.caution.isNotBlank()) {
+            Spacer(Modifier.height(16.dp))
+            Text("购买前留意", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text(decision.caution, style = MaterialTheme.typography.bodyMedium)
         }
+        if (decision.riskFactors.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text("还需要核对", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            decision.riskFactors.take(3).forEach { Text("· $it", style = MaterialTheme.typography.bodyMedium) }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("信息状态：${decision.evidenceLabel.ifBlank { "信息有限" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

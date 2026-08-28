@@ -15,6 +15,8 @@ from app.core.config import FAST_MODE, ENABLE_DECISION_LLM, DECISION_LLM_TIMEOUT
 from app.decision.scoring import DecisionScoring
 from app.decision.evidence_metrics import EvidenceScoringHelper
 from app.retrieval.llm_evaluator import LlmEvaluator
+from app.services.category_normalization import normalize_category
+from app.services.recommendation_score import build_recommendation_score
 from app.schemas.a2a import AgentCard
 from app.schemas.product import Product
 from app.schemas.workflow import WorkflowState
@@ -45,6 +47,17 @@ class DecisionAgent(BaseAgent):
         self._start_trace(state, action, f"candidates={n_candidates}, llm_enabled={ENABLE_DECISION_LLM}")
 
         try:
+            # V9 的候选已经通过闭集 Filter 收敛。不能再把它们送进旧的
+            # ``final_score`` 混合器，否则 RAG 相似度会反向覆盖 Filter 结论，
+            # 并在 UI 上产生“低分却强推荐”的矛盾。
+            # 单品聚焦是可信 ``product_id`` 锁定的受控范围。它不需要再经由
+            # 泛检索生成 v9 report，但展示结论也必须使用 v9 的确定性评分；
+            # 否则会回退到旧 final_score，造成“问欧米”没有指数、标签与普通
+            # 推荐不一致的问题。
+            if ((state.structured_retrieval_report or {}).get("version") == "v9" or
+                    state.retrieval_scope == "exact_product"):
+                return self._execute_v9(state)
+
             constraints = state.constraints
             constraints_dict = {
                 "category": constraints.category, "sub_category": constraints.sub_category,
@@ -125,12 +138,10 @@ class DecisionAgent(BaseAgent):
                     support_ids = ev_metrics.support_evidence_ids
 
                 llm_ev = eval_map.get(pid, {})
-                # 从 context_prompt 提取偏好品牌传给评分
-                preferred_brands = []
-                cp = state.context_prompt or ""
-                if "偏好品牌:" in cp:
-                    brands_part = cp.split("偏好品牌:")[1].split("|")[0].strip()
-                    preferred_brands = [b.strip() for b in brands_part.split(",") if b.strip()]
+                # 偏好只从结构化 MemoryBank 投影读取。曾经从 ``context_prompt``
+                # 反解析“偏好品牌:”不仅脆弱，还会让 FollowUp/工具文本变成评分的
+                # 第二真相；会话最终上下文也因此可能与排序依据不一致。
+                preferred_brands = self._preferred_brands(state.used_memories)
 
                 decision = self._scorer.score_with_evidence(
                     product=product,
@@ -180,21 +191,103 @@ class DecisionAgent(BaseAgent):
                     f"final={decision.final_score:.3f} level={decision.recommendation_level}"
                 )
 
-            # Sort by final_score
-            results.sort(key=lambda r: r["final_score"], reverse=True)
-            # 批内校准高分制（促单原则，用户拍板）：display_score 映射到 [8.0, 9.6]
-            # 拉开区分度，标签纯按校准分分档（消灭同分不同标）；final_score 保留真实值
-            self._calibrate_batch(results)
+            # ``final_score`` 仅保留作旧接口兼容/内部排序，用户决策以闭集 Filter
+            # verdict + 硬约束 + 证据状态为准，不能再被 0~10 展示分反向覆盖。
+            result_by_id = {r.get("product_id"): r for r in results}
+            v9 = (state.structured_retrieval_report or {}).get("version") == "v9"
+            bucket_level = {
+                "primary": "strong_recommend", "alternative": "recommended",
+                "conditional": "worth_considering", "exclude": "not_recommended",
+            }
+            for index, item in enumerate(state.retrieved_products or []):
+                result = result_by_id.get(item.get("product_id"))
+                if not result:
+                    continue
+                verdict = str(item.get("filter_bucket") or "")
+                result["retrieval_rank"] = index + 1
+                result["filter_verdict"] = verdict or "legacy"
+                # Deprecated contract field: clients must use match/evidence labels.
+                result["display_score"] = 0.0
+                if result.get("hard_constraint_status") == "failed":
+                    result["recommendation_level"] = "not_recommended"
+                elif v9 and verdict:
+                    result["recommendation_level"] = bucket_level.get(verdict, "worth_considering")
+                elif result.get("recommendation_level") not in {"insufficient_evidence", "cautious"}:
+                    result["recommendation_level"] = self._level_of(float(result.get("final_score") or 0))
+            # Preserve V9 Filter order.  Legacy pipeline still receives a stable
+            # score ordering, but no numeric score is exposed as UX semantics.
+            if not v9:
+                results.sort(key=lambda r: r["final_score"], reverse=True)
             state.decision_results = results
+            state.scoring_trace = {
+                "version": "verdict_evidence_v1",
+                "v9_filter_active": v9,
+                "signals": ["filter_verdict", "hard_constraints", "evidence_confidence", "retrieval_rank"],
+                "deprecated_display_score": True,
+            }
 
-            risky = sum(1 for r in results if r["display_score"] < 5.0)
-            high = sum(1 for r in results if r["display_score"] >= 8.0)
+            risky = sum(1 for r in results if r.get("recommendation_level") in {"cautious", "not_recommended"})
+            high = sum(1 for r in results if r.get("recommendation_level") in {"strong_recommend", "recommended"})
             ev_tag = " [EVIDENCE_INSUFFICIENT]" if not global_ev_sufficient else ""
-            summary = f"evidence scored={len(results)}, high(>=8)={high}, risky(<5)={risky}{ev_tag}"
+            summary = f"evidence scored={len(results)}, favorable={high}, cautious={risky}{ev_tag}"
             return self._finish_trace(state, summary)
 
         except Exception as e:
             return self._error_trace(state, str(e))
+
+    def _execute_v9(self, state: WorkflowState) -> WorkflowState:
+        """V9 展示裁决：只用可复算的本轮信号，不调用旧评分体系。"""
+        results: list[dict] = []
+        expected_category = normalize_category(state.constraints.category)
+        budget_max = state.constraints.budget_max
+        for index, raw_product in enumerate(state.retrieved_products or []):
+            product = dict(raw_product)
+            if (state.retrieval_scope == "exact_product" and
+                    product.get("product_id") in set(state.resolved_product_ids or [state.focus_product_id])):
+                # 用户已明确锁定这件商品时，指数描述的是“是否满足当前追问”，
+                # 不能因为没有走泛推荐 Filter 而被默认判成 conditional。
+                product.setdefault("filter_bucket", "primary")
+            price = product.get("price")
+            hard_failed = False
+            try:
+                hard_failed = bool(budget_max is not None and float(price or 0) > float(budget_max))
+            except (TypeError, ValueError):
+                pass
+            if expected_category and product.get("category") != expected_category:
+                hard_failed = True
+            product["hard_constraint_status"] = "failed" if hard_failed else "pass"
+            score = build_recommendation_score(product, state.constraints)
+            risks: list[str] = []
+            if hard_failed:
+                risks.append("未满足本次预算或品类条件")
+            elif score["evidence_label"] == "信息有限":
+                risks.append("部分商品资料有限，购买前建议再确认")
+            reason = str(product.get("card_reason") or "").strip()
+            if not reason:
+                reason = score["dimensions"][0]["detail"]
+            result = {
+                "product_id": product.get("product_id", ""),
+                "recommendation_score": score,
+                "recommendation_level": score["recommendation_level"],
+                "match_label": score["match_label"],
+                "evidence_label": score["evidence_label"],
+                "why_it_fits": reason,
+                "recommendation_reason": reason,
+                "caution": "；".join(risks),
+                "risk_factors": risks,
+                "hard_constraint_status": product["hard_constraint_status"],
+                "filter_verdict": str(product.get("filter_bucket") or "conditional"),
+                "retrieval_rank": index + 1,
+            }
+            results.append(result)
+        state.decision_results = results
+        state.scoring_trace = {
+            "version": "omi_recommendation_v1",
+            "user_visible_signals": ["filter_verdict", "need_fit", "budget_fit", "information"],
+            "internal_only_signals": ["chunk_aggregate_score", "rerank_relevance"],
+        }
+        favorable = sum(1 for item in results if item["recommendation_level"] in {"strong_recommend", "recommended"})
+        return self._finish_trace(state, f"v9 deterministic display scores={len(results)}, favorable={favorable}")
 
     # 品牌品类映射: "日系"等品类词 → 具体品牌列表
     _BRAND_CATEGORY_MAP = {
@@ -207,65 +300,16 @@ class DecisionAgent(BaseAgent):
                  "雅顿", "赫莲娜", "理肤泉", "薇姿", "修丽可", "海蓝之谜", "La Mer"],
     }
 
-    # ---- 批内校准高分制（展示层，不动 final_score/component_scores 真实值）----
-
-    _CAL_LO, _CAL_HI = 8.0, 9.6      # 校准显示区间（促单：普遍高分但可辨）
-    _HONEST_FLOOR = 0.5              # 原始 final < 0.5 = 明显不相关，不参与高分映射
-    _HONEST_CAP = 7.9                # 不相关商品显示分封顶（诚实线）
-
     @classmethod
-    def _level_of(cls, display: float) -> str:
-        """标签单一口径：纯按校准后 display_score 分档，同分必同标。"""
-        if display >= 9.2:
+    def _level_of(cls, score: float) -> str:
+        """按真实 final_score 生成推荐等级，避免展示分校准影响用户判断。"""
+        if score >= 0.80:
             return "strong_recommend"
-        if display >= 8.5:
+        if score >= 0.65:
             return "recommended"
-        if display >= 8.0:
+        if score >= 0.50:
             return "worth_considering"
         return "cautious"
-
-    @classmethod
-    def _calibrate_batch(cls, results: list[dict]) -> None:
-        """批内 min-max 校准 display_score 到 [8.0, 9.6] 并重定标签（原地修改）。
-
-        背景（实测）：relevance 透传 reranker 分 0.85-0.93 致全员 8.7-9.2 扎堆，
-        且标签三条件判定与分数公式两套口径出现"同分不同标"。
-        规则：
-        - 硬约束 fail（hard_constraint_status=failed）不参与，保留原低分与 not_recommended
-        - 原始 final < 0.5 不抬分：display 封顶 7.9（促单≠把不相关商品抬到 9 分）
-        - 单品候选直接 9.3；批内极差 < 0.02（全员同分）按位次 0.15/位递减保可辨
-        """
-        pool = [r for r in results
-                if r.get("hard_constraint_status") != "failed"
-                and r.get("final_score", 0.0) >= cls._HONEST_FLOOR]
-        low = [r for r in results
-               if r.get("hard_constraint_status") != "failed"
-               and r.get("final_score", 0.0) < cls._HONEST_FLOOR]
-
-        # 不相关商品：保持真实比例但封顶诚实线
-        for r in low:
-            r["display_score"] = min(round(r.get("final_score", 0.0) * 10, 1), cls._HONEST_CAP)
-            r["recommendation_level"] = cls._level_of(r["display_score"])
-
-        if not pool:
-            return
-        if len(pool) == 1:
-            pool[0]["display_score"] = 9.3
-            pool[0]["recommendation_level"] = cls._level_of(9.3)
-            return
-
-        scores = [r.get("final_score", 0.0) for r in pool]
-        s_max, s_min = max(scores), min(scores)
-        spread = s_max - s_min
-        for idx, r in enumerate(pool):  # pool 沿用 results 的 final_score 降序
-            if spread < 0.02:
-                display = cls._CAL_HI - 0.1 - idx * 0.15  # 全员同分 → 位次微阶梯
-            else:
-                norm = (r.get("final_score", 0.0) - s_min) / spread
-                display = cls._CAL_LO + norm * (cls._CAL_HI - cls._CAL_LO)
-            display = round(max(cls._CAL_LO, min(display, cls._CAL_HI)), 1)
-            r["display_score"] = display
-            r["recommendation_level"] = cls._level_of(display)
 
     def _passes_hard_constraints(self, product, constraints) -> bool:
         """硬约束判断 — 不满足则直接过滤。
@@ -277,11 +321,28 @@ class DecisionAgent(BaseAgent):
         if constraints.budget_max and product.base_price > constraints.budget_max * 2:
             return False
 
-        # 品类精确匹配（如果指定了）
-        if constraints.category and product.category != constraints.category:
+        # 品类值可能来自模型或旧客户端；仅对受控词表中的值施加硬限制。
+        expected_category = normalize_category(constraints.category)
+        if expected_category and product.category != expected_category:
             return False
 
         # 排除标签: 改为软降权（在评分阶段扣分），不再硬过滤
         # 原因: Router LLM 可能从"也可以不是苹果"误提取 avoid=['苹果']
         #       硬过滤会导致整个品牌消失，软降权更安全
         return True
+
+    @staticmethod
+    def _preferred_brands(used_memories: list[dict]) -> list[str]:
+        """从可追溯的长期偏好投影提取品牌，拒绝解析自由文本提示词。"""
+        brands: list[str] = []
+        seen: set[str] = set()
+        for memory in used_memories or []:
+            if not isinstance(memory, dict) or memory.get("memory_type") != "brand":
+                continue
+            value = memory.get("structured_value") or {}
+            brand = str(value.get("brand") or "").strip() if isinstance(value, dict) else ""
+            key = brand.casefold()
+            if brand and key not in seen:
+                seen.add(key)
+                brands.append(brand)
+        return brands

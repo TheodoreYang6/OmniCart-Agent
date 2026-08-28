@@ -39,6 +39,8 @@ _configure_utf8_stdio()
 PROJECT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = PROJECT_DIR / "backend"
 FRONTEND_DIR = PROJECT_DIR / "web-client"
+RUNTIME_DIR = PROJECT_DIR / "tmp" / "runtime"
+RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 BACKEND_HOST = os.getenv("OMNICART_HOST", "0.0.0.0")
 BACKEND_PORT = os.getenv("OMNICART_PORT", "8006")
 FRONTEND_PORT = os.getenv("OMNICART_WEB_PORT", "5173")
@@ -123,6 +125,83 @@ def wait_backend_health(timeout: float = 30.0) -> dict | None:
     return None
 
 
+def _port_open(host: str, port: str) -> bool:
+    """Do not let Vite silently choose 5174/5175/5177.
+
+    A fixed URL is part of the development contract: Android/Web screenshots and
+    the browser should all point to the same live source tree.  If the standard
+    port is already serving, reuse it; a second Vite process with a random port
+    is never started.
+    """
+    try:
+        with socket.create_connection((host, int(port)), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _windows_listening_pid(port: int) -> int | None:
+    """Return the Windows TCP listener PID without relying on Unix lsof."""
+    try:
+        output = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=5,
+        ).stdout
+    except Exception:
+        return None
+    needle = f":{port}"
+    for line in output.splitlines():
+        columns = line.split()
+        if len(columns) >= 5 and columns[1].endswith(needle) and columns[3].upper() == "LISTENING":
+            try:
+                return int(columns[-1])
+            except ValueError:
+                return None
+    return None
+
+
+def _windows_command_line(pid: int) -> str:
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+def clear_drifted_vite_instances() -> None:
+    """Keep exactly the configured Vite port for this workspace on Windows.
+
+    Vite silently increments its port by default.  That is harmful here because
+    screenshots, proxy cookies and the user-facing browser shortcut then point
+    at different live instances.  Only processes whose command line proves
+    they are this project's Vite are terminated; unrelated Node processes are
+    never touched.
+    """
+    if os.name != "nt":
+        return
+    project_marker = str(FRONTEND_DIR).lower().replace("/", "\\")
+    removed: list[tuple[int, int]] = []
+    for candidate in range(int(FRONTEND_PORT) + 1, int(FRONTEND_PORT) + 10):
+        pid = _windows_listening_pid(candidate)
+        if not pid:
+            continue
+        command = _windows_command_line(pid).lower().replace("/", "\\")
+        if "vite" not in command or project_marker not in command:
+            continue
+        try:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True, text=True, timeout=8)
+            removed.append((candidate, pid))
+        except Exception:
+            pass
+    if removed:
+        print(f"{OK} 已清理端口漂移的前端实例: {removed}")
+
+
 # ============================================================
 # 进程管理
 # ============================================================
@@ -136,9 +215,17 @@ def _spawn(cmd: list[str], cwd: Path, tag: str) -> subprocess.Popen:
     )
     _procs.append(proc)
 
+    log_path = RUNTIME_DIR / ("backend.log" if tag == "后端" else "frontend.log")
+
     def _read():
-        for line in iter(proc.stdout.readline, ""):
-            if line:
+        # 同时写文件，避免通过 IDE/双击启动时子进程刚退出却丢失真正异常。
+        with log_path.open("a", encoding="utf-8", errors="replace") as log_file:
+            log_file.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} {' '.join(cmd)} ---\n")
+            log_file.flush()
+            for line in iter(proc.stdout.readline, ""):
+                if line:
+                    log_file.write(line)
+                    log_file.flush()
                 try:
                     print(f"  [{tag}] {line.rstrip()}")
                 except UnicodeEncodeError:
@@ -220,25 +307,39 @@ def main():
     print("║   OmniCart Agent · 一键启动（前端+后端+DB检查）  ║")
     print("╚════════════════════════════════════════════════╝")
 
-    # 0. 清理残留进程（端口占用/旧实例），防止打不开
-    kill_stale_processes()
+    # 0. 先复用已经健康的后端。此前 Windows 下的 lsof/pgrep 不存在，清理
+    # 实际无效；二次启动会因 8006 被占用而立即失败并触发 cleanup，造成
+    # “启动器一打开就退出”的错觉。只有显式请求时才尝试重启旧进程。
+    existing_health = wait_backend_health(timeout=1.2)
+    if os.getenv("OMNICART_RESTART", "").lower() in {"1", "true", "yes"}:
+        kill_stale_processes()
+        existing_health = None
+    elif existing_health:
+        print(f"{OK} 复用已运行后端：http://127.0.0.1:{BACKEND_PORT}")
+
+    clear_drifted_vite_instances()
 
     # 1. 数据库连通检查
     if not check_databases():
         print(f"{WARN}存在不可用的数据库 — 后端将自动降级（如 JSON 模式），"
               f"如需完整功能请先启动对应服务。")
 
-    # 2. 启动后端
-    backend = _spawn(
-        [sys.executable, "-m", "uvicorn", "app.main:app",
-         "--host", BACKEND_HOST, "--port", BACKEND_PORT, "--log-level", "info"],
-        cwd=BACKEND_DIR, tag="后端",
-    )
+    # 2. 启动后端（已有健康实例则不抢占端口）
+    backend = None
+    if not existing_health:
+        backend = _spawn(
+            [sys.executable, "-m", "uvicorn", "app.main:app",
+             "--host", BACKEND_HOST, "--port", BACKEND_PORT, "--log-level", "info"],
+            cwd=BACKEND_DIR, tag="后端",
+        )
 
     # 3. 启动前端（npm run dev；node_modules 缺失时提示先安装）
     frontend = None
+    frontend_reused = _port_open("127.0.0.1", FRONTEND_PORT)
     if (FRONTEND_DIR / "package.json").exists():
-        if (FRONTEND_DIR / "node_modules").is_dir():
+        if frontend_reused:
+            print(f"{OK} 复用已运行前端：http://127.0.0.1:{FRONTEND_PORT}")
+        elif (FRONTEND_DIR / "node_modules").is_dir():
             frontend = _spawn(
                 ["npx.cmd" if os.name == "nt" else "npx",
                  "vite", "--port", FRONTEND_PORT],
@@ -249,9 +350,9 @@ def main():
                   f"请先执行: cd web-client && npm install")
 
     # 4. 等待后端就绪并显示真实 DB 连接状态（后端视角）
-    health = wait_backend_health()
-    if backend.poll() is not None:
-        print(f"\n{FAIL} 后端启动失败，请检查上方错误日志")
+    health = existing_health or wait_backend_health()
+    if backend is not None and backend.poll() is not None:
+        print(f"\n{FAIL} 后端启动失败，请检查 {RUNTIME_DIR / 'backend.log'}")
         cleanup()
     host_show = "127.0.0.1" if BACKEND_HOST == "0.0.0.0" else BACKEND_HOST
 
@@ -265,7 +366,7 @@ def main():
             print(f"│     {mark} {db}: {status}")
     else:
         print(f"│  {WARN}后端健康检查超时，请留意日志")
-    if frontend and frontend.poll() is None:
+    if (frontend and frontend.poll() is None) or frontend_reused:
         print(f"│  {OK} 前端   http://localhost:{FRONTEND_PORT}")
     print("│")
     print("│  按 Ctrl+C 同时停止前后端")
@@ -273,9 +374,14 @@ def main():
 
     # 5. 守护：任一核心进程退出则整体退出
     try:
-        while backend.poll() is None:
+        while True:
+            if backend is not None and backend.poll() is not None:
+                print(f"\n{FAIL} 后端进程已退出 (code={backend.returncode})，日志：{RUNTIME_DIR / 'backend.log'}")
+                break
+            if backend is None and not wait_backend_health(timeout=1.0):
+                print(f"\n{FAIL} 被复用的后端已停止，请重新启动。")
+                break
             time.sleep(1)
-        print(f"\n{FAIL} 后端进程已退出 (code={backend.returncode})")
     except KeyboardInterrupt:
         pass
     finally:
