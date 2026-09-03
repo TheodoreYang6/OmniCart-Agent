@@ -62,7 +62,10 @@ async def _handle(msg: str):
 
 async def test_view(fake_repo):
     res, ctx = await _handle("看看购物车")
-    assert res.ok and "你的购物车" in res.message and "合计" in res.message
+    assert res.ok and "购物车" in res.message
+    assert res.data["shop_card"]["kind"] == "cart_summary"
+    assert res.data["shop_card"]["payload"]["count"] == 4
+    assert res.data["shop_card"]["payload"]["total"] == 1997
     assert ctx.tool_trace[0]["skill_name"] == "cart.view"
 
 

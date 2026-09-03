@@ -49,20 +49,20 @@ class ToolRegistry(ComponentRegistry):
         """
         tools = [self.get(n) for n in names] if names else self.get_all()
         if llm_only:
-            tools = [t for t in tools
-                     if t.spec.llm_exposed and t.spec.permission != "order"]
+            tools = [t for t in tools if t.spec.llm_exposed and t.spec.permission != "order"]
         schemas = []
         for t in tools:
             ov = self._schema_overrides.get(t.spec.name, {})
-            schemas.append({
-                "type": "function",
-                "function": {
-                    "name": t.spec.name,
-                    "description": ov.get("description", t.spec.description),
-                    "parameters": ov.get("parameters") or t.spec.parameters
-                                  or {"type": "object", "properties": {}},
-                },
-            })
+            schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.spec.name,
+                        "description": ov.get("description", t.spec.description),
+                        "parameters": ov.get("parameters") or t.spec.parameters or {"type": "object", "properties": {}},
+                    },
+                }
+            )
         return schemas
 
     async def invoke(self, name: str, args: dict, ctx: ToolContext) -> ToolResult:

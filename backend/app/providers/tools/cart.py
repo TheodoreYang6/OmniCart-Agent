@@ -32,19 +32,21 @@ def _cart_summary_card(cart) -> dict:
     for it in cart.items:
         product = repo.get_by_id(it.product_id)
         skus = [s.model_dump() for s in (product.skus or [])] if product else []
-        items.append({
-            "cart_item_id": it.cart_item_id,
-            "product_id": it.product_id,
-            "title": it.title or "",
-            "brand": it.brand or "",
-            "price": float(it.price),
-            "quantity": it.quantity,
-            "image_url": it.image_url or "",
-            "sku_id": it.sku_id,
-            "sku_label": it.sku_label or "",
-            "selected": it.selected,
-            "skus": skus,
-        })
+        items.append(
+            {
+                "cart_item_id": it.cart_item_id,
+                "product_id": it.product_id,
+                "title": it.title or "",
+                "brand": it.brand or "",
+                "price": float(it.price),
+                "quantity": it.quantity,
+                "image_url": it.image_url or "",
+                "sku_id": it.sku_id,
+                "sku_label": it.sku_label or "",
+                "selected": it.selected,
+                "skus": skus,
+            }
+        )
     return {
         "kind": "cart_summary",
         "payload": {
@@ -57,7 +59,9 @@ def _cart_summary_card(cart) -> dict:
 
 class ViewCartTool(Tool):
     spec = ToolSpec(
-        name="cart.view", category="cart", permission="read",
+        name="cart.view",
+        category="cart",
+        permission="read",
         description="查看购物车当前商品列表与合计金额",
         parameters={"type": "object", "properties": {}},
     )
@@ -80,7 +84,9 @@ class ViewCartTool(Tool):
 
 class RemoveFromCartTool(Tool):
     spec = ToolSpec(
-        name="cart.remove", category="cart", permission="write",
+        name="cart.remove",
+        category="cart",
+        permission="write",
         description="删除购物车中第N个商品",
         parameters={
             "type": "object",
@@ -110,7 +116,9 @@ class RemoveFromCartTool(Tool):
 
 class UpdateCartQtyTool(Tool):
     spec = ToolSpec(
-        name="cart.update_qty", category="cart", permission="write",
+        name="cart.update_qty",
+        category="cart",
+        permission="write",
         description="修改购物车中商品数量（可指定第N个，缺省为第一个）",
         parameters={
             "type": "object",
@@ -149,7 +157,9 @@ class UpdateCartQtyTool(Tool):
 
 class ClearCartTool(Tool):
     spec = ToolSpec(
-        name="cart.clear", category="cart", permission="write",
+        name="cart.clear",
+        category="cart",
+        permission="write",
         description="清空购物车",
         parameters={"type": "object", "properties": {}},
     )
@@ -173,7 +183,9 @@ class AddToCartTool(Tool):
     """
 
     spec = ToolSpec(
-        name="cart.add", category="cart", permission="write",
+        name="cart.add",
+        category="cart",
+        permission="write",
         description="将指定商品加入购物车（需要 shopping.search 返回的真实 product_id；多规格未选时返回规格选项）",
         llm_exposed=True,  # Phase 7: ReAct 多轮中 LLM 从 search 结果携带 product_id（B1 单轮时代无上下文故关闭）
         parameters={
@@ -190,9 +202,16 @@ class AddToCartTool(Tool):
         },
     )
 
-    async def run(self, ctx: ToolContext, product_id: str = "", sku_id: str | None = None,
-                  quantity: int = 1, title: str | None = None, brand: str | None = None,
-                  price: float | None = None) -> ToolResult:
+    async def run(
+        self,
+        ctx: ToolContext,
+        product_id: str = "",
+        sku_id: str | None = None,
+        quantity: int = 1,
+        title: str | None = None,
+        brand: str | None = None,
+        price: float | None = None,
+    ) -> ToolResult:
         if not product_id:
             return ToolResult(ok=False, message="请先说你想买什么，我再帮你加购哦～")
         try:
@@ -218,10 +237,10 @@ class AddToCartTool(Tool):
                     label = " · ".join(f"{k}:{v}" for k, v in props.items())
                     sp = s.price if s.price and s.price > 0 else base
                     label += f" ¥{sp:.0f}"
-                    sku_actions.append({"type": "sku_option", "label": label,
-                                        "sku_id": s.sku_id, "product_id": product_id})
-                sku_actions.append({"type": "sku_option", "label": "默认规格",
-                                    "sku_id": "", "product_id": product_id})
+                    sku_actions.append(
+                        {"type": "sku_option", "label": label, "sku_id": s.sku_id, "product_id": product_id}
+                    )
+                sku_actions.append({"type": "sku_option", "label": "默认规格", "sku_id": "", "product_id": product_id})
                 t = (disp_brand + " " + disp_title)[:50]
                 shop_card = {
                     "kind": "sku_picker",
@@ -231,10 +250,13 @@ class AddToCartTool(Tool):
                         "brand": disp_brand,
                         "image_url": prod_repo.resolve_image_url(product_id),
                         "skus": [
-                            {"sku_id": s.sku_id, "label": (
-                                " · ".join(f"{k}:{v}" for k, v in (s.properties or {}).items())
-                                or "默认规格"),
-                             "price": s.price if s.price and s.price > 0 else product.base_price}
+                            {
+                                "sku_id": s.sku_id,
+                                "label": (
+                                    " · ".join(f"{k}:{v}" for k, v in (s.properties or {}).items()) or "默认规格"
+                                ),
+                                "price": s.price if s.price and s.price > 0 else product.base_price,
+                            }
                             for s in skus
                         ],
                     },
@@ -242,9 +264,15 @@ class AddToCartTool(Tool):
                 return ToolResult(
                     message=sku_picker(t, len(skus)),
                     actions=sku_actions,
-                    data={"needs_sku": {"product_id": product_id, "title": disp_title,
-                                        "brand": disp_brand, "base_price": hint_price},
-                          "shop_card": shop_card},
+                    data={
+                        "needs_sku": {
+                            "product_id": product_id,
+                            "title": disp_title,
+                            "brand": disp_brand,
+                            "base_price": hint_price,
+                        },
+                        "shop_card": shop_card,
+                    },
                 )
 
             # 指定/单规格/无规格 -> 直接加购
@@ -259,8 +287,11 @@ class AddToCartTool(Tool):
             await get_cart_repo().aadd_item(
                 CartItemCreate(product_id=product_id, sku_id=(sel.sku_id if sel else None), quantity=quantity),
                 ctx.user_id,
-                title=disp_title, brand=disp_brand, price=add_price,
-                image_url=prod_repo.resolve_image_url(product_id), sku_label=sku_label,
+                title=disp_title,
+                brand=disp_brand,
+                price=add_price,
+                image_url=prod_repo.resolve_image_url(product_id),
+                sku_label=sku_label,
             )
             t = (disp_brand + " " + disp_title)[:60]
             cart = await get_cart_repo().aget_cart(ctx.user_id)
@@ -269,8 +300,12 @@ class AddToCartTool(Tool):
             shop_card = _cart_summary_card(cart)
             return ToolResult(
                 message=cart_added(t, sku_label, cart_count, cart_total),
-                data={"shop_card": shop_card, "cart_count": cart_count, "cart_total": cart_total,
-                      "needs_llm_summary": True},
+                data={
+                    "shop_card": shop_card,
+                    "cart_count": cart_count,
+                    "cart_total": cart_total,
+                    "needs_llm_summary": True,
+                },
                 actions=[{"type": "quick_reply", "label": "去购物车结算", "route": "cart"}],
             )
         except Exception as e:  # noqa: BLE001

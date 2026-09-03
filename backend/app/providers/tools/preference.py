@@ -17,7 +17,9 @@ __all__ = ["PreferenceSaveTool", "PreferenceListTool", "PreferenceDeleteTool"]
 
 class PreferenceSaveTool(Tool):
     spec = ToolSpec(
-        name="preference.save", category="preference", permission="write",
+        name="preference.save",
+        category="preference",
+        permission="write",
         description="记住用户的长期偏好（如预算、忌口、避雷、品牌喜好），LLM 解析后合并入库",
         parameters={
             "type": "object",
@@ -31,7 +33,7 @@ class PreferenceSaveTool(Tool):
         # P1-2: 剥句首触发词，避免“记住我”等前缀污染偏好解析
         for prefix in ("请记住", "帮我记住", "记住我", "记一下我", "记住"):
             if raw_text.startswith(prefix):
-                raw_text = raw_text[len(prefix):].lstrip("，, 的")
+                raw_text = raw_text[len(prefix) :].lstrip("，, 的")
                 break
         if not raw_text:
             return ToolResult(ok=False, message="想让我记住什么偏好呢？直接告诉我就好～")
@@ -45,13 +47,14 @@ class PreferenceSaveTool(Tool):
         if not entry:
             return ToolResult(ok=False, message="这条我没太理解成偏好，换个说法试试？比如「以后推荐都控制在500以内」")
         summary = entry.get("raw_text") or raw_text
-        return ToolResult(message=f"✅ 记住啦：「{summary[:50]}」，之后推荐都会考虑～",
-                          data={"entry": entry})
+        return ToolResult(message=f"✅ 记住啦：「{summary[:50]}」，之后推荐都会考虑～", data={"entry": entry})
 
 
 class PreferenceListTool(Tool):
     spec = ToolSpec(
-        name="preference.list", category="preference", permission="read",
+        name="preference.list",
+        category="preference",
+        permission="read",
         description="列出用户已保存的长期偏好",
         parameters={
             "type": "object",
@@ -64,14 +67,16 @@ class PreferenceListTool(Tool):
             from app.services.user_profile_service import get_user_profile_service
 
             svc = get_user_profile_service()
-            entries = (await svc.list_entries(ctx.user_id, category) if category
-                       else await svc.list_all_entries(ctx.user_id))
+            entries = (
+                await svc.list_entries(ctx.user_id, category) if category else await svc.list_all_entries(ctx.user_id)
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning(f"preference.list failed: {e}")
             return ToolResult(ok=False, message="暂时无法查看偏好，请稍后再试～")
         if not entries:
-            return ToolResult(message="还没有记录过偏好哦～可以对我说「记住我预算都在500以内」这样的话",
-                              data={"entries": []})
+            return ToolResult(
+                message="还没有记录过偏好哦～可以对我说「记住我预算都在500以内」这样的话", data={"entries": []}
+            )
         lines = [f"💡 你的偏好（{len(entries)} 条）："]
         for idx, e in enumerate(entries, 1):
             text = (e.get("raw_text") or "")[:40]
@@ -84,7 +89,9 @@ class PreferenceListTool(Tool):
 
 class PreferenceDeleteTool(Tool):
     spec = ToolSpec(
-        name="preference.delete", category="preference", permission="write",
+        name="preference.delete",
+        category="preference",
+        permission="write",
         description="删除一条已保存的偏好",
         parameters={
             "type": "object",

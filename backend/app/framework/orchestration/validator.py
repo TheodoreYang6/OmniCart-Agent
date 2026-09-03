@@ -16,8 +16,16 @@ logger = logging.getLogger(__name__)
 __all__ = ["PIPELINE_CAPABILITIES", "PlanValidator"]
 
 # 与 graph.py @register_capability 注册名保持一致（治理校验兜底防漂移）
-PIPELINE_CAPABILITIES = {"visual", "retrieval", "compare_retrieval", "multi_query_retrieval", "reranker",
-                         "evidence_check", "decision", "response"}
+PIPELINE_CAPABILITIES = {
+    "visual",
+    "retrieval",
+    "compare_retrieval",
+    "multi_query_retrieval",
+    "reranker",
+    "evidence_check",
+    "decision",
+    "response",
+}
 
 MAX_PLAN_STEPS = 8
 
@@ -26,7 +34,7 @@ class PlanValidator:
     """校验 LLM 输出的计划 JSON，通过则组装 ExecutionPlan，失败返回 None。"""
 
     def __init__(self, allowed_tools: set[str]):
-        self._allowed_tools = allowed_tools   # llm_exposed 白名单工具名（B1 过滤产物）
+        self._allowed_tools = allowed_tools  # llm_exposed 白名单工具名（B1 过滤产物）
 
     def validate(self, raw: dict, intent: str, trigger: str) -> ExecutionPlan | None:
         steps_raw = (raw or {}).get("steps")
@@ -47,7 +55,7 @@ class PlanValidator:
                 return self._reject(f"step[{i}] id 缺失或重复: {sid!r}")
             # 能力封闭词表：pipeline 能力 或 tool:<白名单工具>
             if cap.startswith("tool:"):
-                if cap[len("tool:"):] not in self._allowed_tools:
+                if cap[len("tool:") :] not in self._allowed_tools:
                     return self._reject(f"受限/未知工具: {cap!r}")
             elif cap not in PIPELINE_CAPABILITIES:
                 return self._reject(f"未知 capability: {cap!r}")
@@ -60,23 +68,22 @@ class PlanValidator:
                 if group in group_deps and sorted(group_deps[group]) != sorted(deps):
                     return self._reject(f"并行组 {group!r} 内依赖不一致")
                 group_deps.setdefault(group, list(deps))
-            steps.append(PlanStep(step_id=sid, capability=cap,
-                                  depends_on=[str(d) for d in deps], parallel_group=group))
+            steps.append(PlanStep(step_id=sid, capability=cap, depends_on=[str(d) for d in deps], parallel_group=group))
             seen_ids.append(sid)
 
         # 唯一宽容项：末步必须是 response，缺失自动追加（依赖最后一步）
         if steps[-1].capability != "response":
             if len(steps) >= MAX_PLAN_STEPS:
                 return self._reject("末步非 response 且已达步数上限")
-            steps.append(PlanStep(step_id="s_auto_response", capability="response",
-                                  depends_on=[steps[-1].step_id]))
+            steps.append(PlanStep(step_id="s_auto_response", capability="response", depends_on=[steps[-1].step_id]))
 
         try:
             max_reflects = int((raw or {}).get("max_reflects", 1))
         except (TypeError, ValueError):
             max_reflects = 1
         plan = ExecutionPlan(
-            intent=intent, steps=steps,
+            intent=intent,
+            steps=steps,
             max_reflects=max(0, min(2, max_reflects)),
             rationale=str((raw or {}).get("rationale", ""))[:200],
         )

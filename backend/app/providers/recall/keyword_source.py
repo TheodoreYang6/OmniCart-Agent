@@ -53,8 +53,12 @@ class KeywordRecallSource(RecallSource):
         async def _do(sub_cat: str | None):
             try:
                 return await akw(
-                    search_query, query.top_k, query.category, sub_cat,
-                    query.budget_max, query.budget_min,
+                    search_query,
+                    query.top_k,
+                    query.category,
+                    sub_cat,
+                    query.budget_max,
+                    query.budget_min,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"keyword search failed: {e}")

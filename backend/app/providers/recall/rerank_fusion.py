@@ -52,16 +52,12 @@ class RerankFusion:
 
         documents = [self._build_doc(p, ev_by_pid) for p in products]
 
-        ranked = await self._rerank_cached(query, documents,
-                                           [str(p.get("product_id", "")) for p in products])
+        ranked = await self._rerank_cached(query, documents, [str(p.get("product_id", "")) for p in products])
 
         # ``reranker_score`` 历史上带有很高的展示基线（甚至可超过 1），只能用于
         # 稳定排序；决策评分必须读取未经抬升的 ``relevance_score``，否则弱相关候选
         # 也会被当成高度匹配。
-        raw_relevance = {
-            r["index"]: max(0.0, min(1.0, float(r["relevance_score"])))
-            for r in ranked
-        }
+        raw_relevance = {r["index"]: max(0.0, min(1.0, float(r["relevance_score"]))) for r in ranked}
         index_map = {idx: 0.68 + 0.38 * score for idx, score in raw_relevance.items()}
         for idx, p in enumerate(products):
             p["reranker_score"] = index_map.get(idx, 0.0)

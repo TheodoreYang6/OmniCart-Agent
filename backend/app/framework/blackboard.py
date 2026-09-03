@@ -34,15 +34,15 @@ __all__ = ["Blackboard", "set_current_board", "current_board", "reset_current_bo
 # 请求级黑板上下文（与 observability.request_context 同模式）。
 # LangGraph 节点边界会重建 Pydantic state（动态私有属性丢失），故黑板不能挂 state；
 # 在 run_workflow 父任务 set，节点子任务继承可见。
-_current_board: ContextVar["Blackboard | None"] = ContextVar("omnicart_blackboard", default=None)
+_current_board: ContextVar[Blackboard | None] = ContextVar("omnicart_blackboard", default=None)
 
 
-def set_current_board(bb: "Blackboard"):
+def set_current_board(bb: Blackboard):
     """绑定请求级黑板，返回 token 供 reset。"""
     return _current_board.set(bb)
 
 
-def current_board() -> "Blackboard | None":
+def current_board() -> Blackboard | None:
     """读当前请求的黑板（未绑定返回 None，消费方按无 A2A 降级）。"""
     return _current_board.get()
 
@@ -55,16 +55,17 @@ class Blackboard:
     """请求级 Artifact 总线（asyncio 单线程语义，无需锁）。"""
 
     def __init__(self) -> None:
-        self._latest: dict[str, Artifact] = {}      # topic -> 最新产物
-        self._history: list[Artifact] = []          # 发布顺序全history
+        self._latest: dict[str, Artifact] = {}  # topic -> 最新产物
+        self._history: list[Artifact] = []  # 发布顺序全history
         self._events: dict[str, asyncio.Event] = {}
-        self._subscribers: dict[str, list] = {}     # topic -> [callback(artifact)]
-        self._tasks: list[asyncio.Task] = []        # 后台生产者任务引用
+        self._subscribers: dict[str, list] = {}  # topic -> [callback(artifact)]
+        self._tasks: list[asyncio.Task] = []  # 后台生产者任务引用
 
     # ---- 生产 ----
 
-    async def publish(self, topic: str, content: dict | None = None,
-                      producer: str = "", confidence: float = 1.0) -> Artifact:
+    async def publish(
+        self, topic: str, content: dict | None = None, producer: str = "", confidence: float = 1.0
+    ) -> Artifact:
         """发布产物：存储 + 唤醒等待者 + 触发订阅回调。"""
         artifact = Artifact(
             artifact_id=f"A-{uuid.uuid4().hex[:8]}",

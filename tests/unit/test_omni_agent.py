@@ -17,14 +17,20 @@ from app.schemas.workflow import WorkflowState
 
 # ---- fakes ----
 
+
 class _SearchTool(Tool):
-    spec = ToolSpec(name="shopping.search", category="shopping", description="搜",
-                    parameters={"type": "object", "properties": {"query": {"type": "string"}}})
+    spec = ToolSpec(
+        name="shopping.search",
+        category="shopping",
+        description="搜",
+        parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+    )
 
     async def run(self, ctx, query: str = "", top_k: int = 5, **kw):
         if ctx.state is not None:
             ctx.state.retrieved_products = [
-                {"product_id": "P-A", "title": f"{query}旗舰", "brand": "TestBrand", "price": 999}]
+                {"product_id": "P-A", "title": f"{query}旗舰", "brand": "TestBrand", "price": 999}
+            ]
         return ToolResult(message=f"「{query}」深度检索到 1 件", data={"products": [{"product_id": "P-A"}]})
 
 
@@ -103,11 +109,16 @@ async def _run(script, tools, deep_think=False, monkeypatch=None):
 
 # ---- 主流程 ----
 
+
 async def test_normal_search_batch_stops_before_a_second_llm_round(monkeypatch):
     events, state, gw = await _run(
-        [{"content": "", "tool_calls": [_call("shopping.search", {"query": "蓝牙耳机"})]},
-         {"content": "信息足够了：TestBrand 旗舰最合适", "tool_calls": []}],
-        [_SearchTool()], monkeypatch=monkeypatch)
+        [
+            {"content": "", "tool_calls": [_call("shopping.search", {"query": "蓝牙耳机"})]},
+            {"content": "信息足够了：TestBrand 旗舰最合适", "tool_calls": []},
+        ],
+        [_SearchTool()],
+        monkeypatch=monkeypatch,
+    )
     kinds = [e["type"] for e in events]
     # 普通模式的商品检索现在是一个受控批次：首个成功 search 后直接收敛，
     # 不再让模型为了生成终稿而进入第二轮工具决策。正式 SSE 由 ResponseAgent
@@ -127,10 +138,13 @@ async def test_normal_search_batch_stops_before_a_second_llm_round(monkeypatch):
 
 async def test_multi_calls_one_round_in_order(monkeypatch):
     events, state, gw = await _run(
-        [{"content": "", "tool_calls": [_call("order.list", cid="a"),
-                                        _call("shopping.check_inventory", cid="b")]},
-         {"content": "done", "tool_calls": []}],
-        [_OrderListTool(), _InvTool()], monkeypatch=monkeypatch)
+        [
+            {"content": "", "tool_calls": [_call("order.list", cid="a"), _call("shopping.check_inventory", cid="b")]},
+            {"content": "done", "tool_calls": []},
+        ],
+        [_OrderListTool(), _InvTool()],
+        monkeypatch=monkeypatch,
+    )
     tool_evs = [e for e in events if e["type"] == "tool_result"]
     assert [e["tool"] for e in tool_evs] == ["order.list", "shopping.check_inventory"]
     # skill_executions 由 registry 落 trace
@@ -138,6 +152,7 @@ async def test_multi_calls_one_round_in_order(monkeypatch):
 
 
 # ---- 预算与防循环 ----
+
 
 async def test_budget_normal_two_rounds(monkeypatch):
     script = [{"content": "", "tool_calls": [_call("order.list", {"limit": i})]} for i in range(10)]
@@ -153,12 +168,12 @@ async def test_budget_normal_two_rounds(monkeypatch):
     assert not (state.answer_draft or "").strip()
 
 
-async def test_budget_deep_think_four_rounds(monkeypatch):
+async def test_budget_deep_think_five_rounds(monkeypatch):
     script = [{"content": "", "tool_calls": [_call("order.list", {"limit": i})]} for i in range(20)]
     events, _, gw = await _run(script, [_OrderListTool()], deep_think=True, monkeypatch=monkeypatch)
-    assert gw.calls == 4, gw.calls          # 深度思考最多 4 轮
-    assert gw.plan_calls == 1               # 首轮尝试产计划（本例规划失败为退化路径）
-    assert events[-1]["rounds"] == 5
+    assert gw.calls == 5, gw.calls  # 深度思考硬上限为 5 轮
+    assert gw.plan_calls == 1  # 首轮尝试产计划（本例规划失败为退化路径）
+    assert events[-1]["rounds"] == 6
 
 
 async def test_repeated_calls_force_stop(monkeypatch):
@@ -170,11 +185,16 @@ async def test_repeated_calls_force_stop(monkeypatch):
 
 # ---- 异常与确认 ----
 
+
 async def test_confirmation_required_backfilled(monkeypatch):
     events, _, gw = await _run(
-        [{"content": "", "tool_calls": [_call("order.submit2")]},
-         {"content": "需要你确认后才能提交哦", "tool_calls": []}],
-        [_ConfirmTool()], monkeypatch=monkeypatch)
+        [
+            {"content": "", "tool_calls": [_call("order.submit2")]},
+            {"content": "需要你确认后才能提交哦", "tool_calls": []},
+        ],
+        [_ConfirmTool()],
+        monkeypatch=monkeypatch,
+    )
     # permission=order 未带 _confirmed → registry 拦截 → 回填确认引导文本
     tool_msgs = [m for m in gw.seen_messages[1] if m.get("role") == "tool"]
     assert tool_msgs and "需要用户本人确认" in tool_msgs[0]["content"]
@@ -183,9 +203,13 @@ async def test_confirmation_required_backfilled(monkeypatch):
 
 async def test_tool_exception_continues(monkeypatch):
     events, _, gw = await _run(
-        [{"content": "", "tool_calls": [_call("test.boom")]},
-         {"content": "工具失败了，换个方式回答", "tool_calls": []}],
-        [_BoomTool()], monkeypatch=monkeypatch)
+        [
+            {"content": "", "tool_calls": [_call("test.boom")]},
+            {"content": "工具失败了，换个方式回答", "tool_calls": []},
+        ],
+        [_BoomTool()],
+        monkeypatch=monkeypatch,
+    )
     tool_msgs = [m for m in gw.seen_messages[1] if m.get("role") == "tool"]
     assert tool_msgs and "[工具失败]" in tool_msgs[0]["content"]
     assert events[-1]["type"] == "done"  # 循环未中断

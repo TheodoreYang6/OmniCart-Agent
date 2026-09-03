@@ -16,10 +16,10 @@ class PlanStep(BaseModel):
     """单个计划步骤。"""
 
     step_id: str
-    capability: str              # "visual"/"retrieval"/"reranker"/"evidence_check"/"decision"/"response" 或 "tool:<name>"
+    capability: str  # "visual"/"retrieval"/"reranker"/"evidence_check"/"decision"/"response" 或 "tool:<name>"
     depends_on: list[str] = Field(default_factory=list)
     parallel_group: str | None = None
-    optional: bool = False       # 失败/跳过不致命
+    optional: bool = False  # 失败/跳过不致命
 
 
 class ExecutionPlan(BaseModel):
@@ -28,7 +28,7 @@ class ExecutionPlan(BaseModel):
     intent: str = ""
     steps: list[PlanStep] = Field(default_factory=list)
     max_reflects: int = 1
-    rationale: str = ""          # planner 依据（进 trace）
+    rationale: str = ""  # planner 依据（进 trace）
     meta: dict = Field(default_factory=dict)  # 计划级参数（如 compare_targets），供 capability 读取
 
     def next_ready(self, done: set[str]) -> list[PlanStep]:
@@ -44,7 +44,8 @@ class ExecutionPlan(BaseModel):
                 continue
             if step.parallel_group:
                 group = [
-                    s for s in self.steps
+                    s
+                    for s in self.steps
                     if s.parallel_group == step.parallel_group
                     and s.step_id not in done
                     and all(dep in done for dep in s.depends_on)

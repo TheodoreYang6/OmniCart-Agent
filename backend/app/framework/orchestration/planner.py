@@ -19,8 +19,15 @@ from app.framework.orchestration.plan import ExecutionPlan, PlanStep
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Planner", "RulePlanner", "LLMPlanner", "HybridPlanner",
-           "get_planner", "extract_compare_targets", "set_tool_schema_source"]
+__all__ = [
+    "Planner",
+    "RulePlanner",
+    "LLMPlanner",
+    "HybridPlanner",
+    "get_planner",
+    "extract_compare_targets",
+    "set_tool_schema_source",
+]
 
 
 # LLM 可见工具 schema 的来源钩子（P0-2 依赖治理）：framework 不得 import providers，
@@ -37,7 +44,8 @@ def set_tool_schema_source(fn) -> None:
 
 # 对比意图触发词（尾部剥离）与实体分隔符
 _COMPARE_TAIL = re.compile(
-    r"(做对比|做比较|对比|比较|哪个更好|哪个好|哪款好|怎么选|如何选|选哪个|哪个强)+[的呢吗?？!！~～\s]*$")
+    r"(做对比|做比较|对比|比较|哪个更好|哪个好|哪款好|怎么选|如何选|选哪个|哪个强)+[的呢吗?？!！~～\s]*$"
+)
 _COMPARE_SEP = re.compile(r"\s*(?:和|与|跟|还是|、|[Vv][Ss]\.?)\s*")
 
 
@@ -57,7 +65,9 @@ def extract_compare_targets(query: str) -> list[str]:
     if q.startswith("对"):
         q = q[1:]
     q = _COMPARE_TAIL.sub("", q).strip()
-    parts = [p.strip(" ，,。的 ") for p in _COMPARE_SEP.split(q)]
+    # ``str.strip`` intentionally receives a character set: comparison edges
+    # may contain any mixture of Chinese/ASCII punctuation and the particle “的”.
+    parts = [p.strip(" ，,。的 ") for p in _COMPARE_SEP.split(q)]  # noqa: B005
     parts = [p for p in parts if p and len(p) >= 2]
     return parts[:3] if len(parts) >= 2 else []
 
@@ -87,8 +97,7 @@ class RulePlanner(Planner):
             return self._build(intent, [("response", None)], rationale="闲聊直达回复")
 
         if intent == "risk_check":
-            steps = [("retrieval", None), ("evidence_check", None),
-                     ("decision", None), ("response", None)]
+            steps = [("retrieval", None), ("evidence_check", None), ("decision", None), ("response", None)]
             return self._build(intent, steps, has_image, rationale="风险核查跳过精排")
 
         if intent == "compare":
@@ -96,29 +105,48 @@ class RulePlanner(Planner):
             # 避免单次混合检索稀释品牌信号造成假阴性；提不出则回退单路。
             targets = extract_compare_targets(state.user_query)
             if targets:
-                steps = [("compare_retrieval", None), ("reranker", "g1"), ("evidence_check", "g1"),
-                         ("decision", None), ("response", None)]
-                plan = self._build(intent, steps, has_image,
-                                   rationale=f"对比目标分解: {targets}，多路并行检索")
+                steps = [
+                    ("compare_retrieval", None),
+                    ("reranker", "g1"),
+                    ("evidence_check", "g1"),
+                    ("decision", None),
+                    ("response", None),
+                ]
+                plan = self._build(intent, steps, has_image, rationale=f"对比目标分解: {targets}，多路并行检索")
                 plan.meta["compare_targets"] = targets
                 return plan
-            steps = [("retrieval", None), ("reranker", "g1"), ("evidence_check", "g1"),
-                     ("decision", None), ("response", None)]
+            steps = [
+                ("retrieval", None),
+                ("reranker", "g1"),
+                ("evidence_check", "g1"),
+                ("decision", None),
+                ("response", None),
+            ]
             return self._build(intent, steps, has_image, rationale="对比意图并行精排与证据检查")
 
         # QU V2 新意图模板
         if intent == "bundle":
             # 多目标拆分检索（sub_queries 由 Router QU 写入；缺失时 capability 内部退化单路）
-            steps = [("multi_query_retrieval", None), ("reranker", None),
-                     ("evidence_check", None), ("decision", None), ("response", None)]
+            steps = [
+                ("multi_query_retrieval", None),
+                ("reranker", None),
+                ("evidence_check", None),
+                ("decision", None),
+                ("response", None),
+            ]
             n = len(state.retrieval_plan.sub_queries or [])
-            return self._build(intent, steps, has_image,
-                               rationale=f"搭配成套：{n} 路并行分组检索")
+            return self._build(intent, steps, has_image, rationale=f"搭配成套：{n} 路并行分组检索")
 
         if intent == "replenish":
             # 复购：先查订单历史（B2 工具步回填 context）再检索同款/同类
-            steps = [("tool:order.list", None), ("retrieval", None), ("reranker", None),
-                     ("evidence_check", None), ("decision", None), ("response", None)]
+            steps = [
+                ("tool:order.list", None),
+                ("retrieval", None),
+                ("reranker", None),
+                ("evidence_check", None),
+                ("decision", None),
+                ("response", None),
+            ]
             return self._build(intent, steps, has_image, rationale="复购：先查订单再检索")
 
         if intent == "knowledge":
@@ -129,13 +157,17 @@ class RulePlanner(Planner):
             return plan
 
         # gift 与 recommend 同管线（差异在 response prompt 的 gift_profile 注入）
-        steps = [("retrieval", None), ("reranker", None), ("evidence_check", None),
-                 ("decision", None), ("response", None)]
+        steps = [
+            ("retrieval", None),
+            ("reranker", None),
+            ("evidence_check", None),
+            ("decision", None),
+            ("response", None),
+        ]
         return self._build(intent, steps, has_image, rationale="默认完整链路")
 
     @staticmethod
-    def _build(intent: str, caps: list[tuple], has_image: bool = False,
-               rationale: str = "") -> ExecutionPlan:
+    def _build(intent: str, caps: list[tuple], has_image: bool = False, rationale: str = "") -> ExecutionPlan:
         """把 (capability, parallel_group) 序列组装为线性依赖计划。
 
         依赖规则：每步依赖「上一批」全部步骤（同 parallel_group 视为一批）。
@@ -153,13 +185,11 @@ class RulePlanner(Planner):
                     prev_batch = cur_batch
                 cur_batch = []
                 cur_group = group
-            steps.append(PlanStep(step_id=sid, capability=cap,
-                                  depends_on=list(prev_batch), parallel_group=group))
+            steps.append(PlanStep(step_id=sid, capability=cap, depends_on=list(prev_batch), parallel_group=group))
             cur_batch.append(sid)
         from app.core.config import REFLECT_MAX_RETRIES
 
-        return ExecutionPlan(intent=intent, steps=steps,
-                             max_reflects=REFLECT_MAX_RETRIES, rationale=rationale)
+        return ExecutionPlan(intent=intent, steps=steps, max_reflects=REFLECT_MAX_RETRIES, rationale=rationale)
 
 
 _planner: Planner | None = None
@@ -220,7 +250,7 @@ class LLMPlanner(Planner):
     _CACHE_MAX = 128
 
     def __init__(self):
-        self._cache: dict[str, dict] = {}   # 进程内：key -> 已校验计划 model_dump
+        self._cache: dict[str, dict] = {}  # 进程内：key -> 已校验计划 model_dump
 
     async def plan(self, state) -> ExecutionPlan:  # pragma: no cover — 统一走 plan_or_none
         plan = await self.plan_or_none(state, "direct")
@@ -230,9 +260,7 @@ class LLMPlanner(Planner):
 
     async def plan_or_none(self, state, trigger: str) -> ExecutionPlan | None:
         try:
-            key = hashlib.md5(
-                f"{state.user_query}|{state.intent}|{bool(state.image_url)}".encode()
-            ).hexdigest()
+            key = hashlib.md5(f"{state.user_query}|{state.intent}|{bool(state.image_url)}".encode()).hexdigest()
             if key in self._cache:
                 return ExecutionPlan(**self._cache[key])
 
@@ -260,8 +288,7 @@ class LLMPlanner(Planner):
         from app.prompts.agent_prompts import build_planning_prompt
 
         tools_desc = "\n".join(
-            f"- tool:{s['function']['name']}: {s['function']['description']}"
-            for s in self._llm_tool_schemas()
+            f"- tool:{s['function']['name']}: {s['function']['description']}" for s in self._llm_tool_schemas()
         )
         prompt = build_planning_prompt(state.user_query, _PIPELINE_DESC, tools_desc)
         raw = await get_model_gateway().chat("planning", prompt)

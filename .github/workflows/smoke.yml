@@ -54,7 +54,7 @@ jobs:
           code=$(curl -s -o /tmp/rec.json -w "%{http_code}" -X POST \
             http://127.0.0.1:8006/api/recommend \
             -H 'Content-Type: application/json' \
-            -d '{"query":"推荐一款蓝牙耳机，500以内"}')
+            -d '{"user_query":"推荐一款蓝牙耳机，500以内"}')
           echo "HTTP $code"; head -c 400 /tmp/rec.json || true
           test "$code" = "200"
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid as _uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.framework.tools.providers import (
     InventoryProvider,
@@ -70,15 +70,15 @@ class MockLogisticsProvider(LogisticsProvider):
 
     async def track(self, order_id: str, created_at=None) -> dict:
         if created_at is None:
-            created_at = datetime.now(timezone.utc)
+            created_at = datetime.now(UTC)
         elif isinstance(created_at, str):
             try:
                 created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
             except Exception:  # noqa: BLE001
-                created_at = datetime.now(timezone.utc)
+                created_at = datetime.now(UTC)
         if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+            created_at = created_at.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
         elapsed = now - created_at
 
         nodes = []
@@ -86,11 +86,13 @@ class MockLogisticsProvider(LogisticsProvider):
         for name, offset in self._STAGES:
             node_time = created_at + offset
             done = elapsed >= offset
-            nodes.append({
-                "name": name,
-                "time": node_time.strftime("%Y-%m-%d %H:%M") if done else "",
-                "done": done,
-            })
+            nodes.append(
+                {
+                    "name": name,
+                    "time": node_time.strftime("%Y-%m-%d %H:%M") if done else "",
+                    "done": done,
+                }
+            )
             if done:
                 current_state = name
         # 预计送达：签收前显示剩余，签收后显示已完成

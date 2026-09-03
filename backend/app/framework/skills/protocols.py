@@ -18,8 +18,8 @@ class PromptSkillSpec(BaseModel):
 
     name: str
     description: str = ""
-    template: str = ""                    # prompt 模板（可含 {占位符}）
-    capability: str = "chat_generation"   # model_gateway 能力名
+    template: str = ""  # prompt 模板（可含 {占位符}）
+    capability: str = "chat_generation"  # model_gateway 能力名
     kind: str = "prompt"
 
 

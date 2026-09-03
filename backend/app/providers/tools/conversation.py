@@ -22,7 +22,9 @@ def _conv_svc():
 
 class ConversationHistoryTool(Tool):
     spec = ToolSpec(
-        name="conversation.history", category="conversation", permission="read",
+        name="conversation.history",
+        category="conversation",
+        permission="read",
         description="回顾当前会话最近聊过的内容",
         parameters={
             "type": "object",
@@ -50,7 +52,9 @@ class ConversationHistoryTool(Tool):
 
 class ConversationResetTool(Tool):
     spec = ToolSpec(
-        name="conversation.reset", category="conversation", permission="write",
+        name="conversation.reset",
+        category="conversation",
+        permission="write",
         description="清空当前会话上下文（聚焦商品/待选规格/待确认订单/上一轮推荐），重新开始",
         parameters={"type": "object", "properties": {}},
     )
@@ -59,13 +63,16 @@ class ConversationResetTool(Tool):
         if not ctx.conversation_id:
             return ToolResult(message="好的～我们重新开始，想看点什么？")
         try:
-            await _conv_svc().aupdate_context_snapshot(ctx.conversation_id, {
-                "focus_product": None,
-                "pending_sku_product": None,
-                "pending_order_items": None,
-                "last_products": [],
-                "last_orders": [],
-            })
+            await _conv_svc().aupdate_context_snapshot(
+                ctx.conversation_id,
+                {
+                    "focus_product": None,
+                    "pending_sku_product": None,
+                    "pending_order_items": None,
+                    "last_products": [],
+                    "last_orders": [],
+                },
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning(f"conversation.reset failed: {e}")
             return ToolResult(ok=False, message="重置失败，请稍后再试～")

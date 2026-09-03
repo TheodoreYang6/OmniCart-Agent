@@ -25,6 +25,7 @@ jobs:
     # 不配置 DB/Qdrant/Redis → 走 PG/Qdrant/Redis 三级降级路径（JSON 仓库 / 本地余弦 / 无缓存）。
     env:
       OMNICART_MOCK_MODE: "true"
+      OMNICART_PORT: "8006"
       DATABASE_URL: ""
       QDRANT_URL: ""
       REDIS_URL: ""
@@ -42,6 +43,32 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx
 
+      - name: Boot test server
+        working-directory: backend
+        run: |
+          uvicorn app.main:app --host 127.0.0.1 --port 8006 > /tmp/omnicart-integration.log 2>&1 &
+          echo $! > /tmp/omnicart-integration.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8006/api/health > /dev/null; then
+              echo "Integration server is healthy"
+              break
+            fi
+            sleep 2
+            if [ "$i" -eq 30 ]; then
+              cat /tmp/omnicart-integration.log
+              echo "Integration server did not become healthy"
+              exit 1
+            fi
+          done
+
       # 端到端集成：recommend / SSE / upload / workflow（MOCK 网关，无外部服务）
       - name: Run integration tests
         run: pytest tests/integration -v -m "not smoke"
+
+      - name: Show server log on failure
+        if: failure()
+        run: tail -n 200 /tmp/omnicart-integration.log || true
+
+      - name: Stop test server
+        if: always()
+        run: kill "$(cat /tmp/omnicart-integration.pid)" 2>/dev/null || true

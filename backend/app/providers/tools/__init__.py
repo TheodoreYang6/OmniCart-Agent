@@ -99,8 +99,7 @@ def get_tool_registry():
             import json
             from pathlib import Path
 
-            reg.set_schema_overrides(json.loads(
-                Path(TOOL_SCHEMA_OVERRIDES_PATH).read_text(encoding="utf-8")))
+            reg.set_schema_overrides(json.loads(Path(TOOL_SCHEMA_OVERRIDES_PATH).read_text(encoding="utf-8")))
 
         _registry = reg
 

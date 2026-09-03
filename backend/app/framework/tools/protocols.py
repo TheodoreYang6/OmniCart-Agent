@@ -21,13 +21,13 @@ __all__ = ["ToolSpec", "ToolContext", "ToolResult", "Tool"]
 class ToolSpec(BaseModel):
     """工具身份 + 契约。``parameters`` 为 OpenAI function-calling 兼容 JSON Schema。"""
 
-    name: str                       # 命名空间.动作，如 "cart.remove"
+    name: str  # 命名空间.动作，如 "cart.remove"
     description: str = ""
     parameters: dict = Field(default_factory=dict)
-    category: str = ""              # shopping / cart / order / preference / conversation
-    permission: str = "read"        # read（自动）/ write（自动+trace）/ order（需确认）
+    category: str = ""  # shopping / cart / order / preference / conversation
+    permission: str = "read"  # read（自动）/ write（自动+trace）/ order（需确认）
     timeout_ms: int = 8000
-    llm_exposed: bool = True        # 是否暴露给 LLM 函数调用（强依赖会话上下文/确认流的工具置 False）
+    llm_exposed: bool = True  # 是否暴露给 LLM 函数调用（强依赖会话上下文/确认流的工具置 False）
 
 
 @dataclass
@@ -37,8 +37,8 @@ class ToolContext:
     user_id: str = ""
     session_id: str = ""
     conversation_id: str = ""
-    args_raw: str = ""              # 原始 query（供 ordinal 解析等）
-    state: object | None = None     # WorkflowState | None（存在则镜像 trace）
+    args_raw: str = ""  # 原始 query（供 ordinal 解析等）
+    state: object | None = None  # WorkflowState | None（存在则镜像 trace）
     blackboard: object | None = None  # 未来接入，本阶段为 None
     tool_trace: list = field(default_factory=list)
 
@@ -49,7 +49,7 @@ class ToolResult(BaseModel):
     ok: bool = True
     data: dict = Field(default_factory=dict)
     artifacts: list[Artifact] = Field(default_factory=list)  # A2A 协同
-    message: str = ""               # 面向用户文本（可空）
+    message: str = ""  # 面向用户文本（可空）
     actions: list[dict] = Field(default_factory=list)  # quick_reply/address_form/sku_option
     error: str = ""
 
@@ -64,8 +64,8 @@ class Tool(ABC):
         """供 ComponentRegistry 按名注册（读 spec.name）。"""
         return self.spec.name
 
-    def should_activate(self, ctx: "ToolContext", **kwargs) -> bool:
+    def should_activate(self, ctx: ToolContext, **kwargs) -> bool:
         return True
 
     @abstractmethod
-    async def run(self, ctx: "ToolContext", **kwargs) -> "ToolResult": ...
+    async def run(self, ctx: ToolContext, **kwargs) -> ToolResult: ...

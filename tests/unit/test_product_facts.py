@@ -1,17 +1,25 @@
-from app.schemas.product import FaqItem, Product, RagKnowledge, ReviewItem
 import pytest
 
 from app.retrieval.discovery_retriever import DiscoveryRetriever
-from app.schemas.discovery_document import build_discovery_document, build_evidence_documents
+from app.schemas.product import FaqItem, Product, RagKnowledge, ReviewItem
+from app.services.discovery_documents import build_discovery_document, build_evidence_documents
 from app.services.product_facts import build_discovery_text, extract_product_facts, filter_products_by_facts
 
 
 def _food(pid: str, title: str, description: str, faq_answer: str = "配料信息见包装") -> Product:
-    return Product(product_id=pid, title=title, brand="测试", category="食品饮料",
-                   sub_category="饮料", base_price=10,
-                   rag_knowledge=RagKnowledge(marketing_description=description,
-                                              official_faq=[FaqItem(question="配料", answer=faq_answer)],
-                                              user_reviews=[ReviewItem(nickname="A", rating=5, content="喝完瘦了")]))
+    return Product(
+        product_id=pid,
+        title=title,
+        brand="测试",
+        category="食品饮料",
+        sub_category="饮料",
+        base_price=10,
+        rag_knowledge=RagKnowledge(
+            marketing_description=description,
+            official_faq=[FaqItem(question="配料", answer=faq_answer)],
+            user_reviews=[ReviewItem(nickname="A", rating=5, content="喝完瘦了")],
+        ),
+    )
 
 
 def test_facts_only_use_catalog_sources_not_review_outcomes():
@@ -36,8 +44,9 @@ async def test_discovery_nutrition_constraint_never_returns_non_food_catalog_ite
     from app.retrieval import discovery_retriever
 
     light = _food("light", "0糖茶", "0糖0脂冷泡茶")
-    non_food = Product(product_id="phone", title="0糖手机壳", brand="测试", category="数码电子",
-                       sub_category="配件", base_price=20)
+    non_food = Product(
+        product_id="phone", title="0糖手机壳", brand="测试", category="数码电子", sub_category="配件", base_price=20
+    )
 
     class Repo:
         def list_all(self):

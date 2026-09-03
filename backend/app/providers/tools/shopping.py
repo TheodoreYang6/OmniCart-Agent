@@ -11,13 +11,17 @@ import logging
 from collections import Counter
 
 from app.framework.tools.protocols import Tool, ToolContext, ToolResult, ToolSpec
-from app.services.category_normalization import CANONICAL_CATEGORIES, normalize_category
+from app.services.category_normalization import normalize_category
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "SearchProductsTool", "GetProductDetailTool", "ProductDossierTool",
-    "CompareProductsTool", "CheckInventoryTool", "build_product_dossier",
+    "SearchProductsTool",
+    "GetProductDetailTool",
+    "ProductDossierTool",
+    "CompareProductsTool",
+    "CheckInventoryTool",
+    "build_product_dossier",
 ]
 
 
@@ -35,7 +39,9 @@ def _avg_rating(product) -> tuple[float, int]:
 
 class SearchProductsTool(Tool):
     spec = ToolSpec(
-        name="shopping.search", category="shopping", permission="read",
+        name="shopping.search",
+        category="shopping",
+        permission="read",
         timeout_ms=60_000,
         description=(
             "深度检索商品：语义召回+精排+证据检查+决策评分的完整管线。"
@@ -44,30 +50,55 @@ class SearchProductsTool(Tool):
         parameters={
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description":
-                          "检索词：只放商品属性词干（品类+关键属性，如'干皮 保湿面霜'）。"
-                          "去掉口语前缀；预算/口碑/品类等有专门参数的约束不要写进 query，"
-                          "否则会污染语义召回与关键词匹配"},
-                "category": {"type": "string", "description":
-                             "一级品类；仅可使用给定枚举，用于收窄召回范围",
-                             "enum": ["数码电子", "美妆护肤", "服饰运动", "食品饮料", "家居用品", "母婴用品", "运动户外", "个护清洁"]},
+                "query": {
+                    "type": "string",
+                    "description": "检索词：只放商品属性词干（品类+关键属性，如'干皮 保湿面霜'）。"
+                    "去掉口语前缀；预算/口碑/品类等有专门参数的约束不要写进 query，"
+                    "否则会污染语义召回与关键词匹配",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "一级品类；仅可使用给定枚举，用于收窄召回范围",
+                    "enum": [
+                        "数码电子",
+                        "美妆护肤",
+                        "服饰运动",
+                        "食品饮料",
+                        "家居用品",
+                        "母婴用品",
+                        "运动户外",
+                        "个护清洁",
+                    ],
+                },
                 "budget_max": {"type": "number", "description": "价格上限（元），用户给了预算就填"},
                 "top_k": {"type": "integer", "default": 5, "description": "返回条数，默认 5"},
-                "intent_hint": {"type": "string", "enum": ["recommend", "compare", "risk_check"],
-                                "description": "检索意图提示，影响召回深度"},
-                "min_rating": {"type": "number",
-                               "description": "口碑下限(1-5)；用户要求高分/口碑好时传如 4.0"},
-                "focus": {"type": "string", "enum": ["reviews", "faq"],
-                          "description": "聚焦检索：reviews=只搜真实评价, faq=只搜参数问答；关心口碑/参数细节时用"},
+                "intent_hint": {
+                    "type": "string",
+                    "enum": ["recommend", "compare", "risk_check"],
+                    "description": "检索意图提示，影响召回深度",
+                },
+                "min_rating": {"type": "number", "description": "口碑下限(1-5)；用户要求高分/口碑好时传如 4.0"},
+                "focus": {
+                    "type": "string",
+                    "enum": ["reviews", "faq"],
+                    "description": "聚焦检索：reviews=只搜真实评价, faq=只搜参数问答；关心口碑/参数细节时用",
+                },
             },
             "required": ["query"],
         },
     )
 
-    async def run(self, ctx: ToolContext, query: str = "", category: str | None = None,
-                  budget_max: float | None = None, top_k: int = 5,
-                  intent_hint: str = "", min_rating: float | None = None,
-                  focus: str = "") -> ToolResult:
+    async def run(
+        self,
+        ctx: ToolContext,
+        query: str = "",
+        category: str | None = None,
+        budget_max: float | None = None,
+        top_k: int = 5,
+        intent_hint: str = "",
+        min_rating: float | None = None,
+        focus: str = "",
+    ) -> ToolResult:
         top_k = max(1, min(10, top_k or 5))
         # 模型工具调用不是可信的分类来源：先归一化，避免错误类别进入 DecisionAgent 的硬约束。
         category = _normalize_category(category)
@@ -75,6 +106,7 @@ class SearchProductsTool(Tool):
             return await self._shallow(query, category, budget_max, top_k)
         try:
             from app.core.config import USE_V9_CHUNK_RETRIEVAL
+
             if USE_V9_CHUNK_RETRIEVAL:
                 return await self._v9_search(ctx, query, category, budget_max, top_k, intent_hint)
         except Exception as exc:  # 新索引开关异常不阻断既有工具链
@@ -84,8 +116,13 @@ class SearchProductsTool(Tool):
             # 导致既没有深检索结果，也来不及执行本地商品库兜底。
             products, evidence, decisions = await asyncio.wait_for(
                 self._deep_search(
-                    query, category, budget_max, top_k, intent_hint,
-                    min_rating=min_rating, focus=focus,
+                    query,
+                    category,
+                    budget_max,
+                    top_k,
+                    intent_hint,
+                    min_rating=min_rating,
+                    focus=focus,
                 ),
                 timeout=54.0,
             )
@@ -114,9 +151,9 @@ class SearchProductsTool(Tool):
             # 如实告知 LLM 供其引导用户放宽条件
             if min_rating is not None or focus:
                 cond = f"口碑≥{min_rating}" if min_rating is not None else f"聚焦{focus}"
-                return ToolResult(data={"products": []},
-                                  message=f"「{query}」在条件【{cond}】下无匹配商品；"
-                                          f"可建议用户放宽条件后重搜")
+                return ToolResult(
+                    data={"products": []}, message=f"「{query}」在条件【{cond}】下无匹配商品；可建议用户放宽条件后重搜"
+                )
             # 深管线零召回（如整句口语 query）→ 浅层子串匹配再兜一道
             shallow = await self._shallow(query, category, budget_max, top_k)
             if shallow.ok and (shallow.data or {}).get("products"):
@@ -129,49 +166,62 @@ class SearchProductsTool(Tool):
         if st is not None and hasattr(st, "retrieved_products") and not getattr(st, "retrieval_groups", None):
             new_pids = {p.get("product_id") for p in products}
             st.retrieved_products = products + [
-                p for p in (st.retrieved_products or []) if p.get("product_id") not in new_pids]
+                p for p in (st.retrieved_products or []) if p.get("product_id") not in new_pids
+            ]
             st.evidence_list = (evidence or []) + [
-                e for e in (st.evidence_list or []) if e.get("product_id") not in new_pids]
+                e for e in (st.evidence_list or []) if e.get("product_id") not in new_pids
+            ]
             st.decision_results = (decisions or []) + [
-                d for d in (st.decision_results or []) if d.get("product_id") not in new_pids]
+                d for d in (st.decision_results or []) if d.get("product_id") not in new_pids
+            ]
 
         score_by_pid = {d.get("product_id"): d.get("final_score") for d in (decisions or [])}
         items, lines = [], []
         for i, p in enumerate(products[:top_k], 1):
             pid = p.get("product_id", "")
-            item = {"product_id": pid, "title": p.get("title", ""), "brand": p.get("brand", ""),
-                    "price": p.get("price", 0), "category": p.get("category", "")}
+            item = {
+                "product_id": pid,
+                "title": p.get("title", ""),
+                "brand": p.get("brand", ""),
+                "price": p.get("price", 0),
+                "category": p.get("category", ""),
+            }
             if score_by_pid.get(pid) is not None:
                 item["decision_score"] = score_by_pid[pid]
             items.append(item)
-            score_txt = (f" 决策分{item['decision_score']:.2f}"
-                         if item.get("decision_score") is not None else "")
+            score_txt = f" 决策分{item['decision_score']:.2f}" if item.get("decision_score") is not None else ""
             # product_id 必须进**文本**通道：res.data 会被 summarize_result 的
             # json.dumps(...)[:300] 随机腰斩，LLM 拿不到完整 id 就无法调
             # shopping.display 选品，卡片也就无从与它的分析对齐。
-            lines.append(f"{i}. [{pid}] {item['brand']} {item['title'][:26]} "
-                         f"¥{item['price']}{score_txt}")
+            lines.append(f"{i}. [{pid}] {item['brand']} {item['title'][:26]} ¥{item['price']}{score_txt}")
         if not items:
             return ToolResult(data={"products": []}, message=f"「{query}」库内未检索到商品")
-        return ToolResult(data={"products": items},
-                          message=f"「{query}」深度检索到 {len(items)} 件：\n" + "\n".join(lines))
+        return ToolResult(
+            data={"products": items}, message=f"「{query}」深度检索到 {len(items)} 件：\n" + "\n".join(lines)
+        )
 
     @staticmethod
-    async def _v9_search(ctx: ToolContext, query: str, category: str | None,
-                         budget_max: float | None, top_k: int, intent_hint: str) -> ToolResult:
+    async def _v9_search(
+        ctx: ToolContext, query: str, category: str | None, budget_max: float | None, top_k: int, intent_hint: str
+    ) -> ToolResult:
         """V9 工具调用快照。每个 ReAct 调用只追加一个 group，绝不覆盖旧组。"""
         from app.retrieval.tool_chunk_retriever_v9 import ToolChunkRetrieverV9
         from app.schemas.workflow import Constraints, RetrievalGroup, RetrievalPlan
 
         state = getattr(ctx, "state", None)
-        plan = (getattr(state, "retrieval_plan", None) or RetrievalPlan(category=category, top_k=max(5, top_k))).model_copy(deep=True)
-        constraints = (getattr(state, "constraints", None) or Constraints(category=category, budget_max=budget_max)).model_copy(deep=True)
+        plan = (
+            getattr(state, "retrieval_plan", None) or RetrievalPlan(category=category, top_k=max(5, top_k))
+        ).model_copy(deep=True)
+        constraints = (
+            getattr(state, "constraints", None) or Constraints(category=category, budget_max=budget_max)
+        ).model_copy(deep=True)
         # 多目标请求中一次工具调用只服务自己的 Router 子目标。此前把完整
         # sub_queries 一起带进每次 search，会让“上衣”检索同时继承“鞋”的条件，
         # 既污染签名也会稀释 LLM Filter 的判断范围。
         norm_query = "".join(str(query or "").lower().split())
-        matched_sub = next((sq for sq in (plan.sub_queries or [])
-                            if "".join(str(sq.query or "").lower().split()) == norm_query), None)
+        matched_sub = next(
+            (sq for sq in (plan.sub_queries or []) if "".join(str(sq.query or "").lower().split()) == norm_query), None
+        )
         if matched_sub is not None:
             plan.entity_terms = list(matched_sub.entity_terms or [])
             plan.must_constraints = list(matched_sub.must_constraints or [])
@@ -191,8 +241,9 @@ class SearchProductsTool(Tool):
         if budget_max is not None:
             constraints.budget_max = budget_max
         intent = intent_hint or getattr(state, "intent", "recommend") or "recommend"
-        result = await ToolChunkRetrieverV9().search(query=query, plan=plan, constraints=constraints,
-                                                     intent=intent, top_k=max(9, top_k))
+        result = await ToolChunkRetrieverV9().search(
+            query=query, plan=plan, constraints=constraints, intent=intent, top_k=max(9, top_k)
+        )
         products = list(result.get("products") or [])
         if matched_sub is not None:
             # 分组归属是受控交付字段：用于首选卡覆盖、最终回答与缺组说明，
@@ -202,39 +253,67 @@ class SearchProductsTool(Tool):
         if state is not None:
             # 分组键由受控运行时写入隔离 state；它不来自模型上下文，也不会
             # 暴露给客户端。多目标的一次 search 批次据此保留独立结果，不能互相覆盖。
-            group_id = (getattr(state, "tool_runtime_group_id", "")
-                        or f"tool:v9:{len(getattr(state, 'candidate_groups', []) or []) + 1}")
+            group_id = (
+                getattr(state, "tool_runtime_group_id", "")
+                or f"tool:v9:{len(getattr(state, 'candidate_groups', []) or []) + 1}"
+            )
             ids = [p.get("product_id", "") for p in products if p.get("product_id")]
             pack = result.get("evidence_pack") or {}
             missing_reason = str((result.get("filter") or {}).get("missing_group") or "")
-            state.retrieval_groups.append(RetrievalGroup(
-                group_id=group_id, role=(matched_sub.role if matched_sub else "工具检索"), query=query,
-                hard_constraints={"must": list(plan.must_constraints or constraints.must_tags or []),
-                                  "avoid": list(plan.avoid_constraints or constraints.exclude_tags or [])},
-                product_ids=ids, evidence_product_ids=list(pack), status="matched" if ids else "missing",
-                missing_reason=missing_reason,
-            ))
+            state.retrieval_groups.append(
+                RetrievalGroup(
+                    group_id=group_id,
+                    role=(matched_sub.role if matched_sub else "工具检索"),
+                    query=query,
+                    hard_constraints={
+                        "must": list(plan.must_constraints or constraints.must_tags or []),
+                        "avoid": list(plan.avoid_constraints or constraints.exclude_tags or []),
+                    },
+                    product_ids=ids,
+                    evidence_product_ids=list(pack),
+                    status="matched" if ids else "missing",
+                    missing_reason=missing_reason,
+                )
+            )
             state.candidate_groups.append({"group_id": group_id, **result})
-            state.candidate_trace.append({"group_id": group_id, "signature": result.get("signature", ""),
-                                          "query": query, "chunk_hits": result.get("chunk_hits", 0),
-                                          "latency_ms": result.get("latency_ms", 0)})
+            state.candidate_trace.append(
+                {
+                    "group_id": group_id,
+                    "signature": result.get("signature", ""),
+                    "query": query,
+                    "chunk_hits": result.get("chunk_hits", 0),
+                    "latency_ms": result.get("latency_ms", 0),
+                }
+            )
             state.llm_filter_result[group_id] = result.get("filter") or {}
             state.evidence_packs.update(pack)
             prior = list(state.retrieved_products or [])
             state.retrieved_products = products + [p for p in prior if p.get("product_id") not in set(ids)]
             state.evidence_list = [e for rows in pack.values() for e in rows] + list(state.evidence_list or [])
-        items = [{key: p.get(key) for key in ("product_id", "title", "brand", "price", "category")}
-                 for p in products[:top_k]]
-        lines = [f"{i}. [{item['product_id']}] {item.get('brand', '')} {item.get('title', '')[:32]} ¥{item.get('price', 0)}"
-                 for i, item in enumerate(items, 1)]
-        return ToolResult(data={"products": items, "filter": result.get("filter", {}), "retrieval_scope": "v9_chunk"},
-                          message=(f"「{query}」已完成商品筛选：\n" + "\n".join(lines)) if items
-                          else f"「{query}」未找到满足条件的商品")
+        items = [
+            {key: p.get(key) for key in ("product_id", "title", "brand", "price", "category")} for p in products[:top_k]
+        ]
+        lines = [
+            f"{i}. [{item['product_id']}] {item.get('brand', '')} {item.get('title', '')[:32]} ¥{item.get('price', 0)}"
+            for i, item in enumerate(items, 1)
+        ]
+        return ToolResult(
+            data={"products": items, "filter": result.get("filter", {}), "retrieval_scope": "v9_chunk"},
+            message=(f"「{query}」已完成商品筛选：\n" + "\n".join(lines))
+            if items
+            else f"「{query}」未找到满足条件的商品",
+        )
 
     @staticmethod
-    async def _deep_search(query: str, category: str | None, budget_max: float | None,
-                           top_k: int, intent_hint: str,
-                           min_rating: float | None = None, focus: str = ""):
+    async def _deep_search(
+        query: str,
+        category: str | None,
+        budget_max: float | None,
+        top_k: int,
+        intent_hint: str,
+        min_rating: float | None = None,
+        focus: str = "",
+    ):
         """子管线：retrieval -> reranker -> evidence_check -> decision。
 
         通过 framework 能力注册表按名消费（P0-1：不反向 import workflow.graph）。
@@ -253,19 +332,18 @@ class SearchProductsTool(Tool):
             intent=intent,
             constraints=Constraints(category=category or None, budget_max=budget_max),
             retrieval_plan=RetrievalPlan(
-                channels=["text", "review"], category=category or None,
+                channels=["text", "review"],
+                category=category or None,
                 top_k=max(top_k * 2, 8 if intent != "recommend" else top_k * 2),
                 rating_min=min_rating,
                 chunk_focus=_focus_map.get(focus),
             ),
         )
-        sub = await run_capability_pipeline(
-            ["retrieval", "reranker", "evidence_check", "decision"], sub)
-        return (sub.retrieved_products or [])[:top_k * 2], sub.evidence_list or [], sub.decision_results or []
+        sub = await run_capability_pipeline(["retrieval", "reranker", "evidence_check", "decision"], sub)
+        return (sub.retrieved_products or [])[: top_k * 2], sub.evidence_list or [], sub.decision_results or []
 
     @staticmethod
-    async def _shallow(query: str, category: str | None, budget_max: float | None,
-                       top_k: int) -> ToolResult:
+    async def _shallow(query: str, category: str | None, budget_max: float | None, top_k: int) -> ToolResult:
         """浅层搜索兜底（原实现）。"""
         try:
             from app.repositories.product_repo import get_product_repo
@@ -278,8 +356,13 @@ class SearchProductsTool(Tool):
         except Exception as e:  # noqa: BLE001
             return ToolResult(ok=False, error=str(e))
         items = [
-            {"product_id": p.product_id, "title": p.title, "brand": p.brand,
-             "price": p.base_price, "category": p.category}
+            {
+                "product_id": p.product_id,
+                "title": p.title,
+                "brand": p.brand,
+                "price": p.base_price,
+                "category": p.category,
+            }
             for p in products[:top_k]
         ]
         return ToolResult(data={"products": items}, message=f"找到 {len(items)} 个相关商品")
@@ -296,14 +379,15 @@ class SearchProductsTool(Tool):
         if st is not None and hasattr(st, "retrieved_products") and not getattr(st, "retrieval_groups", None):
             new_pids = {p.get("product_id") for p in fallback_products}
             st.retrieved_products = fallback_products + [
-                p for p in (st.retrieved_products or [])
-                if p.get("product_id") not in new_pids
+                p for p in (st.retrieved_products or []) if p.get("product_id") not in new_pids
             ]
 
 
 class GetProductDetailTool(Tool):
     spec = ToolSpec(
-        name="shopping.detail", category="shopping", permission="read",
+        name="shopping.detail",
+        category="shopping",
+        permission="read",
         description="获取单个商品详情与口碑摘要",
         parameters={
             "type": "object",
@@ -324,9 +408,14 @@ class GetProductDetailTool(Tool):
         avg, n = _avg_rating(p)
         return ToolResult(
             data={
-                "product_id": p.product_id, "title": p.title, "brand": p.brand,
-                "price": p.base_price, "category": p.category, "sub_category": p.sub_category,
-                "avg_rating": avg, "review_count": n,
+                "product_id": p.product_id,
+                "title": p.title,
+                "brand": p.brand,
+                "price": p.base_price,
+                "category": p.category,
+                "sub_category": p.sub_category,
+                "avg_rating": avg,
+                "review_count": n,
                 "skus": [s.model_dump() for s in (p.skus or [])],
             },
             message=f"{p.brand} {p.title}｜¥{p.base_price:.0f}｜口碑 {avg}/5（{n}条）",
@@ -341,7 +430,9 @@ class ProductDossierTool(Tool):
     """
 
     spec = ToolSpec(
-        name="shopping.product_dossier", category="shopping", permission="read",
+        name="shopping.product_dossier",
+        category="shopping",
+        permission="read",
         timeout_ms=12_000,
         description=(
             "深入核对一件已锁定商品的完整档案：规格、官方说明、FAQ、真实评价、"
@@ -398,19 +489,27 @@ class ProductDossierTool(Tool):
 
         evidence: list[dict] = []
         if description:
-            evidence.append({
-                "evidence_id": f"E-MKT-{product.product_id}-0",
-                "source_type": "marketing", "source_id": product.product_id,
-                "product_id": product.product_id, "confidence": 0.72,
-                "content": f"[商品说明] {description[:500]}",
-            })
+            evidence.append(
+                {
+                    "evidence_id": f"E-MKT-{product.product_id}-0",
+                    "source_type": "marketing",
+                    "source_id": product.product_id,
+                    "product_id": product.product_id,
+                    "confidence": 0.72,
+                    "content": f"[商品说明] {description[:500]}",
+                }
+            )
         for idx, faq in enumerate(faqs[:6]):
-            evidence.append({
-                "evidence_id": f"POL-{product.product_id}-{idx}",
-                "source_type": "official_faq", "source_id": f"{product.product_id}:faq:{idx}",
-                "product_id": product.product_id, "confidence": 0.90,
-                "content": f"[官方问答] {faq.question[:100]}：{faq.answer[:260]}",
-            })
+            evidence.append(
+                {
+                    "evidence_id": f"POL-{product.product_id}-{idx}",
+                    "source_type": "official_faq",
+                    "source_id": f"{product.product_id}:faq:{idx}",
+                    "product_id": product.product_id,
+                    "confidence": 0.90,
+                    "content": f"[官方问答] {faq.question[:100]}：{faq.answer[:260]}",
+                }
+            )
 
         # 保留低分与高分评价，避免档案只挑正面证据；同一评价只出现一次。
         picked: list[tuple[int, object]] = []
@@ -425,17 +524,19 @@ class ProductDossierTool(Tool):
                 if len(picked) >= 5:
                     break
         for idx, review in picked[:5]:
-            evidence.append({
-                "evidence_id": f"R-{product.product_id}-{idx}",
-                "source_type": "user_review_risk" if review.rating <= 2 else "user_review_positive",
-                "source_id": f"{product.product_id}:review:{idx}",
-                "product_id": product.product_id, "confidence": 0.68,
-                "content": f"[用户评价] {review.nickname[:30]}（{review.rating}星）：{review.content[:260]}",
-            })
+            evidence.append(
+                {
+                    "evidence_id": f"R-{product.product_id}-{idx}",
+                    "source_type": "user_review_risk" if review.rating <= 2 else "user_review_positive",
+                    "source_id": f"{product.product_id}:review:{idx}",
+                    "product_id": product.product_id,
+                    "confidence": 0.68,
+                    "content": f"[用户评价] {review.nickname[:30]}（{review.rating}星）：{review.content[:260]}",
+                }
+            )
 
         sku_rows = [
-            {"sku_id": sku.sku_id, "properties": sku.properties, "price": sku.price}
-            for sku in (product.skus or [])[:8]
+            {"sku_id": sku.sku_id, "properties": sku.properties, "price": sku.price} for sku in (product.skus or [])[:8]
         ]
         sku_prices = [float(s.price) for s in (product.skus or [])]
         gaps: list[str] = []
@@ -469,7 +570,9 @@ class ProductDossierTool(Tool):
                 "positive_count": positive_count,
                 "risk_count": risk_count,
                 "rating_distribution": {str(k): rating_counts[k] for k in sorted(rating_counts)},
-            } if review_count else None,
+            }
+            if review_count
+            else None,
             "information_gaps": gaps,
             "evidence_ids": [item["evidence_id"] for item in evidence],
             "evidence_status": "信息有限" if gaps else "证据充分",
@@ -494,7 +597,9 @@ class ProductDossierTool(Tool):
             scope = getattr(state, "retrieval_scope", "broad") or "broad"
             resolved_list = list(getattr(state, "resolved_product_ids", []) or [])
             if groups and not (scope == "exact_product" and len(resolved_list) == 1):
-                return ToolResult(ok=False, message="当前是多商品推荐，未锁定单一主体；如需单品档案，请先点选一件商品再问欧米。")
+                return ToolResult(
+                    ok=False, message="当前是多商品推荐，未锁定单一主体；如需单品档案，请先点选一件商品再问欧米。"
+                )
             resolved = set(getattr(state, "resolved_product_ids", []) or [])
             retrieved = {p.get("product_id") for p in (getattr(state, "retrieved_products", []) or [])}
             if resolved and product_id not in resolved:
@@ -513,7 +618,9 @@ class ProductDossierTool(Tool):
                     "evidence_ids": cached.get("evidence_ids", []),
                     "information_gaps": cached.get("information_gaps", []),
                 },
-                message=f"「{cached.get('brand', '')} {cached.get('title', '')}」的完整档案已在本轮建立，可直接据此回答。",
+                message=(
+                    f"「{cached.get('brand', '')} {cached.get('title', '')}」的完整档案已在本轮建立，可直接据此回答。"
+                ),
             )
         try:
             from app.repositories.product_repo import get_product_repo
@@ -532,8 +639,11 @@ class ProductDossierTool(Tool):
             # 清掉。否则深度模式在建立档案后会丢失 specific scenario 的
             # conditional 标记，出现普通模式 65、深度模式却 92 的评分漂移。
             previous = next(
-                (candidate for candidate in (state.retrieved_products or [])
-                 if candidate.get("product_id") == product.product_id),
+                (
+                    candidate
+                    for candidate in (state.retrieved_products or [])
+                    if candidate.get("product_id") == product.product_id
+                ),
                 {},
             )
             for key in ("filter_bucket", "card_reason", "group_role"):
@@ -548,9 +658,12 @@ class ProductDossierTool(Tool):
             state.product_dossiers[product.product_id] = dossier
             if not state.product_resolution:
                 state.product_resolution = {
-                    "match_type": "exact_product", "retrieval_scope": "exact_product",
-                    "product_id": product.product_id, "resolved_product_ids": [product.product_id],
-                    "confidence": 1.0, "label": f"已锁定：{product.brand} {product.title}",
+                    "match_type": "exact_product",
+                    "retrieval_scope": "exact_product",
+                    "product_id": product.product_id,
+                    "resolved_product_ids": [product.product_id],
+                    "confidence": 1.0,
+                    "label": f"已锁定：{product.brand} {product.title}",
                 }
             state.selected_products = [item]
             state.selected_reason = "已锁定商品的深度档案"
@@ -564,10 +677,7 @@ class ProductDossierTool(Tool):
                 logger.warning("product dossier decision degraded: %s", exc)
 
         reviews = dossier.get("review_summary") or {}
-        review_txt = (
-            f"口碑 {reviews.get('avg_rating')}/5（{reviews.get('count')} 条）"
-            if reviews else "暂无用户评价"
-        )
+        review_txt = f"口碑 {reviews.get('avg_rating')}/5（{reviews.get('count')} 条）" if reviews else "暂无用户评价"
         return ToolResult(
             data={
                 "product_id": product.product_id,
@@ -576,9 +686,11 @@ class ProductDossierTool(Tool):
                 "evidence_ids": dossier["evidence_ids"],
                 "information_gaps": dossier["information_gaps"],
             },
-            message=(f"已建立「{product.brand} {product.title}」深度档案："
-                     f"{len(dossier['skus'])} 个规格、{len(dossier['official_faq'])} 条官方问答、{review_txt}。"
-                     f"回答只能围绕该商品，并说明 {dossier['evidence_status']}。"),
+            message=(
+                f"已建立「{product.brand} {product.title}」深度档案："
+                f"{len(dossier['skus'])} 个规格、{len(dossier['official_faq'])} 条官方问答、{review_txt}。"
+                f"回答只能围绕该商品，并说明 {dossier['evidence_status']}。"
+            ),
         )
 
 
@@ -590,7 +702,9 @@ def build_product_dossier(product, focus: str = "overview") -> dict:
 
 class CompareProductsTool(Tool):
     spec = ToolSpec(
-        name="shopping.compare", category="shopping", permission="read",
+        name="shopping.compare",
+        category="shopping",
+        permission="read",
         description="对比多个商品的价格与口碑",
         parameters={
             "type": "object",
@@ -613,8 +727,16 @@ class CompareProductsTool(Tool):
                 if not p:
                     continue
                 avg, n = _avg_rating(p)
-                rows.append({"product_id": p.product_id, "title": p.title, "brand": p.brand,
-                             "price": p.base_price, "avg_rating": avg, "review_count": n})
+                rows.append(
+                    {
+                        "product_id": p.product_id,
+                        "title": p.title,
+                        "brand": p.brand,
+                        "price": p.base_price,
+                        "avg_rating": avg,
+                        "review_count": n,
+                    }
+                )
         except Exception as e:  # noqa: BLE001
             return ToolResult(ok=False, error=str(e))
         if len(rows) < 2:
@@ -626,7 +748,9 @@ class CheckInventoryTool(Tool):
     """查询商品库存（经 InventoryProvider）。"""
 
     spec = ToolSpec(
-        name="shopping.check_inventory", category="shopping", permission="read",
+        name="shopping.check_inventory",
+        category="shopping",
+        permission="read",
         description="查询商品库存",
         parameters={
             "type": "object",
@@ -681,7 +805,9 @@ class DisplayProductsTool(Tool):
     """
 
     spec = ToolSpec(
-        name="shopping.display", category="shopping", permission="read",
+        name="shopping.display",
+        category="shopping",
+        permission="read",
         timeout_ms=2000,
         description=(
             "确认要展示给用户的商品卡片。检索完、想清楚推荐哪几款之后调用，"
@@ -691,19 +817,17 @@ class DisplayProductsTool(Tool):
             "type": "object",
             "properties": {
                 "product_ids": {
-                    "type": "array", "items": {"type": "string"},
-                    "description": "要展示的 product_id 列表，按推荐优先级排序，"
-                                   "取自 shopping.search 返回行首的 [id]",
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "要展示的 product_id 列表，按推荐优先级排序，取自 shopping.search 返回行首的 [id]",
                 },
-                "reason": {"type": "string",
-                           "description": "一句话说明为什么选这几款（会作为答文依据）"},
+                "reason": {"type": "string", "description": "一句话说明为什么选这几款（会作为答文依据）"},
             },
             "required": ["product_ids"],
         },
     )
 
-    async def run(self, ctx, product_ids: list | None = None, reason: str = "",
-                  **kw) -> ToolResult:
+    async def run(self, ctx, product_ids: list | None = None, reason: str = "", **kw) -> ToolResult:
         state = getattr(ctx, "state", None)
         if state is None or not hasattr(state, "retrieved_products"):
             return ToolResult(ok=False, error="no_state")
@@ -712,20 +836,17 @@ class DisplayProductsTool(Tool):
             return ToolResult(ok=False, message="未提供 product_ids，请先检索再选品")
 
         # 只认已召回集合里的 id —— 防 LLM 编造，也防它引用上一轮已失效的商品
-        pool = {p.get("product_id"): p for p in (state.retrieved_products or [])
-                if p.get("product_id")}
+        pool = {p.get("product_id"): p for p in (state.retrieved_products or []) if p.get("product_id")}
         chosen = [pool[i] for i in ids if i in pool]
         unknown = [i for i in ids if i not in pool]
         if not chosen:
-            return ToolResult(
-                ok=False,
-                message=f"这些 id 不在已检索结果里：{unknown[:5]}；请先 shopping.search 再选品")
+            return ToolResult(ok=False, message=f"这些 id 不在已检索结果里：{unknown[:5]}；请先 shopping.search 再选品")
 
         state.selected_products = chosen
         state.selected_reason = reason or ""
         msg = f"已确认展示 {len(chosen)} 件：" + "、".join(
-            f"{p.get('brand', '')}{p.get('title', '')[:14]}" for p in chosen)
+            f"{p.get('brand', '')}{p.get('title', '')[:14]}" for p in chosen
+        )
         if unknown:
             msg += f"（忽略了不在检索结果里的 {len(unknown)} 个 id）"
-        return ToolResult(message=msg,
-                          data={"selected": [p.get("product_id") for p in chosen]})
+        return ToolResult(message=msg, data={"selected": [p.get("product_id") for p in chosen]})
