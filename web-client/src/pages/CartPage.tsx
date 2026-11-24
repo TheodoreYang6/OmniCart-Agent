@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { Check, Minus, Plus, ShoppingCart, Trash2 } from 'lucide-react'
 import { useCartStore } from '@/store/cartStore'
 import { Omi } from '@/components/brand/Omi'
@@ -12,11 +13,22 @@ import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Modal } from '@/components/ui/Modal'
 import { ShopActionCard } from '@/components/chat/ShopActionCard'
+import { CartPaymentDialog } from '@/components/cart/CartPaymentDialog'
+import { ApiError } from '@/api/client'
+import { cartPayments } from '@/api/cartPayments'
 import { useAuthStore } from '@/store/authStore'
 import type { CartItem, CheckoutPreviewResponse, CheckoutSubmitResponse } from '@/api/types'
 
 export function CartPage() {
   const navigate = useNavigate()
+  const [search] = useSearchParams()
+  const paymentId = search.get('payment')
+  const userId = useAuthStore((s) => s.userId)
+  const paymentService = useQuery({ queryKey: ['cart-payment-service'], queryFn: cartPayments.service, retry: false })
+  const activePayment = useQuery({
+    queryKey: ['active-cart-payment', userId], queryFn: cartPayments.active,
+    enabled: Boolean(userId && paymentService.data?.enabled), retry: false,
+  })
   const items = useCartStore((s) => s.items)
   const isLoading = useCartStore((s) => s.isLoading)
   const hasLoaded = useCartStore((s) => s.hasLoaded)
@@ -35,6 +47,7 @@ export function CartPage() {
   const [preview, setPreview] = useState<CheckoutPreviewResponse | null>(null)
   const [result, setResult] = useState<CheckoutSubmitResponse | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [quoting, setQuoting] = useState(false)
 
   const selected = items.filter((i) => i.selected)
   const totalPrice = selected.reduce((sum, i) => sum + i.price * i.quantity, 0)
@@ -51,6 +64,24 @@ export function CartPage() {
     if (!isLoggedIn) {
       toast.info('登录后即可结算，购物车会自动保留')
       navigate('/login', { state: { from: '/cart' } })
+      return
+    }
+    if (!paymentService.data) {
+      toast.error('暂时无法读取结算方式，请稍后重试')
+      void paymentService.refetch()
+      return
+    }
+    if (paymentService.data.enabled) {
+      setQuoting(true)
+      try {
+        const order = await cartPayments.quote(selected.map((item) => item.cart_item_id))
+        navigate(`/cart?payment=${order.order_id}`)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '购物车报价失败')
+        if (error instanceof ApiError && error.status === 422) navigate('/address')
+      } finally {
+        setQuoting(false)
+      }
       return
     }
     const data = await previewCheckout()
@@ -90,6 +121,11 @@ export function CartPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:py-6">
+          {activePayment.data && (
+            <button className="btn-secondary mb-4" onClick={() => navigate(`/cart?payment=${activePayment.data?.order_id}`)}>
+              查看待支付订单
+            </button>
+          )}
           {isLoading && !hasLoaded ? (
             <LoadingBlock text="加载购物车…" />
           ) : error && items.length === 0 ? (
@@ -186,7 +222,7 @@ export function CartPage() {
                 <div className="my-4 h-px bg-[var(--line)]" />
                 <div className="flex items-center justify-between text-sm text-ink-muted"><span>已选商品</span><span>{selected.length} 件</span></div>
                 <div className="mt-3 flex items-end justify-between"><span className="text-sm text-ink-muted">合计</span><strong className="text-2xl text-price">{formatPrice(totalPrice, 2)}</strong></div>
-                <button onClick={handleCheckout} disabled={selected.length === 0} className="btn-primary mt-5 w-full py-3 disabled:opacity-50">结算 ({selected.length})</button>
+                <button onClick={handleCheckout} disabled={selected.length === 0 || quoting} className="btn-primary mt-5 w-full py-3 disabled:opacity-50">{paymentService.data?.enabled ? '支付宝结算' : '结算'} ({selected.length})</button>
                 {!isLoggedIn && <p className="mt-3 text-xs leading-relaxed text-ink-muted">游客购物车会保留，登录后自动合并再结算。</p>}
               </aside>
             </div>
@@ -212,15 +248,19 @@ export function CartPage() {
             </div>
             <button
               onClick={handleCheckout}
-              disabled={selected.length === 0}
+              disabled={selected.length === 0 || quoting}
               className="btn-primary px-6 py-3 disabled:opacity-50"
             >
-              结算 ({selected.length})
+              {paymentService.data?.enabled ? '支付宝结算' : '结算'} ({selected.length})
             </button>
           </div>
         </div>
       )}
       <ConfirmDialog open={!!deleteTarget} title="移出购物车" description={`确定将“${deleteTarget?.title ?? ''}”移出购物车吗？`} onClose={() => setDeleteTarget(null)} onConfirm={async () => { if (!deleteTarget) return; await removeItem(deleteTarget.cart_item_id); setDeleteTarget(null) }} />
+      {paymentId && (
+        <CartPaymentDialog key={paymentId} orderId={paymentId} returned={search.get('return') === 'alipay'}
+          onClose={() => navigate('/cart', { replace: true })} />
+      )}
 
       {/* 结算确认弹窗 */}
       <Modal open={!!preview} onClose={() => setPreview(null)} title="确认订单" variant="center" className="sm:max-w-lg">

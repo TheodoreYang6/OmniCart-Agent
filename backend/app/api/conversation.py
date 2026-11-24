@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 
 from app.schemas.conversation import ConversationOut, MessageOut
 from app.repositories.conversation_repo import get_conversation_repo
-from app.core.identity import Actor, resolve_actor
+from app.core.identity import Actor, require_user, resolve_actor
 
 router = APIRouter()
 
@@ -15,7 +15,7 @@ async def list_conversations(
     limit: int = Query(default=20, ge=1, le=100),
     actor: Actor = Depends(resolve_actor),
 ):
-    user_id = actor.user_id
+    user_id = require_user(actor).user_id
     repo = get_conversation_repo()
     convs = repo.list_by_user(user_id, limit)
     return {
@@ -42,7 +42,7 @@ async def list_conversations(
 @router.get("/api/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str, actor: Actor = Depends(resolve_actor)):
     repo = get_conversation_repo()
-    conv = repo.get(conversation_id)
+    conv = repo.get(conversation_id, user_id=require_user(actor).user_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     if conv.user_id != actor.user_id:
@@ -68,10 +68,10 @@ async def list_messages(
     actor: Actor = Depends(resolve_actor),
 ):
     repo = get_conversation_repo()
-    conv = repo.get(conversation_id)
+    conv = repo.get(conversation_id, user_id=require_user(actor).user_id)
     if not conv or conv.user_id != actor.user_id:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    msgs = repo.list_messages(conversation_id, limit)
+    msgs = repo.list_messages(conversation_id, limit, user_id=actor.user_id)
     # 收集所有被引用的商品ID，批量查产品信息供前端渲染卡片
     products_map = {}
     all_pids = set()
@@ -124,10 +124,10 @@ async def list_messages(
 @router.delete("/api/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str, actor: Actor = Depends(resolve_actor)):
     repo = get_conversation_repo()
-    conv = repo.get(conversation_id)
+    conv = repo.get(conversation_id, user_id=require_user(actor).user_id)
     if not conv or conv.user_id != actor.user_id:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    ok = repo.delete(conversation_id)
+    ok = repo.delete(conversation_id, user_id=actor.user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found or delete failed")
     return {"ok": True, "conversation_id": conversation_id}

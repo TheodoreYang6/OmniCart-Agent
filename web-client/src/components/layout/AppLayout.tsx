@@ -5,6 +5,7 @@ import {
   Store,
   ShoppingCart,
   User,
+  FileText,
 } from 'lucide-react'
 import { OmiAppIcon } from '@/components/brand/OmiAppIcon'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
@@ -23,6 +24,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/chat', label: `${AGENT_NAME}对话`, icon: MessageCircleHeart },
   { to: '/shop', label: '商品', icon: Store },
+  { to: '/reports', label: '选购报告', icon: FileText },
   { to: '/cart', label: '购物车', icon: ShoppingCart },
   { to: '/profile', label: '我的', icon: User },
 ]
@@ -54,7 +56,7 @@ export function AppLayout() {
   }, [initialized, isLoggedIn, loadCart])
 
   const isChat = location.pathname.startsWith('/chat')
-  const rootTabs = ['/chat', '/shop', '/cart', '/profile']
+  const rootTabs = NAV.map((item) => item.to)
   const isRootTab = rootTabs.includes(location.pathname)
 
   return (

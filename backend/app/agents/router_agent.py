@@ -274,7 +274,7 @@ class RouterAgent(BaseAgent):
         try:
             from app.services.conversation_service import get_conversation_service
             svc = get_conversation_service()
-            snapshot = svc.get_context_snapshot_sync(state.conversation_id)
+            snapshot = svc.get_context_snapshot_sync(state.conversation_id, user_id=state.user_id)
             if not snapshot:
                 return ""
             parts = []

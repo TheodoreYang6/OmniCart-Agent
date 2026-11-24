@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.workflow.graph import run_workflow
 from app.core.identity import Actor, resolve_public_actor
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recommend", tags=["stream"])
@@ -34,6 +35,7 @@ class StreamRequest(BaseModel):
     fast_mode: bool = False  # 快速回答：跳过LLM，直接模板回复（等价 exec_mode="lite"）
     exec_mode: str = ""  # P2-1 执行档位 lite/standard/max（max=动态编排按请求灰度）；与业务场景 mode 字段无关
     deep_think: bool = False  # 深度思考：走 max 档 ReAct 图（受控 Plan-Execute）
+    cart_payment: bool = False
 
 
 def _sse(event: str, data: str) -> str:
@@ -195,7 +197,7 @@ def _result_with_recommendations(
 # ============================================================
 
 
-async def _generate_title(cid: str, conv_svc, first_query: str, first_answer: str):
+async def _generate_title(cid: str, user_id: str, conv_svc, first_query: str, first_answer: str):
     """后台异步生成对话标题。LLM 失败时降级为首条消息前15字。"""
     if not cid or not first_query:
         return
@@ -218,7 +220,7 @@ async def _generate_title(cid: str, conv_svc, first_query: str, first_answer: st
     if not title:
         title = first_query.strip()[:15]
     if title:
-        await conv_svc.aupdate_context_snapshot(cid, {"title": title})
+        await conv_svc.aupdate_context_snapshot(cid, {"title": title}, user_id=user_id)
         # 同时更新 conversations 表的 title 字段
         try:
             from app.core.database import get_session_sync
@@ -228,7 +230,7 @@ async def _generate_title(cid: str, conv_svc, first_query: str, first_answer: st
             factory = get_session_sync()
             async with factory() as session:
                 await session.execute(
-                    update(ConversationModel).where(ConversationModel.conversation_id == cid).values(title=title)
+                    update(ConversationModel).where(ConversationModel.conversation_id == cid, ConversationModel.user_id == user_id).values(title=title)
                 )
                 await session.commit()
         except Exception:
@@ -238,12 +240,12 @@ async def _generate_title(cid: str, conv_svc, first_query: str, first_answer: st
 # ============================================================
 # 辅助: 写入聚焦商品到 conversation context_snapshot（读取/地址解析已收敛到 ShopActionAgent）
 # ============================================================
-async def _write_focus_product(conv_svc, conversation_id: str, product):
+async def _write_focus_product(conv_svc, conversation_id: str, product, user_id: str):
     """问欧米点击时锁定商品 → context_snapshot"""
     if not conv_svc or not conversation_id:
         return
     try:
-        await conv_svc.set_focus_product(conversation_id, product)
+        await conv_svc.set_focus_product(conversation_id, product, user_id=user_id)
     except Exception as e:
         logger.warning(f"Failed to write focus_product: {e}")
 
@@ -389,6 +391,19 @@ async def _stream_plain_text(text: str) -> AsyncGenerator[str, None]:
         await asyncio.sleep(_STREAM_CHUNK_DELAY_SECONDS)
 
 
+async def _collect_answer(request: Request, upstream, *, fallback: str = "") -> str | None:
+    chunks = []
+    try:
+        async for token in upstream:
+            if await request.is_disconnected():
+                return None
+            chunks.append(token)
+    except Exception:
+        logger.warning("Answer provider failed before delivery", exc_info=True)
+        return fallback
+    return "".join(chunks).strip() or fallback
+
+
 def _comparison_answer(comparison: dict) -> str:
     """对比卡的文字结论只复述已经下发的横向事实，避免另起一套 LLM 事实。"""
     items = [comparison.get("target") or [], *(comparison.get("alternatives") or [])]
@@ -459,6 +474,99 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
             sid, req.mode, actor.kind, bool(req.image_url), bool(req.deep_think),
         )
         yield _stage("understanding")
+
+        # ---- 初始化 conv_svc ----
+        conv_svc = None
+        try:
+            from app.services.conversation_service import get_conversation_service
+
+            conv_svc = get_conversation_service()
+        except Exception as e:
+            logger.warning(f"conv_svc init failed: {e}")
+
+        # P0-3: 会话创建/用户消息落库上移到支付与购物块之前——
+        # 支付/报告/购物等早退轮次同样入历史，且后续 pending 快照有真实 cid 可写
+        if can_persist and conv_svc:
+            try:
+                conv_result = await conv_svc.aget_or_create(
+                    user_id=uid,
+                    session_id=sid,
+                    conversation_id=cid,
+                )
+                cid = conv_result["conversation_id"]
+            except Exception:
+                pass
+            if cid:
+                try:
+                    await conv_svc.aappend_user_message(
+                        conversation_id=cid,
+                        user_id=uid,
+                        session_id=sid,
+                        content=req.message,
+                        image_url=req.image_url or "",
+                    )
+                except Exception:
+                    pass
+
+        if (req.cart_payment and req.mode == "normal_recommend" and not req.image_url
+                and settings.report_payment_mode != "disabled"):
+            from app.framework.tools import ToolContext, ToolResult
+            from app.providers.tools.cart_payment import CONFIRM, cart_payment_tools, payment_intent
+
+            payment_tool = payment_intent(msg)
+            if payment_tool:
+                context = ToolContext(user_id=uid, session_id=req.session_id, conversation_id=cid, args_raw=msg)
+                if actor.is_authenticated:
+                    result = await cart_payment_tools().invoke(
+                        payment_tool, {"_confirmed": True} if payment_tool == CONFIRM else {}, context,
+                    )
+                else:
+                    result = ToolResult(ok=False, message="登录后可以结算购物车。",
+                                        actions=[{"type": "quick_reply", "label": "登录", "route": "login"}])
+                answer = result.message or "暂时无法处理这笔支付，请到购物车核对订单状态。"
+                if can_persist and conv_svc and cid:
+                    try:
+                        await conv_svc.aappend_assistant_message(
+                            conversation_id=cid, user_id=uid, session_id=sid, content=answer,
+                            metadata={"shop_card": result.data.get("shop_card"), "actions": result.actions},
+                        )
+                    except Exception:
+                        pass
+                async for event in _stream_plain_text(answer):
+                    yield event
+                yield _sse("result", json.dumps({
+                    "answer": answer, "products": [], "decision_results": [], "shop_action": True,
+                    "conversation_id": cid, "actions": result.actions, "shop_card": result.data.get("shop_card"),
+                }, ensure_ascii=False))
+                yield _sse("done", '{"finish_reason":"stop"}')
+                return
+
+        if req.mode == "normal_recommend" and not req.image_url and any(
+            term in msg for term in ("选购报告", "付费报告", "比价报告")
+        ):
+            if settings.report_payment_mode == "disabled" or not settings.use_postgres:
+                answer = "欧米选购报告暂未开放收款。你可以在报告页查看已购买的报告。"
+            else:
+                amount = f"{settings.report_price_fen // 100}.{settings.report_price_fen % 100:02}"
+                answer = f"我找到了欧米选购报告，服务费 ¥{amount}。你可以在报告页选择品类和预算，核对报价后再确认付款。"
+            report_actions = [{"type": "open_report", "label": "查看选购报告", "route": "reports?source=agent"}]
+            if can_persist and conv_svc and cid:
+                try:
+                    await conv_svc.aappend_assistant_message(
+                        conversation_id=cid, user_id=uid, session_id=sid, content=answer,
+                        metadata={"actions": report_actions},
+                    )
+                except Exception:
+                    pass
+            async for event in _stream_plain_text(answer):
+                yield event
+            yield _sse("result", json.dumps({
+                "answer": answer, "products": [], "decision_results": [],
+                "shop_action": True, "conversation_id": cid,
+                "actions": report_actions,
+            }, ensure_ascii=False))
+            yield _sse("done", '{"finish_reason":"stop"}')
+            return
 
         # ---- 判断意图: 购物操作关键词（仅门控进入 Tool 链，实际路由在 ShopActionAgent 内） ----
         order_words = ["下单", "结算", "结账", "买单", "付款"]
@@ -546,44 +654,11 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
             yield _sse("done", json.dumps({"finish_reason": "login_required"}))
             return
 
-        # ---- 初始化 conv_svc ----
-        conv_svc = None
-        try:
-            from app.services.conversation_service import get_conversation_service
-
-            conv_svc = get_conversation_service()
-        except Exception as e:
-            logger.warning(f"conv_svc init failed: {e}")
-
-        # P0-3: 会话创建/用户消息落库上移到购物块之前——
-        # shop 轮次同样入历史，且首条消息即购物动作时 pending 快照有真实 cid 可写
-        if can_persist and conv_svc:
-            try:
-                conv_result = await conv_svc.aget_or_create(
-                    user_id=uid,
-                    session_id=sid,
-                    conversation_id=cid,
-                )
-                cid = conv_result["conversation_id"]
-            except Exception:
-                pass
-            if cid:
-                try:
-                    await conv_svc.aappend_user_message(
-                        conversation_id=cid,
-                        user_id=uid,
-                        session_id=sid,
-                        content=req.message,
-                        image_url=req.image_url or "",
-                    )
-                except Exception:
-                    pass
-
         # 读取 pending SKU 选择（用户可能正在选规格）
         _pending_sku = {}
         try:
             if conv_svc and cid:
-                snap = await conv_svc.get_context_snapshot(cid)
+                snap = await conv_svc.get_context_snapshot(cid, user_id=uid)
                 _pending_sku = (snap or {}).get("pending_sku_product", {}) or {}
         except Exception:
             pass
@@ -708,27 +783,15 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                     json.dumps(_recommendation_event_payload(_loop_state), ensure_ascii=False, default=str),
                 )
                 yield _stage("answering")
-                _tokens: list[str] = []
-                try:
-                    async for _token in get_response_agent().generate_stream(_loop_state):
-                        if await raw_request.is_disconnected():
-                            break
-                        _tokens.append(_token)
-                        yield _sse("token", json.dumps({"text": _token}, ensure_ascii=False))
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("loop upstream response stream failed: %s", exc)
-                # 工具链已获得受控商品时，上游流偶发失败不能把用户降级为一条
-                # 与本轮结果无关的道歉。用同一份推荐简报驱动的模板完成交付，
-                # 保持卡片、正文和 Guard 的商品范围一致。
-                _answer = "".join(_tokens).strip()
-                if not _answer:
-                    _answer = get_response_agent()._generate_template(_loop_state)
-                    yield _sse("token", json.dumps({"text": _answer}, ensure_ascii=False))
-                _loop_state.answer = _answer
-                try:
-                    get_response_guard().check(_loop_state)
-                except Exception:  # noqa: BLE001
-                    pass
+                from app.verification.response_delivery import finalize_response
+
+                candidate = await _collect_answer(raw_request, get_response_agent().generate_stream(_loop_state))
+                if candidate is None:
+                    return
+                from app.services.recommendation_brief import build_recommendation_brief
+
+                primary, _ = build_recommendation_brief(_loop_state)
+                _answer = finalize_response(_loop_state, candidate, get_response_guard(), cards=primary)
                 _payload = _result_with_recommendations(
                     _loop_state,
                     session_id=sid,
@@ -740,8 +803,6 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 )
                 if _loop_actions:
                     _payload["actions"] = _safe_dump(_loop_actions)
-                yield _sse("result", json.dumps(_payload, ensure_ascii=False, default=str))
-                yield _sse("done", json.dumps({"finish_reason": "stop"}))
                 # 持久化：助手消息 + last_products 快照（供下一轮指代）
                 if can_persist and conv_svc and cid:
                     try:
@@ -749,10 +810,14 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                             conversation_id=cid, user_id=uid, session_id=sid, content=_answer
                         )
                         await conv_svc.apersist_answer_context(
-                            conversation_id=cid, state=_loop_state, answer=_answer,
+                            conversation_id=cid, user_id=uid, state=_loop_state, answer=_answer,
                         )
                     except Exception:  # noqa: BLE001
                         pass
+                async for event in _stream_plain_text(_answer):
+                    yield event
+                yield _sse("result", json.dumps(_payload, ensure_ascii=False, default=str))
+                yield _sse("done", json.dumps({"finish_reason": "stop"}))
                 return
             # Loop 失败 → 继续落入下方既有链路（购物门控 / workflow）
 
@@ -911,7 +976,7 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 _snap = None
                 try:
                     if can_persist and cid:
-                        _snap = await conv_svc.aget_context_projection(cid)
+                        _snap = await conv_svc.aget_context_projection(cid, user_id=uid)
                 except Exception:
                     _snap = None
                 fu = engine.detect(conversation_id=cid, session_id=sid, current_query=req.message, snapshot=_snap)
@@ -1085,7 +1150,7 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 yield _sse("done", json.dumps({"finish_reason": "stop"}))
                 return
 
-            await _write_focus_product(conv_svc, cid, target)
+            await _write_focus_product(conv_svc, cid, target, uid)
             target_dossier = build_product_dossier(target, "overview")
             repo = get_product_repo()
             focus_state = WorkflowState(
@@ -1149,61 +1214,26 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 yield _sse("focus_analysis", json.dumps(focus_analysis, ensure_ascii=False, default=str))
 
             yield _stage("answering")
+            from app.verification.response_delivery import finalize_response
+            from app.workflow.graph import get_response_agent, get_response_guard
+
             if comparison_requested:
-                # 对比裁决完成后，仍由模型基于同一张受控事实表真实流式表达。
-                # 旧版这里调用 _comparison_answer 模板，所以“秒出”且没有真正
-                # 比较能力；现在模型异常才会使用那个受控降级结论。
                 from app.model_gateway.gateway import get_model_gateway
-                from app.prompts.api_prompts import (
+                from app.prompts.api_prompts import COMPARISON_RESPONSE_SYSTEM, build_comparison_response_prompt
+
+                cards = [comparison["target"], *comparison["alternatives"]]
+                upstream = get_model_gateway().chat_stream(
+                    "chat_generation", build_comparison_response_prompt(comparison, req.message),
                     COMPARISON_RESPONSE_SYSTEM,
-                    build_comparison_response_prompt,
                 )
-
-                chunks: list[str] = []
-                try:
-                    prompt = build_comparison_response_prompt(comparison, req.message)
-                    async for token in get_model_gateway().chat_stream(
-                        "chat_generation", prompt, COMPARISON_RESPONSE_SYSTEM,
-                    ):
-                        if await raw_request.is_disconnected():
-                            break
-                        safe = token.replace("*", "").replace("#", "")
-                        if safe:
-                            chunks.append(safe)
-                            yield _sse("token", json.dumps({"text": safe}, ensure_ascii=False))
-                except Exception as exc:  # noqa: BLE001 - controlled fallback keeps SSE valid
-                    logger.warning("same-category comparison response stream failed: %s", exc)
-                answer = "".join(chunks).strip()
-                if len(answer) < 10:
-                    answer = _comparison_answer(comparison)
-                    yield _sse("token", json.dumps({"text": answer}, ensure_ascii=False))
             else:
-                # 点选商品不是“快速模式”。档案完成后仍由最终回答模型消费统一
-                # AnswerContext 真流式生成：会话上下文、用户问题、首选卡和 dossier
-                # 都在同一份投影中。之前为了兜底直接套模板，才造成了秒回。
-                from app.workflow.graph import get_response_agent, get_response_guard
+                cards = None
+                upstream = get_response_agent().generate_stream(focus_state)
 
-                response_agent = get_response_agent()
-                chunks: list[str] = []
-                try:
-                    async for token in response_agent.generate_stream(focus_state):
-                        if await raw_request.is_disconnected():
-                            break
-                        chunks.append(token)
-                        yield _sse("token", json.dumps({"text": token}, ensure_ascii=False))
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("focused response stream failed: %s", exc)
-                answer = "".join(chunks).strip()
-                if not answer:
-                    # 仅在模型调用不可用时降级；模板与档案仍来自同一受控范围。
-                    answer = response_agent._generate_template(focus_state)
-                    yield _sse("token", json.dumps({"text": answer}, ensure_ascii=False))
-                focus_state.answer = answer
-                try:
-                    get_response_guard().check(focus_state)
-                except Exception:  # noqa: BLE001 -- guard diagnostics must not break SSE completion
-                    pass
-
+            candidate = await _collect_answer(raw_request, upstream)
+            if candidate is None:
+                return
+            answer = finalize_response(focus_state, candidate, get_response_guard(), cards=cards)
             result = _result_with_recommendations(
                 focus_state, session_id=sid, conversation_id=cid, answer=answer,
             )
@@ -1211,9 +1241,6 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 result["comparison"] = comparison
             else:
                 result["focus_analysis"] = focus_analysis
-            yield _sse("result", json.dumps(result, ensure_ascii=False, default=str))
-            yield _sse("done", json.dumps({"finish_reason": "stop"}))
-
             if can_persist and conv_svc and cid:
                 try:
                     await conv_svc.aappend_assistant_message(
@@ -1229,9 +1256,15 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                             "price": target.base_price,
                             "locked_at": datetime.now(timezone.utc).isoformat(),
                         },
-                    })
+                    }, user_id=uid)
                 except Exception:
                     pass
+            async for event in _stream_plain_text(answer):
+                yield event
+
+            yield _sse("result", json.dumps(result, ensure_ascii=False, default=str))
+            yield _sse("done", json.dumps({"finish_reason": "stop"}))
+
             return
 
         try:
@@ -1268,8 +1301,6 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
             if hasattr(state, "timing") and state.timing:
                 logger.info(f"⏱ breakdown: {json.dumps(state.timing, ensure_ascii=False, default=str)}")
 
-            answer = state.answer or ""
-
             # Visual recognition is a user-facing fact, not merely a retrieval
             # hint. It arrives before cards/prose so clients can explain what
             # was actually recognised instead of silently recommending.
@@ -1281,43 +1312,24 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 }
                 yield _sse("visual_result", json.dumps(visual_payload, ensure_ascii=False, default=str))
 
-            # 卡片在回答前锁定；从这里开始 token 必须来自上游模型，而不是将完整
-            # 字符串按固定宽度回放，确保客户端真实看到首字流式到达。
-            _recommendation_sections(state)
+            # 商品卡可以先送达，正文在 Guard 完成后统一发送。
+            from app.services.recommendation_brief import build_recommendation_brief
+
+            primary, _ = build_recommendation_brief(state)
             yield _stage("checking")
             yield _sse(
                 "recommendations", json.dumps(_recommendation_event_payload(state), ensure_ascii=False, default=str)
             )
             yield _stage("answering")
             _t_resp = _time.perf_counter()
-            if not answer:
-                from app.workflow.graph import get_response_agent
+            from app.verification.response_delivery import finalize_response
+            from app.workflow.graph import get_response_agent, get_response_guard
 
-                chunks: list[str] = []
-                try:
-                    async for token in get_response_agent().generate_stream(state):
-                        if await raw_request.is_disconnected():
-                            break
-                        chunks.append(token)
-                        yield _sse("token", json.dumps({"text": token}, ensure_ascii=False))
-                    answer = "".join(chunks).strip()
-                except Exception as e:
-                    logger.warning(f"upstream response stream failed: {e}")
-                if not answer:
-                    answer = "抱歉，暂时无法回答您的问题。"
-                    yield _sse("token", json.dumps({"text": answer}, ensure_ascii=False))
-            else:
-                # 聚焦/兼容分支已有受控回答时保持兼容；主推荐链路不会进入此分支。
-                yield _sse("token", json.dumps({"text": answer}, ensure_ascii=False))
-            state.answer = answer
+            candidate = state.answer or await _collect_answer(raw_request, get_response_agent().generate_stream(state))
+            if candidate is None:
+                return
+            answer = finalize_response(state, candidate, get_response_guard(), cards=primary)
             state.timing["response_ms"] = round((_time.perf_counter() - _t_resp) * 1000)
-            try:
-                from app.workflow.graph import get_response_guard
-
-                get_response_guard().check(state)
-            except Exception:
-                pass
-
             result = _result_with_recommendations(
                 state,
                 session_id=sid,
@@ -1335,57 +1347,21 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 comparison_table=comparison,
                 cross_category=cross_category,
             )
+            if can_persist and conv_svc and cid:
+                await conv_svc.aappend_assistant_message(
+                    conversation_id=cid, user_id=uid, session_id=sid, content=answer,
+                    product_refs=[p["product_id"] for p in result["products"] if p.get("product_id")],
+                )
+                await conv_svc.apersist_answer_context(conversation_id=cid, user_id=uid, state=state, answer=answer)
+                if not (await conv_svc.get_context_snapshot(cid, user_id=uid)).get("title"):
+                    task = asyncio.create_task(_generate_title(cid, uid, conv_svc, req.message, answer[:200]))
+                    _BG_TASKS.add(task)
+                    task.add_done_callback(_BG_TASKS.discard)
+            async for event in _stream_plain_text(answer):
+                yield event
+
             yield _sse("result", json.dumps(result, ensure_ascii=False, default=str))
             yield _sse("done", json.dumps({"finish_reason": "stop"}))
-
-            if can_persist and cid:
-                # 收尾持久化整体后台化 — done 已发，不再占用 SSE 连接时间
-                _persist_state, _persist_answer = state, answer
-
-                async def _persist_turn():
-                    try:
-                        # 结构化商品列表 (供 FollowUpEngine 做指代解析)
-                        product_ids = []
-                        structured_products = []
-                        for p in (_persist_state.retrieved_products or [])[:10]:
-                            pid = p.get("product_id", "")
-                            if pid:
-                                product_ids.append(pid)
-                                structured_products.append(
-                                    {
-                                        "product_id": pid,
-                                        "title": p.get("title", "")[:60],
-                                        "brand": p.get("brand", ""),
-                                        "price": p.get("price", 0),
-                                    }
-                                )
-
-                        await conv_svc.aappend_assistant_message(
-                            conversation_id=cid,
-                            user_id=uid,
-                            session_id=sid,
-                            content=_persist_answer,
-                            product_refs=product_ids,
-                        )
-
-                        # 新的检查点是会话状态唯一写入口。旧 snapshot 的 recent_turns /
-                        # summary 拼接会造成竞态和双重真相，不能再在这里异步改写。
-                        await conv_svc.apersist_answer_context(
-                            conversation_id=cid,
-                            state=_persist_state,
-                            answer=_persist_answer,
-                        )
-                        # 首次对话生成标题（旧 snapshot 拼接逻辑已由 apersist_answer_context 接管）
-                        snap = await conv_svc.get_context_snapshot(cid) or {}
-                        if not snap.get("title", ""):
-                            await _generate_title(cid, conv_svc, req.message, _persist_answer[:200])
-                        return
-                    except Exception:
-                        pass
-
-                _task = asyncio.create_task(_persist_turn())
-                _BG_TASKS.add(_task)
-                _task.add_done_callback(_BG_TASKS.discard)
 
         except asyncio.CancelledError:
             logger.info(f"SSE cancelled: {sid}")

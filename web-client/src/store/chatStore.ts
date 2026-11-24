@@ -276,6 +276,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         user_id: getEffectiveUserId(),
         conversation_id: get().conversationId,
         message: finalQuery,
+        cart_payment: true,
         image_url: imageUrl,
         deep_think: get().deepThink,
       },
@@ -473,7 +474,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           imageUrl: m.image_url ? resolveImageUrl(m.image_url) : null,
         })
       })
-      if (get()._requestId === requestId) set({ conversationId, messages: msgs, error: null })
+      if (get()._requestId === requestId) set({ conversationId, sessionId: shortId(), messages: msgs, error: null })
     } catch (e) {
       set({ error: e instanceof Error ? e.message : '加载对话失败' })
     }

@@ -10,6 +10,7 @@ const ShopPage = lazy(() => import('@/pages/ShopPage').then((m) => ({ default: m
 const ProductDetailPage = lazy(() => import('@/pages/ProductDetailPage').then((m) => ({ default: m.ProductDetailPage })))
 const CartPage = lazy(() => import('@/pages/CartPage').then((m) => ({ default: m.CartPage })))
 const OrdersPage = lazy(() => import('@/pages/OrdersPage').then((m) => ({ default: m.OrdersPage })))
+const ReportsPage = lazy(() => import('@/pages/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const ProfilePage = lazy(() => import('@/pages/ProfilePage').then((m) => ({ default: m.ProfilePage })))
 const AddressPage = lazy(() => import('@/pages/AddressPage').then((m) => ({ default: m.AddressPage })))
 const PreferencePage = lazy(() => import('@/pages/PreferencePage').then((m) => ({ default: m.PreferencePage })))
@@ -64,6 +65,7 @@ function AppLifecycle() {
     const labels: Record<string, string> = {
       '/chat': '与欧米聊天', '/shop': '好物广场', '/cart': '购物车',
       '/orders': '我的订单', '/profile': '个人中心', '/address': '收货地址',
+      '/reports': '欧米选购报告',
       '/preferences': '购物偏好', '/login': '登录',
     }
     const routeLabel = labels[location.pathname]
@@ -106,6 +108,7 @@ export default function App() {
             <Route path="/cart" element={<ProtectedRoute><CartPage /></ProtectedRoute>} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
+            <Route path="/reports" element={<ReportsPage />} />
             <Route path="/address" element={<ProtectedRoute><AddressPage /></ProtectedRoute>} />
             <Route path="/preferences" element={<ProtectedRoute><PreferencePage /></ProtectedRoute>} />
             {BrandPreviewPage && <Route path="/brand" element={<BrandPreviewPage />} />}

@@ -107,7 +107,7 @@ async def test_reflect_regenerates_on_hallucination(dyn, monkeypatch):
     guard = _FlakyGuard()
     monkeypatch.setattr(g, "_guard", guard)
     state = await _run("推荐一款蓝牙耳机")
-    assert guard.calls == 2               # reflect 评估两轮
+    assert guard.calls == 3               # reflect 两轮，加交付前校验
     assert state.reflect_count == 1       # 消耗一次反思预算
     assert any(sid.startswith("r1_") for sid in state.completed_steps)  # response 重排执行
     assert "[纠正]" in state.context_prompt

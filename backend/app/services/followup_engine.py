@@ -79,6 +79,7 @@ class FollowUpEngine:
         session_id: str = "",
         current_query: str = "",
         snapshot: dict | None = None,
+        *, user_id: str = "" ,
     ) -> dict:
         """检测追问模式，返回约束更新 + 上下文提示。
 
@@ -113,10 +114,10 @@ class FollowUpEngine:
         pending_question = None
         if conversation_id:
             try:
-                if snapshot is None:
+                if snapshot is None and user_id:
                     from app.services.conversation_service import get_conversation_service
                     svc = get_conversation_service()
-                    snapshot = svc.get_context_snapshot_sync(conversation_id)
+                    snapshot = svc.get_context_snapshot_sync(conversation_id, user_id=user_id)
                 snapshot = snapshot or {}
                 # 产品引用 — 兼容新旧格式: [{id,title,brand}] 或 ["P001","P003"]
                 last_products_raw = snapshot.get("last_products") or snapshot.get("last_recommended_product_ids", [])

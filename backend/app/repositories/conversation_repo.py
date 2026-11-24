@@ -60,12 +60,12 @@ class ConversationRepository:
         finally:
             await gen.aclose()
 
-    async def aget(self, conversation_id: str) -> Optional[ConversationModel]:
+    async def aget(self, conversation_id: str, *, user_id: str) -> Optional[ConversationModel]:
         gen = self._aget_session()
         session = await anext(gen)
         try:
             result = await session.execute(
-                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id)
+                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id, ConversationModel.user_id == user_id)
             )
             return result.scalar_one_or_none()
         finally:
@@ -92,27 +92,25 @@ class ConversationRepository:
         gen = self._aget_session()
         session = await anext(gen)
         try:
-            stmt = select(ConversationModel).where(ConversationModel.session_id == session_id)
-            if user_id:
-                stmt = stmt.where(ConversationModel.user_id == user_id)
+            stmt = select(ConversationModel).where(ConversationModel.session_id == session_id, ConversationModel.user_id == user_id)
             stmt = stmt.order_by(desc(ConversationModel.updated_at)).limit(1)
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
         finally:
             await gen.aclose()
 
-    async def aupdate(self, conversation_id: str, **kwargs) -> Optional[ConversationModel]:
+    async def aupdate(self, conversation_id: str, *, user_id: str, **kwargs) -> Optional[ConversationModel]:
         gen = self._aget_session()
         session = await anext(gen)
         try:
             result = await session.execute(
-                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id)
+                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id, ConversationModel.user_id == user_id)
             )
             conv = result.scalar_one_or_none()
             if not conv:
                 return None
             for k, v in kwargs.items():
-                if hasattr(conv, k) and v is not None:
+                if k in {"title", "status", "summary", "last_message", "context_snapshot"} and v is not None:
                     setattr(conv, k, v)
             conv.updated_at = _utcnow()
             await session.commit()
@@ -130,6 +128,15 @@ class ConversationRepository:
         gen = self._aget_session()
         session = await anext(gen)
         try:
+            # touch conversation updated_at
+            conv_result = await session.execute(
+                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id, ConversationModel.user_id == user_id).with_for_update()
+            )
+            conv = conv_result.scalar_one_or_none()
+            if conv is None:
+                raise LookupError("Conversation not found")
+            conv.updated_at = _utcnow()
+
             msg = ConversationMessageModel(
                 message_id=_new_id("MSG"),
                 conversation_id=conversation_id,
@@ -145,20 +152,13 @@ class ConversationRepository:
                 extra_data=metadata or {},
             )
             session.add(msg)
-            # touch conversation updated_at
-            conv_result = await session.execute(
-                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id)
-            )
-            conv = conv_result.scalar_one_or_none()
-            if conv:
-                conv.updated_at = _utcnow()
             await session.commit()
             await session.refresh(msg)
             return msg
         finally:
             await gen.aclose()
 
-    async def alist_messages(self, conversation_id: str, limit: int = 50) -> list[ConversationMessageModel]:
+    async def alist_messages(self, conversation_id: str, limit: int = 50, *, user_id: str) -> list[ConversationMessageModel]:
         gen = self._aget_session()
         session = await anext(gen)
         try:
@@ -167,7 +167,9 @@ class ConversationRepository:
             # 先倒序截取最新窗口，再恢复成自然对话顺序交给上层。
             result = await session.execute(
                 select(ConversationMessageModel)
-                .where(ConversationMessageModel.conversation_id == conversation_id)
+                .join(ConversationModel, ConversationModel.conversation_id == ConversationMessageModel.conversation_id)
+                .where(ConversationMessageModel.conversation_id == conversation_id,
+                       ConversationMessageModel.user_id == user_id, ConversationModel.user_id == user_id)
                 .order_by(desc(ConversationMessageModel.created_at))
                 .limit(limit)
             )
@@ -175,13 +177,15 @@ class ConversationRepository:
         finally:
             await gen.aclose()
 
-    async def aget_active_checkpoint(self, conversation_id: str) -> Optional[ConversationContextCheckpointModel]:
+    async def aget_active_checkpoint(self, conversation_id: str, *, user_id: str) -> Optional[ConversationContextCheckpointModel]:
         gen = self._aget_session()
         session = await anext(gen)
         try:
             result = await session.execute(
                 select(ConversationContextCheckpointModel)
+                .join(ConversationModel, ConversationModel.conversation_id == ConversationContextCheckpointModel.conversation_id)
                 .where(
+                    ConversationModel.user_id == user_id,
                     ConversationContextCheckpointModel.conversation_id == conversation_id,
                     ConversationContextCheckpointModel.status == "active",
                 )
@@ -193,7 +197,7 @@ class ConversationRepository:
             await gen.aclose()
 
     async def acommit_checkpoint(
-        self, conversation_id: str, *, expected_revision: int, summary: str,
+        self, conversation_id: str, *, user_id: str, expected_revision: int, summary: str,
         shopping_state: dict, source_through_message_id: str | None,
         retained_message_ids: list[str], token_count: int,
     ) -> Optional[ConversationContextCheckpointModel]:
@@ -202,7 +206,7 @@ class ConversationRepository:
         session = await anext(gen)
         try:
             conv_result = await session.execute(
-                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id).with_for_update()
+                select(ConversationModel).where(ConversationModel.conversation_id == conversation_id, ConversationModel.user_id == user_id).with_for_update()
             )
             conv = conv_result.scalar_one_or_none()
             if not conv or int(conv.context_revision or 0) != int(expected_revision):
@@ -240,8 +244,8 @@ class ConversationRepository:
     def create(self, user_id: str, session_id: str, title: str = "") -> ConversationModel:
         return run_async(self.acreate(user_id, session_id, title))
 
-    def get(self, conversation_id: str) -> Optional[ConversationModel]:
-        return run_async(self.aget(conversation_id))
+    def get(self, conversation_id: str, *, user_id: str) -> Optional[ConversationModel]:
+        return run_async(self.aget(conversation_id, user_id=user_id))
 
     def list_by_user(self, user_id: str, limit: int = 20) -> list[ConversationModel]:
         return run_async(self.alist_by_user(user_id, limit))
@@ -253,16 +257,23 @@ class ConversationRepository:
                        role: str, content: str, **kwargs) -> ConversationMessageModel:
         return run_async(self.aappend_message(conversation_id, user_id, session_id, role, content, **kwargs))
 
-    def list_messages(self, conversation_id: str, limit: int = 50) -> list[ConversationMessageModel]:
-        return run_async(self.alist_messages(conversation_id, limit))
+    def list_messages(self, conversation_id: str, limit: int = 50, *, user_id: str) -> list[ConversationMessageModel]:
+        return run_async(self.alist_messages(conversation_id, limit, user_id=user_id))
 
 
-    async def adelete(self, conversation_id: str) -> bool:
+    async def adelete(self, conversation_id: str, *, user_id: str) -> bool:
         """硬删除对话及其所有消息。"""
         gen = self._aget_session()
         session = await anext(gen)
         try:
-            # 先删检查点与消息，再删对话本身，避免留下孤儿记录。
+            owned = await session.scalar(
+                select(ConversationModel.conversation_id)
+                .where(ConversationModel.conversation_id == conversation_id, ConversationModel.user_id == user_id)
+                .with_for_update()
+            )
+            if owned is None:
+                return False
+            # 兼容早期迁移中的外键定义。
             from sqlalchemy import delete
             await session.execute(
                 delete(ConversationContextCheckpointModel).where(
@@ -277,7 +288,7 @@ class ConversationRepository:
             # 再删对话
             result = await session.execute(
                 delete(ConversationModel).where(
-                    ConversationModel.conversation_id == conversation_id
+                    ConversationModel.conversation_id == conversation_id, ConversationModel.user_id == user_id
                 )
             )
             await session.commit()
@@ -288,10 +299,10 @@ class ConversationRepository:
         finally:
             await gen.aclose()
 
-    def delete(self, conversation_id: str) -> bool:
+    def delete(self, conversation_id: str, *, user_id: str) -> bool:
         """同步删除 (使用 run_async 桥接)。"""
         try:
-            return run_async(self.adelete(conversation_id))
+            return run_async(self.adelete(conversation_id, user_id=user_id))
         except Exception:
             return False
 

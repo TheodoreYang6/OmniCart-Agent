@@ -1,11 +1,11 @@
 """V1 Response Guard — 回答守门检查。
 
-ResponseAgent 输出后执行，轻量规则不阻塞回答。
-标记硬失败（幻觉/编造），写入 harness_report 供前端展示。
+ResponseAgent 完成后、正文交付前执行，将校验结果写入 harness_report。
 """
 
 import re
 import logging
+from decimal import Decimal
 from app.schemas.workflow import WorkflowState
 
 _log = logging.getLogger(__name__)
@@ -41,19 +41,21 @@ class ResponseGuard:
     def check(self, state: WorkflowState) -> dict:
         answer = state.answer or ""
         products = state.retrieved_products or []
+        ids = set(state.answer_cited_pids or [])
+        visible = [p for p in products if p.get("product_id") in ids] if ids else products
         context = state.context_prompt or ""
         user_query = state.user_query or ""
 
         report = {
-            "evidence_bound": self._check_evidence(answer, products),
-            "price_accurate": self._check_price(answer, products),
+            "evidence_bound": self._check_evidence(answer, visible),
+            "price_accurate": self._check_price(answer, visible),
             "risk_warned": self._check_risk(answer, state.decision_results or []),
-            "honest_on_empty": self._check_empty(answer, products),
-            "hallucination": self._check_hallucination(answer, products, context, user_query),
+            "honest_on_empty": self._check_empty(answer, visible),
+            "hallucination": self._check_hallucination(answer, visible, context, user_query),
             "cited_in_list": self._check_cited_in_list(answer, products,
                                                        state.answer_cited_pids or []),
             "group_coverage": self._check_group_coverage(state, products, answer),
-            "health_claim_safe": self._check_health_claims(answer, products),
+            "health_claim_safe": self._check_health_claims(answer, visible),
             "warnings": [],
         }
 
@@ -150,7 +152,16 @@ class ResponseGuard:
         # 即可，不把这种无法通过短称区分的变体误判成引用了备选。
         in_stubs = {_family_stub(product) for product in in_list}
         distinct_out_list = [product for product in out_list if _family_stub(product) not in in_stubs]
-        return not any(_mentioned(product) for product in distinct_out_list)
+        if any(_mentioned(product) for product in distinct_out_list):
+            return False
+        # 同一品牌下虚构型号也属于卡片外商品。型号必须能在对应可见资料中找到。
+        model_pattern = re.compile(r"[A-Za-z]{1,12}[-–]?\d{2,5}[A-Za-z0-9-]*")
+        known_models = {
+            model.casefold()
+            for product in in_list
+            for model in model_pattern.findall(str(product))
+        }
+        return all(model.casefold() in known_models for model in model_pattern.findall(answer))
 
     def _check_evidence(self, answer: str, products: list[dict]) -> bool:
         """证据绑定：回答是否引用了具体商品信息（品牌名/标题关键词/证据内容）。"""
@@ -175,31 +186,26 @@ class ResponseGuard:
                     return True
         return False
 
-    def _check_price(self, answer: str, products: list[dict]) -> bool:
-        """价格准确：如果提到了商品名，价格是否正确。"""
-        # 最终交付最多有三张首选卡。旧实现只校验前两张，第三张即使被模型
-        # 说错价格也能通过 Guard，导致卡片与正文再次失去同一口径。
-        for p in products[:3]:
-            brand = p.get("brand", "")
-            title = p.get("title", "")
-            price = int(p.get("price", 0))
-            # 不能用 ``str(price) in answer``：型号 C300、容量 300ml、续航
-            # 300 小时都会被错误当成金额。只接受货币符号或明确价格单位。
-            price_patterns = (
-                rf"[¥￥]\s*{price}(?:\.0+)?(?!\d)",
-                rf"(?<![A-Za-z0-9]){price}(?:\.0+)?\s*(?:元|块)(?![A-Za-z0-9])",
-            )
-            # 检查回答是否引用了该商品（品牌或标题关键词）
-            mentioned = (brand and len(brand) >= 2 and brand in answer)
-            if not mentioned:
-                # 标题滑窗：4字片段命中即认为引用了该商品
-                for i in range(len(title) - 3):
-                    if title[i:i+4] in answer:
-                        mentioned = True
-                        break
-            if mentioned and price > 0:
-                if not any(re.search(pattern, answer) for pattern in price_patterns):
-                    return False
+    _MONEY = re.compile(r"[¥￥]\s*(\d[\d,]*(?:\.\d+)?)|(?<![\d.,])(\d[\d,]*(?:\.\d+)?)\s*(?:元|块)")
+
+    @classmethod
+    def _check_price(cls, answer: str, products: list[dict]) -> bool:
+        prices = {Decimal(str(p["price"])) for p in products if p.get("price") is not None}
+        if not prices:
+            return True
+        for clause in re.split(r"[。；;，、\n]", answer):
+            amounts = {Decimal((match[1] or match[2]).replace(",", "")) for match in cls._MONEY.finditer(clause)}
+            if not amounts:
+                continue
+            if not amounts <= prices:
+                return False
+            mentioned = {
+                Decimal(str(product["price"])) for product in products if product.get("price") is not None
+                and any(word and word.casefold() in clause.casefold()
+                        for word in (str(product.get("title") or "")[:12], product.get("brand", "")))
+            }
+            if len(mentioned) == 1 and not amounts <= mentioned:
+                return False
         return True
 
     def _check_risk(self, answer: str, decisions: list[dict]) -> bool:
@@ -231,7 +237,7 @@ class ResponseGuard:
     ) -> str:
         """幻觉检测：回答是否引用了不在检索结果中的品牌。
 
-        排除: 用户自己提到的品牌 / 否定/解释性语境中的品牌引用。
+        否定或解释性语境中的品牌引用可放行。
         """
         if not products:
             return ""
@@ -248,18 +254,6 @@ class ResponseGuard:
 
         for brand in self._KNOWN_BRANDS:
             if brand.lower() in answer.lower() and brand.lower() not in aliased:
-                # 用户自己提到过（含别名）→ 不算幻觉
-                user_mentioned = brand.lower() in user_query.lower()
-                if not user_mentioned:
-                    alias = BRAND_ALIASES.get(brand.lower(), "")
-                    user_mentioned = alias in user_query.lower()
-                if not user_mentioned:
-                    user_mentioned = brand.lower() in context.lower()
-                if not user_mentioned:
-                    alias = BRAND_ALIASES.get(brand.lower(), "")
-                    user_mentioned = alias in context.lower()
-                if user_mentioned:
-                    continue  # 用户提过的品牌，跳过
                 # 否定/解释性语境（如 "Nike长裤为下装，非T恤"）→ 也不算幻觉
                 idx = answer.lower().find(brand.lower())
                 if idx >= 0:
@@ -300,20 +294,30 @@ class ResponseGuard:
     def _check_health_claims(answer: str, products: list[dict]) -> bool:
         """Weight outcomes are never product claims; dietary language needs facts."""
         lowered = answer.lower()
-        if any(term in lowered for term in ("不长胖", "不会胖", "减肥效果", "保证瘦", "瘦下来", "燃脂")):
+        if any(term in lowered for term in ("不长胖", "不会胖", "减肥效果", "保证瘦", "瘦下来", "燃脂",
+                                               "治愈", "治疗", "预防癌症", "降低血糖", "降低血压")):
             return False
-        fact_keys = {
-            f.get("fact_key", "")
-            for product in products
-            for f in (product.get("product_facts", []) or [])
-        }
         assertions = {
             "0糖": "nutrition.zero_sugar", "无糖": "nutrition.zero_sugar",
             "低糖": "nutrition.low_sugar", "0脂": "nutrition.zero_fat",
             "低脂": "nutrition.low_fat", "低卡": "nutrition.low_calorie",
             "0卡": "nutrition.zero_calorie", "高蛋白": "nutrition.high_protein",
         }
-        return all(key in fact_keys for phrase, key in assertions.items() if phrase in answer)
+        for clause in re.split(r"[。；;，、\n]", answer):
+            required = {key for phrase, key in assertions.items() if phrase in clause}
+            if not required:
+                continue
+            named = [p for p in products if any(
+                word and word.casefold() in clause.casefold()
+                for word in (str(p.get("title") or "")[:12], p.get("brand", ""))
+            )]
+            relevant = named or products
+            if not relevant or any(
+                not required <= {fact.get("fact_key") for fact in p.get("product_facts") or [] if isinstance(fact, dict)}
+                for p in relevant
+            ):
+                return False
+        return True
 
     def _has_risks(self, decisions: list[dict]) -> bool:
         return any(d.get("risk_factors") for d in decisions)

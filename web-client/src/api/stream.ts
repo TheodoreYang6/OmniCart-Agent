@@ -16,6 +16,7 @@ export interface StreamRequest {
   allow_same_category_comparison?: boolean
   exec_mode?: string
   deep_think?: boolean
+  cart_payment?: boolean
 }
 
 export type StreamFinishReason = 'complete' | 'aborted' | 'error'

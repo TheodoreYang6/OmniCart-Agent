@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import exists, select, update
 
 from app.core.database import get_session_sync
 from app.models.order import OrderModel
+from app.models.report_order import ReportOrderModel
 
 logger = logging.getLogger(__name__)
 
@@ -36,30 +37,37 @@ class PgOrderRepository:
             logger.warning(f"alist_by_user failed for {user_id}: {e}")
             return []
 
-    async def aget(self, order_id: str) -> dict | None:
+    async def aget(self, order_id: str, *, user_id: str) -> dict | None:
         factory = get_session_sync()
         if factory is None:
             return None
         try:
             async with factory() as session:
-                row = await session.get(OrderModel, order_id)
-                return row.to_dict() if row else None
+                row = (await session.execute(select(OrderModel, ReportOrderModel.environment).outerjoin(
+                    ReportOrderModel, (ReportOrderModel.order_id == OrderModel.order_id)
+                    & (ReportOrderModel.user_id == OrderModel.user_id) & (ReportOrderModel.kind == "cart"),
+                ).where(OrderModel.order_id == order_id, OrderModel.user_id == user_id))).one_or_none()
+                return {**row[0].to_dict(), "payment_environment": row[1]} if row else None
         except Exception as e:  # noqa: BLE001
             logger.warning(f"aget failed for {order_id}: {e}")
             return None
 
-    async def aupdate_status(self, order_id: str, status: str) -> bool:
+    async def aupdate_status(self, order_id: str, status: str, *, user_id: str, expected_status: str) -> bool:
         factory = get_session_sync()
         if factory is None:
             return False
         try:
             async with factory() as session:
-                row = await session.get(OrderModel, order_id)
-                if not row:
-                    return False
-                row.status = status
+                result = await session.execute(update(OrderModel).where(
+                    OrderModel.order_id == order_id, OrderModel.user_id == user_id,
+                    OrderModel.status == expected_status,
+                    ~exists().where(
+                        ReportOrderModel.order_id == OrderModel.order_id,
+                        ReportOrderModel.kind == "cart",
+                    ),
+                ).values(status=status))
                 await session.commit()
-                return True
+                return result.rowcount == 1
         except Exception as e:  # noqa: BLE001
             logger.warning(f"aupdate_status failed for {order_id}: {e}")
             return False
@@ -83,12 +91,13 @@ class MemOrderRepository:
         items.sort(key=lambda o: o.get("created_at", ""), reverse=True)
         return items[:limit]
 
-    async def aget(self, order_id: str) -> dict | None:
+    async def aget(self, order_id: str, *, user_id: str) -> dict | None:
         o = self._orders.get(order_id)
-        return dict(o) if o else None
+        return dict(o) if o and o["user_id"] == user_id else None
 
-    async def aupdate_status(self, order_id: str, status: str) -> bool:
-        if order_id not in self._orders:
+    async def aupdate_status(self, order_id: str, status: str, *, user_id: str, expected_status: str) -> bool:
+        order = self._orders.get(order_id)
+        if not order or order["user_id"] != user_id or order["status"] != expected_status:
             return False
         self._orders[order_id]["status"] = status
         return True

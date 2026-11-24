@@ -19,8 +19,9 @@ class _FakeRepo:
         self.by_id[conv.conversation_id] = conv
         return conv
 
-    async def aget(self, conversation_id):
-        return self.by_id.get(conversation_id)
+    async def aget(self, conversation_id, *, user_id):
+        row = self.by_id.get(conversation_id)
+        return row if row and row.user_id == user_id else None
 
     async def aget_latest_by_session(self, user_id, session_id):
         conv = self.by_session.get(session_id)

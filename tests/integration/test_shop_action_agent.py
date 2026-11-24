@@ -19,10 +19,10 @@ class _FakeConv:
     def __init__(self, snap=None):
         self._snap = dict(snap or {})
 
-    async def get_context_snapshot(self, cid):
+    async def get_context_snapshot(self, cid, *, user_id):
         return dict(self._snap)
 
-    async def aupdate_context_snapshot(self, cid, updates):
+    async def aupdate_context_snapshot(self, cid, updates, *, user_id):
         self._snap.update(updates)
 
 

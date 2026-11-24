@@ -15,7 +15,7 @@ import secrets
 import time
 from dataclasses import dataclass
 
-from fastapi import Header, HTTPException, Query, Request
+from fastapi import Depends, Header, HTTPException, Query, Request
 
 from app.core.config import settings
 from app.repositories.user_repo import get_user_repo
@@ -136,6 +136,14 @@ async def resolve_public_actor(
 def require_user(actor: Actor) -> Actor:
     if not actor.is_authenticated:
         raise HTTPException(status_code=401, detail="login required")
+    return actor
+
+
+def require_admin(actor: Actor = Depends(resolve_actor)) -> Actor:
+    actor = require_user(actor)
+    allowed = {value.strip() for value in settings.admin_user_ids.split(",") if value.strip()}
+    if actor.user_id not in allowed:
+        raise HTTPException(status_code=403, detail="admin access required")
     return actor
 
 

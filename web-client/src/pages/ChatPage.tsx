@@ -8,6 +8,7 @@ import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
 import { getEffectiveUserId } from '@/store/authStore'
 import { api } from '@/api/client'
+import { alipayCheckoutUrl } from '@/api/cartPayments'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { ConversationHistory } from '@/components/chat/ConversationHistory'
 import { ProductSpotlight } from '@/components/product/ProductSpotlight'
@@ -164,6 +165,12 @@ export function ChatPage() {
   const handleAction = async (action: ChatAction) => {
     const type = String(action.type ?? '')
     const label = String(action.label ?? '')
+    if (type === 'cart_payment_handoff') {
+      const url = alipayCheckoutUrl(action.checkout_url)
+      if (url) window.open(url, '_blank', 'noopener,noreferrer')
+      else toast.error('支付链接无效，请从购物车重试')
+      return
+    }
     if (action.route) {
       if (action.route === 'cart') navigate('/cart')
       else if (action.route === 'orders') navigate('/orders')

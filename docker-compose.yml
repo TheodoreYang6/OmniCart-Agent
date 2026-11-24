@@ -46,6 +46,11 @@ services:
       - "8006:8006"
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/api/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 3
     volumes:
       - ./data:/app/data
       - ./ecommerce_agent_dataset:/app/ecommerce_agent_dataset:ro
@@ -54,6 +59,25 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Web 前端：静态资源 + /api、/images 反代到 backend（单栈同源部署）
+  web:
+    build:
+      context: ./web-client
+      dockerfile: Dockerfile
+    environment:
+      OMNICART_PROXY_TARGET: ${OMNICART_WEB_PROXY_TARGET:-backend:8006}
+    ports:
+      - "${OMNICART_WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      backend:
         condition: service_healthy
     restart: unless-stopped
 

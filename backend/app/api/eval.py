@@ -13,13 +13,15 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+from app.core.identity import require_admin
+
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 _EVAL_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "eval_runs"
 _EVAL_DIR.mkdir(parents=True, exist_ok=True)

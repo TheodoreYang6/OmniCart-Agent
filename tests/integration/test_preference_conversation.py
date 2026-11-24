@@ -46,14 +46,14 @@ class _FakeConvSvc:
     def __init__(self):
         self.snapshot_updates = []
 
-    def get_messages(self, cid, limit=50):
+    def get_messages(self, cid, limit=50, *, user_id):
         return [{"role": "user", "content": "推荐蓝牙耳机"},
                 {"role": "assistant", "content": "推荐你看看这几款～"}]
 
-    async def aupdate_context_snapshot(self, cid, update):
+    async def aupdate_context_snapshot(self, cid, update, *, user_id):
         self.snapshot_updates.append(update)
 
-    async def get_context_snapshot(self, cid):
+    async def get_context_snapshot(self, cid, *, user_id):
         return {}
 
 

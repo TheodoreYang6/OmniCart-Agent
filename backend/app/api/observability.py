@@ -1,10 +1,12 @@
 """可观测性 API — 查看 LLM 调用追踪和聚合统计"""
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.observability.collector import get_collector
 
-router = APIRouter(prefix="/api/observability", tags=["observability"])
+from app.core.identity import require_admin
+
+router = APIRouter(prefix="/api/observability", tags=["observability"], dependencies=[Depends(require_admin)])
 
 
 @router.get("/traces")

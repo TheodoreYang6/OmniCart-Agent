@@ -1,10 +1,10 @@
-"""共享 pytest fixtures — 测试始终使用 JSON + Stub 后端。"""
+"""共享 pytest fixtures — 默认使用 JSON + Stub 后端。"""
 
 import os
 
-# 强制测试模式：清空数据库连接串，确保测试使用 JSON + Stub 后端
+# 可用 OMNICART_TEST_DATABASE_URL 为独立集成测试启用 PostgreSQL。
 # 必须在任何 app 导入之前设置
-os.environ["DATABASE_URL"] = ""
+os.environ["DATABASE_URL"] = os.environ.get("OMNICART_TEST_DATABASE_URL", "")
 os.environ["QDRANT_URL"] = ""
 os.environ["REDIS_URL"] = ""
 os.environ["OMNICART_MOCK_MODE"] = "true"

@@ -71,19 +71,41 @@ def get_session_sync():
 
 
 async def init_db():
-    """应用启动时建表（若无 Alembic 可先用 create_all）。"""
+    """Check that the configured database is reachable and migrations are current.
+
+    Raises ``RuntimeError`` with a human-readable message so the readiness
+    probe and entrypoint can surface the specific failure (connection vs
+    migration mismatch) instead of a generic "unavailable".
+    """
     if not USE_POSTGRES:
         return
-    from app.models import Base
-    factory = _get_factory_for_current_loop()
-    if factory is None:
-        return
-    engine = _engines[id(asyncio.get_running_loop())][0]
+    from pathlib import Path
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import text
+
+    migrations = Path(__file__).resolve().parents[3] / "alembic"
+    expected = set(ScriptDirectory(str(migrations)).get_heads())
     try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-    except Exception:
-        pass  # 表已存在则忽略，避免启动崩溃
+        async with get_session_sync()() as session:
+            current = set((await session.scalars(text("SELECT version_num FROM alembic_version"))).all())
+    except Exception as exc:
+        raise RuntimeError(
+            "Database is configured but not reachable. "
+            "Check DATABASE_URL and ensure PostgreSQL is running. "
+            f"Original error: {exc}"
+        ) from exc
+    if current != expected:
+        missing = expected - current
+        extra = current - expected
+        detail = []
+        if missing:
+            detail.append(f"pending migrations: {', '.join(sorted(missing))}")
+        if extra:
+            detail.append(f"unexpected heads: {', '.join(sorted(extra))}")
+        raise RuntimeError(
+            "Database migration required. Run 'alembic upgrade head'. "
+            + "; ".join(detail)
+        )
 
 
 async def close_db():

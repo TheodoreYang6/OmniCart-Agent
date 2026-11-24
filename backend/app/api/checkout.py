@@ -102,6 +102,7 @@ async def list_orders(user_id: str = Query(default=""), actor: Actor = Depends(r
                 select(OrderModel)
                 .where(OrderModel.user_id == user_id)
                 .order_by(OrderModel.created_at.desc())
+                .limit(50)
             )
             orders = [r.to_dict() for r in result.scalars().all()]
             # Historical orders may predate image_url / sku_label persistence.

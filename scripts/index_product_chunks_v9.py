@@ -15,6 +15,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -93,13 +94,23 @@ async def main() -> None:
         print("跳过 Qdrant 写入（--local-only 或 QDRANT 未配置）")
 
     CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_FILE.write_text(json.dumps({
-        "version": "v9", "collection": args.collection, "dimension": actual_dimension,
-        "count": len(chunks), "chunk_type_counts": counts,
-        "chunks": [{"product_id": c.product_id, "chunk_id": c.chunk_id,
-                    "chunk_type": c.chunk_type, "payload": c.to_qdrant_payload(),
-                    "embedding": embeddings[i]} for i, c in enumerate(chunks)],
-    }, ensure_ascii=False), encoding="utf-8")
+    with TemporaryDirectory(dir=CACHE_FILE.parent) as temporary:
+        pending_cache = Path(temporary) / CACHE_FILE.name
+        metadata = CACHE_FILE.with_suffix(".meta.json")
+        pending_metadata = Path(temporary) / metadata.name
+        pending_cache.write_text(json.dumps({
+            "version": "v9", "collection": args.collection, "dimension": actual_dimension,
+            "count": len(chunks), "chunk_type_counts": counts,
+            "chunks": [{"product_id": c.product_id, "chunk_id": c.chunk_id,
+                        "chunk_type": c.chunk_type, "payload": c.to_qdrant_payload(),
+                        "embedding": embeddings[i]} for i, c in enumerate(chunks)],
+        }, ensure_ascii=False), encoding="utf-8")
+        stat = pending_cache.stat()
+        pending_metadata.write_text(json.dumps({
+            "dimension": actual_dimension, "cache_size": stat.st_size, "cache_mtime_ns": stat.st_mtime_ns,
+        }), encoding="utf-8")
+        pending_cache.replace(CACHE_FILE)
+        pending_metadata.replace(metadata)
     print(f"本地验证缓存：{CACHE_FILE}")
 
 

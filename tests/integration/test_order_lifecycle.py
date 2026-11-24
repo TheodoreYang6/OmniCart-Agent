@@ -20,10 +20,10 @@ class _FakeConv:
     def __init__(self, snap=None):
         self._snap = dict(snap or {})
 
-    async def get_context_snapshot(self, cid):
+    async def get_context_snapshot(self, cid, *, user_id):
         return dict(self._snap)
 
-    async def aupdate_context_snapshot(self, cid, updates):
+    async def aupdate_context_snapshot(self, cid, updates, *, user_id):
         self._snap.update(updates)
 
 
@@ -79,12 +79,13 @@ class _FakeOrderRepo:
         items.sort(key=lambda o: o.get("created_at", ""), reverse=True)
         return items[:limit]
 
-    async def aget(self, order_id):
+    async def aget(self, order_id, *, user_id):
         o = self._orders.get(order_id)
-        return dict(o) if o else None
+        return dict(o) if o and o['user_id'] == user_id else None
 
-    async def aupdate_status(self, order_id, status):
-        if order_id not in self._orders:
+    async def aupdate_status(self, order_id, status, *, user_id, expected_status):
+        if (order_id not in self._orders or self._orders[order_id]['user_id'] != user_id
+                or self._orders[order_id]['status'] != expected_status):
             return False
         self._orders[order_id]["status"] = status
         return True

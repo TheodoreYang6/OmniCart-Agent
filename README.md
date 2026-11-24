@@ -351,6 +351,10 @@ python run.py
 
 V9 索引构建需要可用的 Embedding 配置，并会写入 Qdrant。真实推理模式还需要在 `.env` 中配置模型 API Key，或准备本地 Embedding / Reranker 权重。配置入口统一位于 [`backend/app/model_gateway/model_config.yaml`](backend/app/model_gateway/model_config.yaml) 与 [`.env.example`](.env.example)。
 
+### 支付宝 AI 付
+
+Web 端的选购报告支持报价、支付宝网站支付和付款后交付。技能包、本地演示和沙箱配置见 [PAYATHON 接入指南](docs/PAYATHON.md)。
+
 ### Android 真机联调
 
 Debug 变体默认访问电脑端 `127.0.0.1:8006`。USB 连接设备后执行：

@@ -59,7 +59,7 @@ class ShopActionAgent:
         conv = self._conv_svc()
         cid, uid = ctx.conversation_id, ctx.user_id
 
-        snap = await self._snapshot(conv, cid)
+        snap = await self._snapshot(conv, cid, ctx.user_id)
         pending_sku = snap.get("pending_sku_product") or {}
         focus = snap.get("focus_product") or {}
         last_products = snap.get("last_products") or []
@@ -200,7 +200,7 @@ class ShopActionAgent:
             "brand": pending_sku.get("brand") or product.brand,
             # price 不传 → cart.add 用 sku.price 或 product.base_price（对齐 legacy）
         }, ctx)
-        await self._update_snapshot(conv, cid, {"pending_sku_product": None})
+        await self._update_snapshot(conv, cid, ctx.user_id, {"pending_sku_product": None})
         return res
 
     async def _handle_confirm(self, registry, ctx, uid, focus, last_products):
@@ -227,7 +227,7 @@ class ShopActionAgent:
         addr = await self._resolve_address(uid)
         res = await registry.invoke("order.preview", {"items": items, "address": addr}, ctx)
         if source and res.data.get("pending_order_items"):
-            await self._update_snapshot(conv, cid, {"pending_order_items": res.data["pending_order_items"]})
+            await self._update_snapshot(conv, cid, ctx.user_id, {"pending_order_items": res.data["pending_order_items"]})
         return res
 
     async def _handle_add(self, registry, ctx, conv, cid, msg, focus, last_products):
@@ -257,7 +257,7 @@ class ShopActionAgent:
             # sku_id 不传(None) → 多规格触发 needs_sku
         }, ctx)
         if res.data.get("needs_sku"):
-            await self._update_snapshot(conv, cid, {"pending_sku_product": res.data["needs_sku"]})
+            await self._update_snapshot(conv, cid, ctx.user_id, {"pending_sku_product": res.data["needs_sku"]})
         return res
 
     # ================================================================
@@ -269,7 +269,7 @@ class ShopActionAgent:
         orders = (res.data or {}).get("orders", [])
         order_ids = [o.get("order_id", "") for o in orders if o.get("order_id")]
         if order_ids:
-            await self._update_snapshot(conv, cid, {"last_orders": order_ids})
+            await self._update_snapshot(conv, cid, ctx.user_id, {"last_orders": order_ids})
         return res
 
     async def _handle_order_detail(self, registry, ctx, msg, last_orders):
@@ -442,19 +442,19 @@ class ShopActionAgent:
             return None
 
     @staticmethod
-    async def _snapshot(conv, cid) -> dict:
+    async def _snapshot(conv, cid, user_id) -> dict:
         if not (conv and cid):
             return {}
         try:
-            return (await conv.get_context_snapshot(cid)) or {}
+            return (await conv.get_context_snapshot(cid, user_id=user_id)) or {}
         except Exception:  # noqa: BLE001
             return {}
 
     @staticmethod
-    async def _update_snapshot(conv, cid, updates: dict) -> None:
+    async def _update_snapshot(conv, cid, user_id, updates: dict) -> None:
         if not (conv and cid):
             return
         try:
-            await conv.aupdate_context_snapshot(cid, updates)
+            await conv.aupdate_context_snapshot(cid, updates, user_id=user_id)
         except Exception:  # noqa: BLE001
             pass

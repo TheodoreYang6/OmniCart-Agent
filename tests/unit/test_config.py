@@ -38,11 +38,13 @@ def test_settings_types_parsed():
 
 
 def test_settings_derived_flags_defaults():
-    # DATABASE_URL / QDRANT_URL 默认空 → 派生开关 False（不依赖 conftest）
-    import app.core.config as cfg
+    # 用独立 Settings 实例验证派生开关默认值，不依赖全局 lru_cache 单例
+    # （conftest 和 OMNICART_TEST_DATABASE_URL 可能覆盖全局 settings 的 DATABASE_URL）
+    from app.core.config import Settings
 
-    assert cfg.settings.use_postgres is False
-    assert cfg.settings.use_qdrant is False
+    fresh = Settings(_env_file=None)
+    assert fresh.use_postgres is False
+    assert fresh.use_qdrant is False
     # 默认值
-    assert cfg.SERVICE_NAME == "omnicart-agent"
-    assert cfg.MOCK_MODE is True
+    assert fresh.SERVICE_NAME == "omnicart-agent"
+    assert fresh.MOCK_MODE is True

@@ -76,8 +76,8 @@ class ConversationContextAssembler:
             repo = get_conversation_repo()
             try:
                 checkpoint_model, messages = await asyncio.gather(
-                    repo.aget_active_checkpoint(state.conversation_id),
-                    repo.alist_messages(state.conversation_id, limit=8),
+                    repo.aget_active_checkpoint(state.conversation_id, user_id=state.user_id),
+                    repo.alist_messages(state.conversation_id, limit=8, user_id=state.user_id),
                 )
                 if checkpoint_model:
                     checkpoint = {
@@ -92,7 +92,7 @@ class ConversationContextAssembler:
                 # used only as a read-compatible projection until the DB is migrated.
                 try:
                     from app.services.conversation_service import get_conversation_service
-                    snapshot = await get_conversation_service().get_context_snapshot(state.conversation_id)
+                    snapshot = await get_conversation_service().get_context_snapshot(state.conversation_id, user_id=state.user_id)
                     checkpoint = {"summary": snapshot.get("conversation_summary", ""), "shopping_state": snapshot}
                 except Exception:
                     pass

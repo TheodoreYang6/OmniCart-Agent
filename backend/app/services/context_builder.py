@@ -75,7 +75,7 @@ class ContextBuilder:
         try:
             from app.services.conversation_service import get_conversation_service
             svc = get_conversation_service()
-            ctx = svc.get_context(conversation_id, limit=6)
+            ctx = svc.get_context(conversation_id, limit=6, user_id=user_id)
         except Exception as e:
             logger.debug(f"ContextBuilder load failed: {e}")
             return result

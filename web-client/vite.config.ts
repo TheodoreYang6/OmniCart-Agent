@@ -6,7 +6,7 @@ import { fileURLToPath, URL } from 'node:url'
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const apiTarget = env.VITE_API_BASE || 'http://127.0.0.1:8006'
+  const apiTarget = env.OMNICART_VITE_PROXY_TARGET || env.VITE_API_BASE || 'http://127.0.0.1:8006'
   return {
     plugins: react(),
     resolve: {

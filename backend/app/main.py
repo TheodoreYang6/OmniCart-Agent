@@ -17,6 +17,9 @@ from app.api.upload import router as upload_router
 from app.api.products import router as products_router
 from app.api.cart import router as cart_router
 from app.api.checkout import router as checkout_router
+from app.api.report_payments import router as report_payments_router
+from app.api.cart_payments import router as cart_payments_router
+from app.api.admin_payments import router as admin_payments_router
 from app.api.agent_actions import router as agent_actions_router
 from app.api.auth import router as auth_router
 from app.api.address import router as address_router
@@ -95,6 +98,9 @@ app.include_router(upload_router)
 app.include_router(products_router)
 app.include_router(cart_router)
 app.include_router(checkout_router)
+app.include_router(report_payments_router)
+app.include_router(cart_payments_router)
+app.include_router(admin_payments_router)
 app.include_router(agent_actions_router)
 app.include_router(auth_router)
 app.include_router(address_router)
@@ -117,12 +123,10 @@ async def on_startup():
     get_tool_registry()
 
     if USE_POSTGRES:
-        try:
-            from app.core.database import init_db
-            await init_db()
-            logger.info("PostgreSQL connected and tables initialized")
-        except Exception as e:
-            logger.warning(f"PostgreSQL init failed: {e} — falling back to JSON mode")
+        from app.core.database import init_db
+
+        await init_db()
+        logger.info("PostgreSQL connected and migrations current")
     else:
         logger.info("PostgreSQL not configured — using JSON file mode")
 

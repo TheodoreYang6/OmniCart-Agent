@@ -31,7 +31,7 @@ async def _context_summary(state: WorkflowState) -> str:
     try:
         from app.services.conversation_service import get_conversation_service
 
-        snap = await get_conversation_service().aget_context_projection(state.conversation_id) or {}
+        snap = await get_conversation_service().aget_context_projection(state.conversation_id, user_id=state.user_id) or {}
     except Exception:  # noqa: BLE001
         return ""
     lines = []

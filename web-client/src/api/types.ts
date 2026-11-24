@@ -608,6 +608,7 @@ export interface ChatAction {
   route?: 'cart' | 'orders' | 'address' | string
   cart_item_id?: string
   quantity?: number
+  checkout_url?: string
 }
 
 export interface ClarificationOption {

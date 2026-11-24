@@ -38,7 +38,7 @@ class ConversationService:
     def __init__(self):
         self._repo = get_conversation_repo()
         # 内存缓存: cid → context_snapshot dict (PG 的读缓存, 不是独立数据源)
-        self._snapshot_cache: dict[str, dict] = {}
+        self._snapshot_cache: dict[tuple[str, str], dict] = {}
         # 同一会话的投影提交必须串行。否则 SSE 收尾的后台任务会把下一轮状态覆盖掉。
         self._context_locks: dict[str, asyncio.Lock] = {}
         self._last_cleanup = time.time()
@@ -51,7 +51,7 @@ class ConversationService:
                              conversation_id: str = "",
                              title: str = "") -> dict:
         if conversation_id:
-            existing = await self._repo.aget(conversation_id)
+            existing = await self._repo.aget(conversation_id, user_id=user_id)
             if existing:
                 return {"conversation_id": existing.conversation_id, "is_new": False}
         # P0-1 会话连续性：cid 缺失时按 session_id 复用最近会话
@@ -69,7 +69,7 @@ class ConversationService:
     def get_or_create(self, user_id: str, session_id: str,
                       conversation_id: str = "", title: str = "") -> dict:
         if conversation_id:
-            existing = self._repo.get(conversation_id)
+            existing = self._repo.get(conversation_id, user_id=user_id)
             if existing:
                 return {"conversation_id": existing.conversation_id, "is_new": False}
         if session_id:
@@ -95,7 +95,7 @@ class ConversationService:
             image_url=image_url or None, metadata=metadata or {},
         )
         preview = content[:100] if content else ""
-        await self._repo.aupdate(conversation_id, last_message=preview)
+        await self._repo.aupdate(conversation_id, user_id=user_id, last_message=preview)
         return {"message_id": msg.message_id, "role": "user", "content": content[:200]}
 
     async def aappend_assistant_message(self, conversation_id: str, user_id: str,
@@ -111,7 +111,7 @@ class ConversationService:
             memory_refs=[], metadata=metadata or {},
         )
         preview = content[:100] if content else ""
-        await self._repo.aupdate(conversation_id, last_message=preview)
+        await self._repo.aupdate(conversation_id, user_id=user_id, last_message=preview)
         return {"message_id": msg.message_id, "role": "assistant", "content": content[:200]}
 
     # Sync wrappers
@@ -124,7 +124,7 @@ class ConversationService:
             image_url=image_url or None, metadata=metadata or {},
         )
         preview = content[:100] if content else ""
-        self._repo.aupdate_sync(conversation_id, last_message=preview)
+        self._repo.aupdate_sync(conversation_id, user_id=user_id, last_message=preview)
         return {"message_id": msg.message_id, "role": "user", "content": content[:200]}
 
     def append_assistant_message(self, conversation_id: str, user_id: str,
@@ -140,14 +140,14 @@ class ConversationService:
             memory_refs=[], metadata=metadata or {},
         )
         preview = content[:100] if content else ""
-        self._repo.aupdate_sync(conversation_id, last_message=preview)
+        self._repo.aupdate_sync(conversation_id, user_id=user_id, last_message=preview)
         return {"message_id": msg.message_id, "role": "assistant", "content": content[:200]}
 
     # ================================================================
     # 短期上下文读写 (Memory Lite 核心)
     # ================================================================
 
-    async def get_context_snapshot(self, conversation_id: str) -> dict:
+    async def get_context_snapshot(self, conversation_id: str, *, user_id: str) -> dict:
         """读取兼容投影；新会话优先使用 versioned checkpoint。
 
         Returns:
@@ -160,13 +160,13 @@ class ConversationService:
                 "focus_product": {product_id, title, price, brand, ...},
             }
         """
-        if conversation_id in self._snapshot_cache:
-            return self._snapshot_cache[conversation_id]
+        if (user_id, conversation_id) in self._snapshot_cache:
+            return self._snapshot_cache[user_id, conversation_id]
 
-        conv = await self._repo.aget(conversation_id)
+        conv = await self._repo.aget(conversation_id, user_id=user_id)
         snapshot = dict(conv.context_snapshot) if conv and conv.context_snapshot else {}
         try:
-            checkpoint = await self._repo.aget_active_checkpoint(conversation_id)
+            checkpoint = await self._repo.aget_active_checkpoint(conversation_id, user_id=user_id)
             if checkpoint:
                 projected = dict(checkpoint.shopping_state or {})
                 projected["conversation_summary"] = checkpoint.summary or ""
@@ -174,20 +174,20 @@ class ConversationService:
                 snapshot = {**snapshot, **projected}
         except Exception:
             pass
-        self._snapshot_cache[conversation_id] = snapshot
+        self._snapshot_cache[user_id, conversation_id] = snapshot
         return snapshot
 
-    async def aget_context_projection(self, conversation_id: str) -> dict:
+    async def aget_context_projection(self, conversation_id: str, *, user_id: str) -> dict:
         """供 Router/FollowUp 使用的单一会话投影，隐藏 snapshot 的存储细节。"""
-        return await self.get_context_snapshot(conversation_id)
+        return await self.get_context_snapshot(conversation_id, user_id=user_id)
 
-    def get_context_snapshot_sync(self, conversation_id: str) -> dict:
+    def get_context_snapshot_sync(self, conversation_id: str, *, user_id: str) -> dict:
         """同步版 — 仅查 PG (无缓存), 供 FollowUpEngine 等同步调用方使用。"""
-        conv = self._repo.get(conversation_id)
+        conv = self._repo.get(conversation_id, user_id=user_id)
         return dict(conv.context_snapshot) if conv and conv.context_snapshot else {}
 
     async def merge_constraints(self, conversation_id: str,
-                                new_constraints: Constraints) -> Constraints:
+                                new_constraints: Constraints, *, user_id: str) -> Constraints:
         """本轮约束合并已累积约束，返回合并后的 Constraints。
 
         规则:
@@ -197,7 +197,7 @@ class ConversationService:
         - 合并结果写回 context_snapshot + 缓存
         """
         self._maybe_cleanup()
-        snapshot = await self.get_context_snapshot(conversation_id)
+        snapshot = await self.get_context_snapshot(conversation_id, user_id=user_id)
 
         acc = snapshot.get("constraints", {})
         cur = self._build_current_turn(new_constraints)
@@ -230,8 +230,8 @@ class ConversationService:
         snapshot["constraints"] = merged_acc
         snapshot["current_turn"] = cur
         snapshot["_updated_at"] = _now_ts()
-        self._snapshot_cache[conversation_id] = snapshot
-        await self._persist_snapshot(conversation_id, snapshot)
+        self._snapshot_cache[user_id, conversation_id] = snapshot
+        await self._persist_snapshot(conversation_id, snapshot, user_id=user_id)
 
         # 返回合并后的 Constraints
         c = Constraints()
@@ -244,28 +244,28 @@ class ConversationService:
         c.exclude_tags = merged_acc.get("exclude_tags", [])
         return c
 
-    async def set_last_products(self, conversation_id: str, product_ids: list[str]):
+    async def set_last_products(self, conversation_id: str, product_ids: list[str], *, user_id: str):
         """记录本轮推荐的商品 ID 列表 (供 FollowUpEngine 做序数引用)。"""
-        snapshot = await self.get_context_snapshot(conversation_id)
+        snapshot = await self.get_context_snapshot(conversation_id, user_id=user_id)
         snapshot["last_products"] = product_ids[:10]
         snapshot["_updated_at"] = _now_ts()
-        self._snapshot_cache[conversation_id] = snapshot
-        await self._persist_snapshot(conversation_id, snapshot)
+        self._snapshot_cache[user_id, conversation_id] = snapshot
+        await self._persist_snapshot(conversation_id, snapshot, user_id=user_id)
 
-    async def set_last_context(self, conversation_id: str, query: str = "", intent: str = ""):
+    async def set_last_context(self, conversation_id: str, query: str = "", intent: str = "", *, user_id: str):
         """记录本轮查询上下文 (供 Router LLM 下一轮注入 prompt)。"""
-        snapshot = await self.get_context_snapshot(conversation_id)
+        snapshot = await self.get_context_snapshot(conversation_id, user_id=user_id)
         if query:
             snapshot["last_query"] = query
         if intent:
             snapshot["last_intent"] = intent
         snapshot["_updated_at"] = _now_ts()
-        self._snapshot_cache[conversation_id] = snapshot
-        await self._persist_snapshot(conversation_id, snapshot)
+        self._snapshot_cache[user_id, conversation_id] = snapshot
+        await self._persist_snapshot(conversation_id, snapshot, user_id=user_id)
 
-    async def set_focus_product(self, conversation_id: str, product):
+    async def set_focus_product(self, conversation_id: str, product, *, user_id: str):
         """锁定聚焦商品 (问欧米功能)。"""
-        snapshot = await self.get_context_snapshot(conversation_id)
+        snapshot = await self.get_context_snapshot(conversation_id, user_id=user_id)
         snapshot["focus_product"] = {
             "product_id": product.product_id,
             "title": product.title,
@@ -275,30 +275,30 @@ class ConversationService:
             "price": product.base_price,
             "locked_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._snapshot_cache[conversation_id] = snapshot
-        await self._persist_snapshot(conversation_id, snapshot)
+        self._snapshot_cache[user_id, conversation_id] = snapshot
+        await self._persist_snapshot(conversation_id, snapshot, user_id=user_id)
         logger.info(f"Focus product set: {product.product_id} {product.title[:30]}")
 
     # ---- 兼容旧接口 ----
 
-    async def aupdate_context_snapshot(self, conversation_id: str, snapshot_update: dict) -> None:
+    async def aupdate_context_snapshot(self, conversation_id: str, snapshot_update: dict, *, user_id: str) -> None:
         """合并更新 context_snapshot (兼容旧调用方)。"""
-        snapshot = await self.get_context_snapshot(conversation_id)
+        snapshot = await self.get_context_snapshot(conversation_id, user_id=user_id)
         snapshot.update(snapshot_update)
-        self._snapshot_cache[conversation_id] = snapshot
-        await self._persist_snapshot(conversation_id, snapshot)
+        self._snapshot_cache[user_id, conversation_id] = snapshot
+        await self._persist_snapshot(conversation_id, snapshot, user_id=user_id)
 
-    async def apersist_answer_context(self, *, conversation_id: str, state, answer: str) -> None:
+    async def apersist_answer_context(self, *, conversation_id: str, user_id: str, state, answer: str) -> None:
         """提交一份 versioned checkpoint，并同步维护旧 snapshot 的只读兼容投影。"""
         if not conversation_id:
             return
         lock = self._context_locks.setdefault(conversation_id, asyncio.Lock())
         async with lock:
             try:
-                conv = await self._repo.aget(conversation_id)
+                conv = await self._repo.aget(conversation_id, user_id=user_id)
                 if not conv:
                     return
-                messages = await self._repo.alist_messages(conversation_id, limit=10)
+                messages = await self._repo.alist_messages(conversation_id, user_id=user_id, limit=10)
                 last_message_id = messages[-1].message_id if messages else None
                 products = []
                 by_id = {p.get("product_id"): p for p in (state.retrieved_products or []) if p.get("product_id")}
@@ -336,6 +336,7 @@ class ConversationService:
                 summary = self._build_shopping_summary(shopping_state, answer)
                 checkpoint = await self._repo.acommit_checkpoint(
                     conversation_id,
+                    user_id=user_id,
                     expected_revision=int(getattr(conv, "context_revision", 0) or 0),
                     summary=summary,
                     shopping_state=shopping_state,
@@ -355,8 +356,8 @@ class ConversationService:
                     "current_turn": constraints,
                     "focus_product": focus,
                 }
-                self._snapshot_cache[conversation_id] = compat
-                await self._persist_snapshot(conversation_id, compat)
+                self._snapshot_cache[user_id, conversation_id] = compat
+                await self._persist_snapshot(conversation_id, compat, user_id=user_id)
             except Exception as exc:  # migration may not yet be applied during a rolling deploy
                 logger.debug("context checkpoint persist skipped: %s", exc)
 
@@ -382,20 +383,20 @@ class ConversationService:
             parts.append("待确认：" + shopping_state["pending_question"])
         return "\n".join(parts)[:1600]
 
-    def update_context_snapshot(self, conversation_id: str, snapshot_update: dict) -> None:
-        conv = self._repo.get(conversation_id)
+    def update_context_snapshot(self, conversation_id: str, snapshot_update: dict, *, user_id: str) -> None:
+        conv = self._repo.get(conversation_id, user_id=user_id)
         if not conv:
             return
         existing = dict(conv.context_snapshot or {})
         existing.update(snapshot_update)
-        self._repo.aupdate_sync(conversation_id, context_snapshot=existing)
+        self._repo.aupdate_sync(conversation_id, user_id=user_id, context_snapshot=existing)
 
     # ---- 兼容旧 PreferenceMemory API (供 sync 调用方过渡) ----
 
-    def get_context(self, conversation_id: str, limit: int = 6) -> dict:
+    def get_context(self, conversation_id: str, limit: int = 6, *, user_id: str) -> dict:
         """获取会话上下文 (兼容旧 FollowUpEngine 调用)。"""
-        conv = self._repo.get(conversation_id)
-        messages = self._repo.list_messages(conversation_id, limit=limit)
+        conv = self._repo.get(conversation_id, user_id=user_id)
+        messages = self._repo.list_messages(conversation_id, user_id=user_id, limit=limit)
         snapshot = dict(conv.context_snapshot) if conv and conv.context_snapshot else {}
         return {
             "conversation_id": conversation_id,
@@ -411,10 +412,10 @@ class ConversationService:
             ],
         }
 
-    async def aget_context(self, conversation_id: str, limit: int = 6) -> dict:
+    async def aget_context(self, conversation_id: str, limit: int = 6, *, user_id: str) -> dict:
         """Async: 获取会话上下文 (兼容旧 agent_stream 调用)。"""
-        conv = await self._repo.aget(conversation_id)
-        messages = await self._repo.alist_messages(conversation_id, limit=limit)
+        conv = await self._repo.aget(conversation_id, user_id=user_id)
+        messages = await self._repo.alist_messages(conversation_id, user_id=user_id, limit=limit)
         snapshot = dict(conv.context_snapshot) if conv and conv.context_snapshot else {}
         return {
             "conversation_id": conversation_id,
@@ -449,8 +450,8 @@ class ConversationService:
             for c in convs
         ]
 
-    def get_messages(self, conversation_id: str, limit: int = 50) -> list[dict]:
-        messages = self._repo.list_messages(conversation_id, limit=limit)
+    def get_messages(self, conversation_id: str, limit: int = 50, *, user_id: str) -> list[dict]:
+        messages = self._repo.list_messages(conversation_id, user_id=user_id, limit=limit)
         return [
             {
                 "message_id": m.message_id,
@@ -468,12 +469,12 @@ class ConversationService:
     # Internal
     # ================================================================
 
-    async def _persist_snapshot(self, conversation_id: str, snapshot: dict):
+    async def _persist_snapshot(self, conversation_id: str, snapshot: dict, *, user_id: str):
         """将缓存中的 snapshot 持久化到 PG (best-effort)。"""
         try:
             # 清理内部字段, 只持久化业务数据
             clean = {k: v for k, v in snapshot.items() if not k.startswith("_")}
-            await self._repo.aupdate(conversation_id, context_snapshot=clean)
+            await self._repo.aupdate(conversation_id, user_id=user_id, context_snapshot=clean)
         except Exception as e:
             logger.debug(f"Snapshot persist skipped: {e}")
 

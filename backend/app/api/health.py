@@ -1,4 +1,10 @@
-from fastapi import APIRouter
+import asyncio
+import logging
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
+from app.core.identity import require_admin
 
 from app.core.config import (
     SERVICE_NAME,
@@ -10,6 +16,7 @@ from app.core.config import (
 from app.core.redis_client import health_check as redis_health
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def _postgres_status() -> str:
@@ -40,6 +47,47 @@ def _qdrant_status() -> str:
         return "unavailable"
 
 
+@router.get("/api/health/live")
+async def liveness():
+    return {"status": "ok"}
+
+
+@router.get("/api/health/ready")
+async def readiness():
+    from app.core.database import init_db
+    from app.core.redis_client import get_redis
+
+    async def probe(check):
+        try:
+            return "connected" if await asyncio.wait_for(check(), timeout=3) else "unavailable"
+        except Exception as exc:
+            logger.warning("readiness probe failed: %s", exc)
+            return "unavailable"
+
+    async def postgres():
+        await init_db()
+        return True
+
+    async def qdrant():
+        return await asyncio.to_thread(_qdrant_status) == "connected"
+
+    async def redis():
+        client = await get_redis()
+        return bool(client and await client.ping())
+
+    async def status(enabled, check):
+        return await probe(check) if enabled else "disabled"
+
+    pg, qd, rd = await asyncio.gather(
+        status(USE_POSTGRES, postgres), status(USE_QDRANT, qdrant), status(USE_REDIS, redis),
+    )
+    ready = "unavailable" not in (pg, qd, rd)
+    return JSONResponse(
+        {"status": "ready" if ready else "not_ready", "postgres": pg, "qdrant": qd, "redis": rd},
+        status_code=200 if ready else 503,
+    )
+
+
 @router.get("/api/health")
 async def health():
     return {
@@ -52,7 +100,7 @@ async def health():
     }
 
 
-@router.get("/api/cache/stats")
+@router.get("/api/cache/stats", dependencies=[Depends(require_admin)])
 async def cache_stats():
     from app.core.cache import get_stats
     return {"redis": redis_health(), "stats": get_stats()}

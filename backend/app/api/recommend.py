@@ -299,7 +299,7 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
             engine = get_followup_engine()
             fu = engine.detect(
                 conversation_id=conversation_id, session_id=session_id,
-                current_query=req.user_query,
+                current_query=req.user_query, user_id=user_id,
             )
             if fu.get("is_follow_up") and fu.get("context_prompt"):
                 enriched_query = f"{req.user_query}\n\n{fu['context_prompt']}"
@@ -359,6 +359,18 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
     )
     result.session_id = session_id
 
+    # P4: 对话提取检查 — 用户消息含长时信号则异步提取偏好
+    try:
+        if user_id:
+            from app.services.user_profile_service import get_user_profile_service
+            profile_svc = get_user_profile_service()
+            if profile_svc.has_long_term_signal(req.user_query):
+                profile = await profile_svc.parse_and_merge(user_id, req.user_query)
+                if profile:
+                    result.answer = result.answer.rstrip() + "\n\n我记住了，已更新你的偏好设置。"
+    except Exception as e:
+        _log.debug(f"Conversation memory extraction skipped: {e}")
+
     # P0: 写入 assistant message
     product_ids = [p.get("product_id", "") for p in result.retrieved_products[:10]]
     if conv_svc:
@@ -400,21 +412,9 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
             snapshot_update["current_turn"] = cur_turn
     if conv_svc:
         try:
-            await conv_svc.aupdate_context_snapshot(conversation_id, snapshot_update)
+            await conv_svc.aupdate_context_snapshot(conversation_id, snapshot_update, user_id=user_id)
         except Exception as e:
             _log.debug(f"Context snapshot update skipped: {e}")
-
-    # P4: 对话提取检查 — 用户消息含长时信号则异步提取偏好
-    try:
-        if user_id:
-            from app.services.user_profile_service import get_user_profile_service
-            profile_svc = get_user_profile_service()
-            if profile_svc.has_long_term_signal(req.user_query):
-                profile = await profile_svc.parse_and_merge(user_id, req.user_query)
-                if profile:
-                    result.answer = result.answer.rstrip() + "\n\n我记住了，已更新你的偏好设置。"
-    except Exception as e:
-        _log.debug(f"Conversation memory extraction skipped: {e}")
 
     # P4: 异步上下文压缩 — 不阻塞响应，后台更新 conversation_summary
     if conversation_id and user_id:
@@ -422,12 +422,12 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
             import asyncio
             prev_summary = ""
             try:
-                snap = conv_svc.get_context_snapshot_sync(conversation_id)
+                snap = conv_svc.get_context_snapshot_sync(conversation_id, user_id=user_id)
                 prev_summary = (snap or {}).get("conversation_summary", "") or ""
             except Exception:
                 pass
             asyncio.create_task(
-                _compress_conversation(conversation_id, conv_svc, prev_summary,
+                _compress_conversation(conversation_id, user_id, conv_svc, prev_summary,
                                        req.user_query, result.answer)
             )
         except Exception:
@@ -459,7 +459,7 @@ async def recommend_v2(req: RecommendRequest, actor: Actor = Depends(resolve_pub
 
 
 async def _compress_conversation(
-    cid: str, conv_svc, prev_summary: str,
+    cid: str, user_id: str, conv_svc, prev_summary: str,
     last_query: str, last_answer: str, pending_question: str | None = None,
 ):
     """后台异步压缩对话历史并写入 context_snapshot。"""
@@ -476,7 +476,7 @@ async def _compress_conversation(
         )
         await conv_svc.aupdate_context_snapshot(cid, {
             "conversation_summary": result.get("summary", ""),
-        })
+        }, user_id=user_id)
     except Exception:
         pass
 

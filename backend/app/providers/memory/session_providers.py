@@ -36,7 +36,7 @@ class ShortTermMemoryProvider(MemoryProvider):
         from app.services.conversation_service import get_conversation_service
 
         cid = _conversation_id(request)
-        snapshot = await get_conversation_service().get_context_snapshot(cid)
+        snapshot = await get_conversation_service().get_context_snapshot(cid, user_id=request.user_id)
         items: list[MemoryItem] = []
 
         constraints = snapshot.get("constraints", {}) or {}
@@ -82,7 +82,7 @@ class ConversationHistoryProvider(MemoryProvider):
         from app.services.conversation_service import get_conversation_service
 
         cid = _conversation_id(request)
-        ctx = await get_conversation_service().aget_context(cid, limit=self._limit)
+        ctx = await get_conversation_service().aget_context(cid, limit=self._limit, user_id=request.user_id)
         messages = ctx.get("recent_messages", []) or []
         items: list[MemoryItem] = []
         total = len(messages)

@@ -1,9 +1,11 @@
 """Evaluation Dashboard — 交互式 HTML 评测面板 (Chart.js)"""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
-router = APIRouter()
+from app.core.identity import require_admin
+
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">

@@ -10,11 +10,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 源码
-COPY backend/ ./backend/
+COPY backend/app/ ./backend/app/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
 COPY scripts/ ./scripts/
-COPY data/ ./data/
+# 只复制镜像需要的静态数据文件；uploads/traces/eval_runs/checkpoints 由 .dockerignore 排除
+COPY data/bm25_stats.json data/product_alias_overrides.json data/subcategory_image_manifest.json ./data/
 COPY ecommerce_agent_dataset/ ./ecommerce_agent_dataset/
 
 # 入口

@@ -19,7 +19,7 @@ router = APIRouter()
 def _owned_conversation_id(actor: Actor, conversation_id: str, session_id: str) -> str | None:
     repo = get_conversation_repo()
     if conversation_id:
-        conv = repo.get(conversation_id)
+        conv = repo.get(conversation_id, user_id=actor.user_id)
         return conversation_id if conv and conv.user_id == actor.user_id else None
     if session_id:
         conv = repo.get_latest_by_session(actor.user_id, session_id)
@@ -37,7 +37,7 @@ async def get_preferences(session_id: str = Query(default=""),
     if cid:
         try:
             svc = get_conversation_service()
-            snapshot = svc.get_context_snapshot_sync(cid)
+            snapshot = svc.get_context_snapshot_sync(cid, user_id=actor.user_id)
             if snapshot:
                 prefs = dict(snapshot.get("constraints", {}))
         except Exception as e:
@@ -63,10 +63,10 @@ async def update_preferences(session_id: str = Query(default=""),
 
     try:
         svc = get_conversation_service()
-        snapshot = svc.get_context_snapshot_sync(cid)
+        snapshot = svc.get_context_snapshot_sync(cid, user_id=actor.user_id)
         constraints = dict(snapshot.get("constraints", {}))
         constraints.update(data)
-        svc.update_context_snapshot(cid, {"constraints": constraints})
+        svc.update_context_snapshot(cid, {"constraints": constraints}, user_id=actor.user_id)
         return {"session_id": cid, "preferences": constraints}
     except Exception as e:
         logger.debug(f"Preferences update skipped: {e}")
@@ -83,7 +83,7 @@ async def reset_preferences(session_id: str = Query(default=""),
         raise HTTPException(status_code=404, detail="Conversation not found")
     try:
         svc = get_conversation_service()
-        svc.update_context_snapshot(cid, {"constraints": {}, "current_turn": {}})
+        svc.update_context_snapshot(cid, {"constraints": {}, "current_turn": {}}, user_id=actor.user_id)
     except Exception as e:
         logger.debug(f"Preferences reset skipped: {e}")
     return {"ok": True, "session_id": cid}

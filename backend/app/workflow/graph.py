@@ -112,11 +112,12 @@ async def _node_router(state: WorkflowState) -> WorkflowState:
             # 把一件正常商品错误标为“未满足本次预算或品类条件”。用户若明确
             # 提出预算、对比或替代，Router 已会把它写进本轮 constraints。
             if state.retrieval_scope != "exact_product":
-                state.constraints = await conv_svc.merge_constraints(state.conversation_id, state.constraints)
+                state.constraints = await conv_svc.merge_constraints(state.conversation_id, state.constraints, user_id=state.user_id)
             await conv_svc.set_last_context(
                 state.conversation_id,
                 query=state.user_query,
                 intent=state.intent,
+                user_id=state.user_id,
             )
         except Exception as e:
             _log.debug(f"Constraint merge skipped: {e}")
@@ -952,7 +953,7 @@ async def _node_decision(state: WorkflowState) -> WorkflowState:
                     )
             if structured:
                 conv_svc = get_conversation_service()
-                await conv_svc.set_last_products(state.conversation_id, structured)
+                await conv_svc.set_last_products(state.conversation_id, structured, user_id=state.user_id)
         except Exception:
             pass
     # RAG trace: 记录最终结果 + 评估
@@ -1516,6 +1517,10 @@ async def run_workflow(
     if isinstance(state, dict):
         state = WorkflowState(**state)
 
+    if not no_response:
+        from app.verification.response_delivery import finalize_response
+
+        finalize_response(state, state.answer or "", _guard)
     return state
 
 

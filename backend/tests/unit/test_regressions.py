@@ -35,8 +35,9 @@ def test_owned_conversation_id_enforces_ownership(monkeypatch):
                 "cid_other": FakeConversation("cid_other", "user_b"),
             }
 
-        def get(self, conversation_id):
-            return self.conversations.get(conversation_id)
+        def get(self, conversation_id, *, user_id):
+            row = self.conversations.get(conversation_id)
+            return row if row and row.user_id == user_id else None
 
         def get_latest_by_session(self, user_id, session_id):
             if session_id == "sess_a" and user_id == "user_a":

@@ -5,6 +5,7 @@
 !.env.example
 !.env.docker
 !**/.env.example
+/.alipay-sandbox.json
 
 # ===== Python build, test and virtual environments =====
 __pycache__/

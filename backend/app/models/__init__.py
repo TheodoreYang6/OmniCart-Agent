@@ -16,6 +16,7 @@ from app.models.user_preference_entry import UserPreferenceEntry
 from app.models.order import OrderModel
 from app.models.product_identity import ProductIdentityModel, ProductAliasModel
 from app.models.product_fact import ProductFactModel
+from app.models.report_order import ReportOrderModel
 
 __all__ = [
     "Base",
@@ -24,4 +25,5 @@ __all__ = [
     "UserPreferenceEntry", "OrderModel",
     "ProductIdentityModel", "ProductAliasModel",
     "ProductFactModel",
+    "ReportOrderModel",
 ]

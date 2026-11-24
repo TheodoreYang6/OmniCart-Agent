@@ -53,7 +53,7 @@ async def agent_action(req: AgentActionRequest, actor: Actor = Depends(resolve_a
                     "last_action": "add_to_cart",
                     "last_added_product_id": req.product_id,
                     "last_added_product_title": product.title,
-                })
+                }, user_id=req.user_id)
             except Exception as e:
                 logger.debug(f"Context snapshot skipped: {e}")
 

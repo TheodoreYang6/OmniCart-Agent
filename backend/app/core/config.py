@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 from pydantic import Field, computed_field
@@ -54,6 +56,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173,http://localhost:5173",
         validation_alias="OMNICART_CORS_ORIGINS",
     )
+    admin_user_ids: str = Field("", validation_alias="OMNICART_ADMIN_USER_IDS")
     allow_legacy_user_id: bool = Field(False, validation_alias="OMNICART_ALLOW_LEGACY_USER_ID")
 
     @property
@@ -120,6 +123,20 @@ class Settings(BaseSettings):
 
     # ---- PostgreSQL ----
     database_url: str = Field("", validation_alias="DATABASE_URL")
+
+    # ---- Paid reports and Alipay ----
+    report_payment_mode: Literal["disabled", "demo", "sandbox", "production"] = Field(
+        "disabled", validation_alias="OMNICART_REPORT_PAYMENT_MODE",
+    )
+    report_price_fen: int = Field(199, ge=1, le=100000, validation_alias="OMNICART_REPORT_PRICE_FEN")
+    cart_allow_live_payment: bool = Field(False, validation_alias="OMNICART_CART_ALLOW_LIVE_PAYMENT")
+    report_skillpay_url: str = Field("", validation_alias="OMNICART_REPORT_SKILLPAY_URL")
+    alipay_app_id: str = Field("", validation_alias="ALIPAY_APP_ID")
+    alipay_seller_id: str = Field("", validation_alias="ALIPAY_SELLER_ID")
+    alipay_private_key_path: Path | None = Field(None, validation_alias="ALIPAY_PRIVATE_KEY_PATH")
+    alipay_public_key_path: Path | None = Field(None, validation_alias="ALIPAY_PUBLIC_KEY_PATH")
+    alipay_notify_url: str = Field("", validation_alias="ALIPAY_NOTIFY_URL")
+    alipay_web_origin: str = Field("", validation_alias="ALIPAY_WEB_ORIGIN")
 
     # ---- Qdrant ----
     qdrant_url: str = Field("", validation_alias="QDRANT_URL")

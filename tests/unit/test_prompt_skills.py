@@ -58,7 +58,7 @@ async def _handle(msg, monkeypatch, snap=None):
     from app.agents.shop_action_agent import ShopActionAgent
 
     class _Conv:
-        async def get_context_snapshot(self, cid):
+        async def get_context_snapshot(self, cid, *, user_id):
             return snap or {}
 
     monkeypatch.setattr("app.services.conversation_service.get_conversation_service", lambda: _Conv())

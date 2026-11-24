@@ -12,6 +12,7 @@ class OrderModel(Base):
     order_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     items: Mapped[list] = mapped_column(JSONB, default=list)
+    shipping_address: Mapped[dict | None] = mapped_column(JSONB)
     total_price: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -21,6 +22,7 @@ class OrderModel(Base):
             "order_id": self.order_id,
             "user_id": self.user_id,
             "items": self.items or [],
+            "shipping_address": self.shipping_address or {},
             "total_price": self.total_price,
             "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else "",

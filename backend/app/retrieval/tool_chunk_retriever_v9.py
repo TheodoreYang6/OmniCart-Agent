@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 import re
 import time
 from pathlib import Path
@@ -18,6 +17,8 @@ from app.providers.recall.rerank_fusion import RerankFusion
 from app.repositories.product_repo import get_product_repo
 from app.services.candidate_llm_filter import CandidateLLMFilter, plan_snapshot
 from app.services.product_facts import extract_product_facts
+
+from app.retrieval import v9_local_index
 
 logger = logging.getLogger(__name__)
 _CACHE_FILE = Path(__file__).resolve().parents[2] / "data" / "product_chunk_embeddings_v9.json"
@@ -199,7 +200,7 @@ class ToolChunkRetrieverV9:
                 logger.debug("v9 collection dimension unavailable: %s", exc)
         if expected is None:
             try:
-                expected = int(json.loads(_CACHE_FILE.read_text(encoding="utf-8")).get("dimension") or 0) or None
+                expected = v9_local_index.dimension(_CACHE_FILE) or None
             except Exception:
                 pass
         return expected is None or expected == actual
@@ -307,28 +308,9 @@ class ToolChunkRetrieverV9:
 
     def _local_hits(self, vector: list[float], filters: dict) -> list[dict]:
         try:
-            cache = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
-        except Exception:
+            return v9_local_index.hits(_CACHE_FILE, vector, filters)
+        except (OSError, KeyError, TypeError, ValueError):
             return []
-        out = []
-        for item in cache.get("chunks", []):
-            payload = item.get("payload", {})
-            if filters.get("category") and payload.get("category") != filters["category"]:
-                continue
-            if filters.get("price_max") is not None and float(payload.get("price", 0)) > float(filters["price_max"]):
-                continue
-            emb = item.get("embedding", [])
-            denom = math.sqrt(sum(x * x for x in vector)) * math.sqrt(sum(x * x for x in emb))
-            if denom:
-                out.append(
-                    {
-                        "product_id": payload.get("product_id"),
-                        "score": sum(a * b for a, b in zip(vector, emb, strict=False)) / denom,
-                        "payload": payload,
-                        "chunk_type": payload.get("chunk_type", ""),
-                    }
-                )
-        return sorted(out, key=lambda item: -item["score"])[:100]
 
     def _aggregate(self, hits: list[dict], filters: dict) -> list[dict]:
         grouped: dict[str, list[dict]] = {}

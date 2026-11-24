@@ -23,7 +23,7 @@ __all__ = [
     "OrderPayTool",
 ]
 
-_STATUS_CN = {"pending": "待支付", "paid": "已支付", "shipped": "已发货", "cancelled": "已取消"}
+_STATUS_CN = {"pending": "待支付", "paid": "已支付", "shipped": "已发货", "cancelled": "已取消", "refunded": "已退款", "partially_refunded": "部分退款"}
 
 _ITEMS_SCHEMA = {"type": "array", "items": {"type": "object"}}
 
@@ -167,7 +167,7 @@ class OrderDetailTool(Tool):
         try:
             from app.repositories.order_repo import get_order_repo
 
-            order = await get_order_repo().aget(order_id)
+            order = await get_order_repo().aget(order_id, user_id=ctx.user_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"order.detail failed: {e}")
             return ToolResult(ok=False, message="暂时无法查看订单详情，请稍后再试～")
@@ -211,18 +211,20 @@ class OrderCancelTool(Tool):
             from app.repositories.order_repo import get_order_repo
 
             repo = get_order_repo()
-            order = await repo.aget(order_id)
+            order = await repo.aget(order_id, user_id=ctx.user_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"order.cancel failed: {e}")
             return ToolResult(ok=False, message="取消失败，请稍后再试～")
         if not order:
             return ToolResult(ok=False, message=f"找不到订单 {order_id}～")
         cur = order.get("status", "")
+        if order.get("payment_environment"):
+            return ToolResult(ok=False, message="这笔订单有支付流水，请通过对应的支付渠道处理。")
         if cur == "cancelled":
             return ToolResult(ok=False, message=f"订单 {order_id} 已取消，无需重复～")
         if cur == "shipped":
             return ToolResult(ok=False, message=f"订单 {order_id} 已发货，无法取消～")
-        ok = await repo.aupdate_status(order_id, "cancelled")
+        ok = await repo.aupdate_status(order_id, "cancelled", user_id=ctx.user_id, expected_status=cur)
         if not ok:
             return ToolResult(ok=False, message="取消失败，请稍后再试～")
         # P2-1: 已支付订单取消附退款语义（模拟）
@@ -256,7 +258,7 @@ class OrderTrackTool(Tool):
             from app.providers.tools.mocks import get_logistics_provider
             from app.repositories.order_repo import get_order_repo
 
-            order = await get_order_repo().aget(order_id)
+            order = await get_order_repo().aget(order_id, user_id=ctx.user_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"order.track failed: {e}")
             return ToolResult(ok=False, message="暂时无法查询物流，请稍后再试～")
@@ -308,7 +310,7 @@ class OrderPayTool(Tool):
             from app.repositories.order_repo import get_order_repo
 
             repo = get_order_repo()
-            order = await repo.aget(order_id)
+            order = await repo.aget(order_id, user_id=ctx.user_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"order.pay failed: {e}")
             return ToolResult(ok=False, message="支付失败，请稍后再试～")
@@ -324,7 +326,8 @@ class OrderPayTool(Tool):
         result = await get_payment_provider().pay(order_id, method=method)
         if result.get("status") != "paid":
             return ToolResult(ok=False, message=f"支付失败：{result.get('error') or '未知错误'}")
-        await repo.aupdate_status(order_id, "paid")
+        if not await repo.aupdate_status(order_id, "paid", user_id=ctx.user_id, expected_status=cur):
+            return ToolResult(ok=False, message="订单状态已变化，请重新查询。")
         return ToolResult(
             message=f"💳 支付成功！订单 {order_id} 已完成支付（{result.get('txn_id')}），感谢购买～",
             data={"order_id": order_id, "txn_id": result.get("txn_id")},

@@ -36,7 +36,7 @@ class ConversationHistoryTool(Tool):
         if not ctx.conversation_id:
             return ToolResult(message="我们才刚开始聊哦～有什么想买的直接说！")
         try:
-            msgs = _conv_svc().get_messages(ctx.conversation_id, limit=max(1, min(20, limit)))
+            msgs = _conv_svc().get_messages(ctx.conversation_id, limit=max(1, min(20, limit)), user_id=ctx.user_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"conversation.history failed: {e}")
             return ToolResult(ok=False, message="暂时想不起来聊了什么，请稍后再试～")
@@ -72,6 +72,7 @@ class ConversationResetTool(Tool):
                     "last_products": [],
                     "last_orders": [],
                 },
+                user_id=ctx.user_id,
             )
         except Exception as e:  # noqa: BLE001
             logger.warning(f"conversation.reset failed: {e}")
