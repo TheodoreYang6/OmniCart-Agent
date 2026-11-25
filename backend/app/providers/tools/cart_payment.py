@@ -64,6 +64,10 @@ class CartPaymentQuote(Tool):
         except HTTPException as exc:
             actions = [{"type": "address_form", "label": "填写收货地址"}] if exc.status_code == 422 else []
             return ToolResult(ok=False, message=str(exc.detail), actions=actions)
+        status = fulfillment_status(order)
+        if status in _SETTLED_MESSAGES:
+            return ToolResult(message=_SETTLED_MESSAGES[status], actions=[_view_action(order, "查看付款结果")])
+
         address = {**order.report["address"]}
         if address.get("phone"):
             address["phone"] = "****" + address["phone"][-4:]

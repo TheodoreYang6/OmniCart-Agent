@@ -98,10 +98,10 @@ async def _apply_trade(session: AsyncSession, order: ReportOrderModel, trade: di
         await fulfill_cart(session, order)
 
 
-async def _refresh(session: AsyncSession, order_id: str, user_id: str, kind: str, *, recover_closed: bool = False):
+async def _refresh(session: AsyncSession, order_id: str, user_id: str, kind: str):
     order = await _order(session, order_id, user_id, kind=kind)
-    if order.status != "pending" and not (recover_closed and order.status == "closed"
-                                         and order.environment in {"sandbox", "production"}):
+    can_recover = order.status == "closed" and order.environment in {"sandbox", "production"}
+    if order.status != "pending" and not can_recover:
         return order
     provider = _provider()
     _check_provider(order, provider)

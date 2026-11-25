@@ -7,7 +7,7 @@ Create Date: 2026-05-22
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
@@ -18,6 +18,14 @@ depends_on: Union[Sequence[str], None] = None
 
 
 def upgrade():
+    if not context.is_offline_mode():
+        existing = set(sa.inspect(op.get_bind()).get_table_names())
+        if existing.intersection({"products", "cart_items", "user_preferences"}):
+            raise RuntimeError(
+                "Existing database has OmniCart tables but no Alembic revision. "
+                "See docs/PAYATHON.md for the data-preserving upgrade via a separate database."
+            )
+
     op.create_table(
         "products",
         sa.Column("product_id", sa.String(64), primary_key=True),

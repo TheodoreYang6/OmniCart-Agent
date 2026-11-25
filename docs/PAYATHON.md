@@ -10,7 +10,7 @@
 
 ## 本地演示
 
-准备有商品数据的 PostgreSQL。已有 OmniCart 数据栈可继续使用。安装本次新增的 Python 依赖，并从项目根目录运行迁移。
+准备有商品数据的 PostgreSQL。已有 OmniCart 数据栈可继续使用。旧版自动建表的数据库请先按下方流程迁移。安装本次新增的 Python 依赖，并从项目根目录运行迁移。
 
 ```bash
 python -m pip install -r requirements.txt
@@ -22,6 +22,33 @@ alembic upgrade head
 对话发起的演示从“我想看看选购报告”开始。点击欧米回复中的“查看选购报告”进入报价页，此后走同一结算流程。报告页会标记 Agent 发起的订单。
 
 本地演示订单标记为 `demo`，无法触发支付宝付款或履约正式订单。仓库默认关闭报告收款。配置项见 [环境变量样例](../.env.example)。
+
+## 升级没有 Alembic 版本记录的旧数据库
+
+已通过 Alembic 管理的数据库直接运行 `alembic upgrade head`。如果旧版应用通过 ORM 自动建表，且 `alembic_version` 不存在或为空，先备份旧库并暂停写入。保留旧库作为回滚来源，在新建的空数据库上运行迁移后导入应用数据。避免用 `alembic stamp` 跳过建表迁移。
+
+以下命令适用于自动建表生成的 PostgreSQL `public` 表结构。把 `LEGACY_DSN` 和 `TARGET_DSN` 分别设置为旧库和新库的 PostgreSQL 连接串（`postgresql://`）。`TARGET_DSN` 必须指向一个空数据库。用 PostgreSQL 16 或更新版本的客户端，且客户端版本不低于源库服务器版本。
+
+```bash
+(
+  set -e
+  umask 077
+  DATABASE_URL="postgresql+asyncpg://${TARGET_DSN#postgresql://}" alembic upgrade head
+  pg_dump --dbname="$LEGACY_DSN" --data-only --strict-names --no-owner --no-privileges \
+    --table=public.users --table=public.addresses --table=public.products --table=public.cart_items \
+    --table=public.orders --table=public.conversations --table=public.conversation_messages \
+    --table=public.conversation_context_checkpoints --table=public.user_preference_entries \
+    --table=public.product_identities --table=public.product_aliases --table=public.product_facts \
+    --file=omnicart-legacy-data.sql
+  psql --dbname="$TARGET_DSN" -X --single-transaction --set ON_ERROR_STOP=1 \
+    --command='ALTER TABLE public.cart_items ALTER COLUMN sku_label DROP NOT NULL' \
+    --file=omnicart-legacy-data.sql \
+    --command="UPDATE public.cart_items SET sku_label = '' WHERE sku_label IS NULL" \
+    --command='ALTER TABLE public.cart_items ALTER COLUMN sku_label SET NOT NULL'
+)
+```
+
+检查导入命令的退出状态，核对表行数，并验证登录、地址、购物车、历史订单和对话后，再将应用切到新库。数据转储包含账户和收货信息，应按数据库备份保管。如果旧库有手工改过的表结构，先在数据库副本上验证导入。初次迁移和导入时若报错，应用继续使用旧库。
 
 ## 购物车与对话支付
 

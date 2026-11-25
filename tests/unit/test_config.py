@@ -46,5 +46,5 @@ def test_settings_derived_flags_defaults():
     assert fresh.use_postgres is False
     assert fresh.use_qdrant is False
     # 默认值
-    assert fresh.SERVICE_NAME == "omnicart-agent"
-    assert fresh.MOCK_MODE is True
+    assert fresh.service_name == "omnicart-agent"
+    assert fresh.mock_mode is True

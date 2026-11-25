@@ -7,6 +7,8 @@ on:
       - "tests/**"
       - "requirements.txt"
       - "pyproject.toml"
+      - "alembic/**"
+      - "alembic.ini"
       - ".github/workflows/backend-integration.yml"
   pull_request:
     paths:
@@ -14,6 +16,8 @@ on:
       - "tests/**"
       - "requirements.txt"
       - "pyproject.toml"
+      - "alembic/**"
+      - "alembic.ini"
       - ".github/workflows/backend-integration.yml"
 
 jobs:
@@ -21,6 +25,20 @@ jobs:
     name: Integration (MOCK gateway + 三级降级)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: omnicart
+          POSTGRES_PASSWORD: omnicart
+          POSTGRES_DB: omnicart_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U omnicart -d omnicart_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     # 集成层验证 /api/recommend(/stream) 端到端（文字/图片/追问）。
     # 不配置 DB/Qdrant/Redis → 走 PG/Qdrant/Redis 三级降级路径（JSON 仓库 / 本地余弦 / 无缓存）。
     env:
@@ -64,6 +82,14 @@ jobs:
       # 端到端集成：recommend / SSE / upload / workflow（MOCK 网关，无外部服务）
       - name: Run integration tests
         run: pytest tests/integration -v -m "not smoke"
+
+      - name: Test payment settlement against PostgreSQL
+        env:
+          DATABASE_URL: postgresql+asyncpg://omnicart:omnicart@127.0.0.1:5432/omnicart_test
+          OMNICART_TEST_DATABASE_URL: postgresql+asyncpg://omnicart:omnicart@127.0.0.1:5432/omnicart_test
+        run: |
+          alembic upgrade head
+          pytest tests/integration/test_public_deployment_boundaries.py -v
 
       - name: Show server log on failure
         if: failure()

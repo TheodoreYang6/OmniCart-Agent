@@ -14,6 +14,7 @@ pydantic-settings>=2.0.0
 # HTTP 客户端
 httpx>=0.28.0
 cryptography>=44.0.0
+tzdata>=2024.1  # ZoneInfo fallback for Windows and minimal images
 
 # 环境变量
 python-dotenv>=1.0.0

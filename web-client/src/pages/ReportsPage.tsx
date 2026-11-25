@@ -96,13 +96,14 @@ export function ReportsPage() {
     },
   })
   const { mutate: runPayment } = payment
+  const canRefresh = Boolean(order && service.data?.enabled && order.mode !== 'demo'
+    && order.mode === service.data.mode && (order.status === 'pending' || order.status === 'closed'))
   useEffect(() => {
-    if (returnedFromAlipay && order?.status === 'pending' && order.mode !== 'demo'
-        && service.data?.enabled && order.mode === service.data.mode && refreshedOnReturn.current !== orderId) {
+    if (returnedFromAlipay && canRefresh && refreshedOnReturn.current !== orderId) {
       refreshedOnReturn.current = orderId
       runPayment({ operation: 'refresh', id: orderId })
     }
-  }, [order, orderId, returnedFromAlipay, runPayment, service.data])
+  }, [canRefresh, orderId, returnedFromAlipay, runPayment])
   const formError = quote.error ?? categories.error
   const paymentError = (payment.variables?.id === orderId ? payment.error : null) ?? selected.error
   const expired = order?.expired === true
@@ -182,7 +183,7 @@ export function ReportsPage() {
                         模拟付款成功
                       </button>
                     )}
-                    {order.status === 'pending' && order.mode !== 'demo' && order.mode === currentMode && (
+                    {canRefresh && (
                       <button className="btn-secondary" disabled={payment.isPending} onClick={() => payment.mutate({ operation: 'refresh', id: orderId })}>
                         查询支付宝付款结果
                       </button>

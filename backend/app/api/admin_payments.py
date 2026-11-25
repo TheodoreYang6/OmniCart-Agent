@@ -28,7 +28,7 @@ async def reconcile(req: ReconcileRequest, session: AsyncSession = Depends(_sess
     for order_id in dict.fromkeys(req.order_ids):
         try:
             order = await _order(session, order_id, kind=None)
-            order = await _refresh(session, order_id, order.user_id, order.kind, recover_closed=True)
+            order = await _refresh(session, order_id, order.user_id, order.kind)
             results.append({"order_id": order_id, "status": fulfillment_status(order)})
         except HTTPException as exc:
             results.append({"order_id": order_id, "error": exc.detail})

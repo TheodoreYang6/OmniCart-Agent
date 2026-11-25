@@ -279,8 +279,58 @@ async def test_cart_quote_blocks_stale_confirm_and_demo_lifecycle(monkeypatch):
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_quote_replaces_expired_pending_when_gateway_unreachable(monkeypatch):
-    """沙箱网关不可达时，过期 pending 不应锁死用户：本地关单放行新报价。"""
+@pytest.mark.parametrize("kind", ["cart", "report"])
+async def test_buyer_can_recover_provider_payment_for_closed_order(monkeypatch, kind):
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.models.report_order import ReportOrderModel
+    from app.services import payment_settlement
+
+    order_id, trade_no = token_hex(16), token_hex(16)
+    trade = {
+        "code": "10000", "out_trade_no": order_id, "total_amount": "1.99",
+        "trade_status": "TRADE_SUCCESS", "trade_no": trade_no,
+    }
+    provider = SimpleNamespace(app_id="qa-app", seller_id="qa-seller", query=AsyncMock(return_value=trade))
+    monkeypatch.setattr(settings, "report_payment_mode", "sandbox")
+    monkeypatch.setattr(payment_settlement, "_provider", lambda: provider)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://local") as buyer, httpx.AsyncClient(
+        transport=transport, base_url="http://local",
+    ) as other:
+        user_id = await _buyer(buyer)
+        await _buyer(other)
+        now = datetime.now(timezone.utc)
+        payload = (
+            {"items": [], "address": {}, "item_versions": {}}
+            if kind == "cart"
+            else {"category": "headphones", "budget_fen": 10000, "candidate_count": 2}
+        )
+        async with get_session_sync()() as session:
+            session.add(ReportOrderModel(
+                order_id=order_id, user_id=user_id, kind=kind, channel="web", environment="sandbox",
+                app_id=provider.app_id, seller_id=provider.seller_id, status="closed", amount_fen=199,
+                report=payload, created_at=now - timedelta(hours=1), expires_at=now - timedelta(minutes=30),
+            ))
+            await session.commit()
+
+        endpoint = f"/api/{kind}-payments/orders/{order_id}/refresh"
+        assert (await other.post(endpoint)).status_code == 404
+        provider.query.assert_not_awaited()
+        response = await buyer.post(endpoint)
+        assert response.status_code == 200
+        assert response.json()["status"] == "paid"
+        assert response.json()["trade_no"] == trade_no
+        provider.query.assert_awaited_once_with(order_id)
+
+
+@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.parametrize("gateway_status", ["TRADE_SUCCESS", "TRADE_CLOSED"])
+async def test_expired_cart_stays_pending_until_alipay_confirms(monkeypatch, gateway_status):
+    """An outage cannot free the payment slot while the original charge is uncertain."""
     from datetime import datetime, timedelta, timezone
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
@@ -291,8 +341,12 @@ async def test_quote_replaces_expired_pending_when_gateway_unreachable(monkeypat
     from app.services import payment_settlement
 
     product_id = "qa-pay-" + token_hex(6)
-    provider = SimpleNamespace(app_id="qa-app", seller_id="qa-seller",
-                               query=AsyncMock(side_effect=httpx.ConnectError("gateway down")))
+    provider = SimpleNamespace(
+        app_id="qa-app",
+        seller_id="qa-seller",
+        query=AsyncMock(side_effect=httpx.ConnectError("gateway down")),
+        checkout_url=lambda order: "https://example.invalid/checkout",
+    )
     monkeypatch.setattr(settings, "report_payment_mode", "sandbox")
     monkeypatch.setattr(checkout_payment_module, "_provider", lambda: provider)
     monkeypatch.setattr(payment_settlement, "_provider", lambda: provider)
@@ -312,21 +366,39 @@ async def test_quote_replaces_expired_pending_when_gateway_unreachable(monkeypat
         })).status_code == 200
         assert (await client.post("/api/cart/items", json={"product_id": product_id, "quantity": 1})).status_code == 200
 
-        now = datetime.now(timezone.utc)
-        stale_id = token_hex(16)
-        async with get_session_sync()() as session:
-            session.add(ReportOrderModel(
-                order_id=stale_id, user_id=user, kind="cart", amount_fen=19990, channel="web",
-                environment="sandbox", app_id="qa-app", seller_id="qa-seller", status="pending",
-                report={"items": [], "address": {}, "item_versions": {}},
-                created_at=now - timedelta(minutes=40), expires_at=now - timedelta(minutes=10),
-            ))
-            await session.commit()
-
-        quote = await client.post("/api/cart-payments/orders", json={"item_ids": []})
-        assert quote.status_code == 201
-        assert quote.json()["status"] == "quoted"
+        quote_path = "/api/cart-payments/orders"
+        sale = await client.post(quote_path, json={"item_ids": []})
+        alternative = await client.post(quote_path, json={"item_ids": []})
+        stale_id = sale.json()["order_id"]
+        stale_url = f"{quote_path}/{stale_id}"
+        alternative_url = f"{quote_path}/{alternative.json()['order_id']}"
+        assert (await client.post(stale_url + "/confirm", json={"confirmed": True})).status_code == 200
         async with get_session_sync()() as session:
             stale = await session.get(ReportOrderModel, stale_id)
-            assert stale.status == "closed"
-        provider.query.assert_awaited()
+            stale.expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+            await session.commit()
+
+        assert (await client.post(quote_path, json={"item_ids": []})).status_code == 502
+        assert (await client.get(stale_url)).json()["status"] == "pending"
+        assert (await client.get("/api/cart-payments/active")).json()["order_id"] == stale_id
+        assert (await client.post(alternative_url + "/confirm", json={"confirmed": True})).status_code == 409
+
+        provider.query.side_effect = None
+        provider.query.return_value = {
+            "code": "10000", "out_trade_no": stale_id, "total_amount": "199.90",
+            "trade_status": gateway_status, "trade_no": token_hex(16),
+        }
+        retry = await client.post(quote_path, json={"item_ids": []})
+        assert retry.status_code == 201
+        if gateway_status == "TRADE_SUCCESS":
+            assert retry.json()["order_id"] == stale_id
+            assert retry.json()["status"] == "paid"
+            assert (await client.post(alternative_url + "/confirm", json={"confirmed": True})).status_code == 409
+            orders = (await client.get("/api/orders")).json()["orders"]
+            assert [(order["order_id"], order["status"]) for order in orders] == [(stale_id, "paid")]
+        else:
+            assert (await client.get(stale_url)).json()["status"] == "closed"
+            assert retry.json()["order_id"] != stale_id
+            assert retry.json()["status"] == "quoted"
+            replacement_url = f"{quote_path}/{retry.json()['order_id']}"
+            assert (await client.post(replacement_url + "/confirm", json={"confirmed": True})).status_code == 200

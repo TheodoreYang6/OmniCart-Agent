@@ -87,13 +87,21 @@ async def init_db():
     expected = set(ScriptDirectory(str(migrations)).get_heads())
     try:
         async with get_session_sync()() as session:
-            current = set((await session.scalars(text("SELECT version_num FROM alembic_version"))).all())
+            version_table = await session.scalar(text("SELECT to_regclass('alembic_version')"))
+            current = set()
+            if version_table is not None:
+                current.update((await session.scalars(text("SELECT version_num FROM alembic_version"))).all())
     except Exception as exc:
         raise RuntimeError(
             "Database is configured but not reachable. "
             "Check DATABASE_URL and ensure PostgreSQL is running. "
             f"Original error: {exc}"
         ) from exc
+    if not current:
+        raise RuntimeError(
+            "Database has no Alembic revision. Run 'alembic upgrade head' for an empty database. "
+            "For an existing unversioned database, see docs/PAYATHON.md."
+        )
     if current != expected:
         missing = expected - current
         extra = current - expected

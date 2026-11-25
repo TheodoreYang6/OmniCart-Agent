@@ -47,21 +47,24 @@ async def quote_cart(session: AsyncSession, user_id: str, item_ids: list[str], c
     provider = cart_provider()
     await lock_buyer(session, user_id)
     pending = await pending_cart_payment(session, user_id, lock=True)
-    if pending and _expired(pending):
-        # 过期报价不能永久占住唯一的 pending 名额。先按网关实况核销；
-        # 网关不可达或商户变更时以本地过期事实关单放行——晚到的成功
-        # 回调仍可经 closed→paid 入账（见 payment_settlement._reconcile）。
-        try:
-            pending = await _refresh(session, pending.order_id, user_id, "cart")
-        except HTTPException:
-            pending = await _order(session, pending.order_id, user_id, lock=True, kind="cart")
-            if pending.status == "pending":
-                pending.status = "closed"
-                await session.flush()
-        if pending.status in {"pending", "paid"}:
+    if pending:
+        if not _expired(pending):
             return pending
-    elif pending:
-        return pending
+
+        # Release database locks before calling Alipay. An inconclusive check
+        # must leave the old order pending and continue blocking new payments.
+        order_id = pending.order_id
+        await session.commit()
+        pending = await _refresh(session, order_id, user_id, "cart")
+        if pending.status != "closed":
+            return pending
+
+        # Another checkout may have started while the gateway was being queried.
+        await session.commit()
+        await lock_buyer(session, user_id)
+        active = await pending_cart_payment(session, user_id, lock=True)
+        if active is not None:
+            return active
     snapshot, amount = await snapshot_cart(session, user_id, item_ids)
     now = datetime.now(timezone.utc)
     order = ReportOrderModel(

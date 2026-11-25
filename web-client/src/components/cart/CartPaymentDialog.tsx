@@ -25,6 +25,7 @@ export function CartPaymentDialog({ orderId, returned, onClose }: {
     refetchInterval: (query) => query.state.data?.status === 'pending' ? 5000 : false,
   })
   const order = orderQuery.data
+  const canRefresh = Boolean(order && order.mode !== 'demo' && (order.status === 'pending' || order.status === 'closed'))
   const operation = useMutation({
     mutationFn: (method: 'confirm' | 'refresh' | 'demoPay') => cartPayments[method](orderId),
     onSuccess: (data) => {
@@ -37,12 +38,14 @@ export function CartPaymentDialog({ orderId, returned, onClose }: {
   })
   const { mutate } = operation
   useEffect(() => {
-    if (returned && order?.status === 'pending' && order.mode !== 'demo' && !verifiedOnReturn.current) {
+    if (returned && canRefresh && !verifiedOnReturn.current) {
       verifiedOnReturn.current = true
       mutate('refresh')
     }
-  }, [mutate, order, returned])
+  }, [mutate, canRefresh, returned])
   const isPaid = order?.status === 'paid'
+  const canRequote = order?.status === 'closed'
+    || (order?.expired && (order.status === 'quoted' || (order.status === 'pending' && order.mode === 'demo')))
   useEffect(() => {
     if (isPaid) {
       void loadCart()
@@ -77,25 +80,20 @@ export function CartPaymentDialog({ orderId, returned, onClose }: {
               {!order.expired && order.status === 'pending' && order.mode === 'demo' && (
                 <button className="btn-primary" disabled={operation.isPending} onClick={() => mutate('demoPay')}>模拟付款成功</button>
               )}
-              {order.status === 'pending' && order.mode !== 'demo' && (
+              {canRefresh && (
                 <button className="btn-secondary" disabled={operation.isPending} onClick={() => mutate('refresh')}>查询支付结果</button>
               )}
               {isPaid && <button className="btn-primary" onClick={() => navigate('/orders')}>查看购物订单</button>}
               {!isPaid && order.status === 'quoted' && !order.expired && (
                 <button className="btn-secondary" onClick={() => navigate('/address')}>修改收货地址</button>
               )}
-              {/* 过期或已关闭时提供重新报价和查询结果出口，避免用户卡在弹窗里 */}
-              {!isPaid && (order.expired || order.status === 'closed') && (
-                <>
-                  {order.status === 'pending' && (
-                    <button className="btn-secondary" disabled={operation.isPending} onClick={() => mutate('refresh')}>
-                      查询支付结果
-                    </button>
-                  )}
-                  <button className="btn-primary" onClick={() => navigate('/cart', { replace: true })}>
-                    返回购物车重新结算
-                  </button>
-                </>
+              {order.expired && order.status === 'pending' && order.mode !== 'demo' && (
+                <p className="text-sm text-ink-muted">支付宝确认旧订单状态后，才能重新结算。</p>
+              )}
+              {canRequote && (
+                <button className="btn-primary" onClick={() => navigate('/cart', { replace: true })}>
+                  返回购物车重新结算
+                </button>
               )}
             </div>
           </>
