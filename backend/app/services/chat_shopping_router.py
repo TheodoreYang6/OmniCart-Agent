@@ -297,9 +297,8 @@ async def run_shopping_turn(
             return ToolResult(message="\n".join([*results, intent.question or "你想让我做哪一步？"]),
                               data={"cart_changed": cart_changed})
         if intent.action == "report.open":
-            text = "选购报告可以在报告页选择品类和预算。"
-            if settings.report_payment_mode == "disabled" or not settings.use_postgres:
-                text = "选购报告暂未开放收款。"
+            text = ("在报告页选择品类和预算，即可免费生成选购报告。"
+                    if settings.use_postgres else "选购报告暂时无法生成。")
             report = _reply("\n".join([*results, text]), "查看选购报告", "reports?source=agent")
             report.data["cart_changed"] = cart_changed
             return report

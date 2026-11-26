@@ -1,6 +1,6 @@
-"""Quote, collect payment and release a shopping report to its buyer."""
+"""Generate free shopping reports and reconcile existing Alipay transactions."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
@@ -17,15 +17,15 @@ from app.core.database import get_session_sync
 from app.core.identity import Actor, require_user, resolve_actor
 from app.models.report_order import ReportOrderModel
 from app.services.payment_settlement import (
-    _apply_trade, _check_provider, _demo_pay, _expired, _order, _provider, _refresh,
+    _apply_trade, _check_provider, _expired, _order, _provider, _refresh,
 )
 from app.services.shopping_report import REPORT_TITLE, build_shopping_report, list_report_categories
 
-router = APIRouter(prefix="/api/report-payments", tags=["paid reports"])
+router = APIRouter(prefix="/api/report-payments", tags=["shopping reports"])
 OrderId = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{32}$")]
 
 
-class QuoteRequest(BaseModel):
+class GenerateRequest(BaseModel):
     category: str = Field(min_length=1, max_length=80)
     budget_fen: int = Field(gt=0, le=100_000_000, strict=True)
     channel: Literal["web", "agent"] = "web"
@@ -38,7 +38,7 @@ class ConfirmRequest(BaseModel):
 async def _session():
     factory = get_session_sync()
     if factory is None:
-        raise HTTPException(503, "支付服务需要 PostgreSQL")
+        raise HTTPException(503, "该功能需要 PostgreSQL")
     async with factory() as session:
         yield session
 
@@ -61,21 +61,16 @@ def _view(order: ReportOrderModel, *, include_report: bool = True) -> dict:
         "status": order.status,
         "created_at": order.created_at,
         "expires_at": order.expires_at,
-        "expired": _expired(order),
+        "expired": order.environment != "free" and _expired(order),
         "paid_at": order.paid_at,
         "trade_no": order.trade_no if order.status == "paid" else None,
-        "report": order.report if include_report and order.status == "paid" else None,
+        "report": order.report if include_report and order.status in {"delivered", "paid"} else None,
     }
 
 
 @router.get("/service")
 async def discover_service(response: Response):
     response.headers["Cache-Control"] = "no-store"
-    try:
-        _provider()
-        enabled = get_session_sync() is not None
-    except HTTPException:
-        enabled = False
     try:
         skillpay_link = urlsplit(settings.report_skillpay_url)
         skillpay_url = settings.report_skillpay_url if (
@@ -90,12 +85,12 @@ async def discover_service(response: Response):
         "service_id": "omnicart.shopping-report",
         "title": REPORT_TITLE,
         "description": "按品类和预算比较商品，查看价格差异、FAQ 和评价样本。",
-        "amount_fen": settings.report_price_fen,
+        "amount_fen": 0,
         "currency": "CNY",
-        "mode": settings.report_payment_mode,
-        "enabled": enabled,
+        "mode": "free",
+        "enabled": get_session_sync() is not None,
         "skillpay_url": skillpay_url,
-        "quote_path": "/api/report-payments/orders",
+        "generate_path": "/api/report-payments/orders",
     }
 
 
@@ -105,17 +100,17 @@ async def categories(session: AsyncSession = Depends(_session)):
 
 
 @router.post("/orders", status_code=201)
-async def quote(req: QuoteRequest, actor: Actor = Depends(_user), session: AsyncSession = Depends(_session)):
-    provider = _provider()
+async def generate(req: GenerateRequest, response: Response, actor: Actor = Depends(_user),
+                   session: AsyncSession = Depends(_session)):
+    response.headers["Cache-Control"] = "private, no-store"
     report = await build_shopping_report(session, req.category.strip(), req.budget_fen)
     if report is None:
         raise HTTPException(422, "该品类在预算内少于两款商品，请调整品类或预算")
     now = datetime.now(timezone.utc)
     order = ReportOrderModel(
-        order_id=uuid4().hex, user_id=actor.user_id, amount_fen=settings.report_price_fen,
-        channel=req.channel, environment=settings.report_payment_mode, status="quoted",
-        app_id=provider.app_id if provider else "", seller_id=provider.seller_id if provider else "",
-        report=report, created_at=now, expires_at=now + timedelta(minutes=30),
+        order_id=uuid4().hex, user_id=actor.user_id, amount_fen=0,
+        channel=req.channel, environment="free", status="delivered", app_id="", seller_id="",
+        report=report, created_at=now, expires_at=now,
     )
     session.add(order)
     await session.commit()
@@ -142,32 +137,20 @@ async def read_order(order_id: OrderId, response: Response, actor: Actor = Depen
 async def confirm_order(order_id: OrderId, _: ConfirmRequest, response: Response, actor: Actor = Depends(_user),
                         session: AsyncSession = Depends(_session)):
     response.headers["Cache-Control"] = "private, no-store"
-    provider = _provider()
-    order = await _order(session, order_id, actor.user_id, lock=True)
-    if order.status == "paid":
+    order = await _order(session, order_id, actor.user_id)
+    if order.status in {"delivered", "paid"}:
         return _view(order)
-    _check_provider(order, provider)
-    if order.status == "closed" or _expired(order):
-        raise HTTPException(409, "报价已过期，请重新获取报价，如已付款请先查询订单")
-    order.status = "pending"
-    result = _view(order)
-    result["checkout_url"] = provider.checkout_url(order) if provider else None
-    await session.commit()
-    return result
+    raise HTTPException(410, "选购报告已免费，请重新生成报告")
 
 
 @router.post("/orders/{order_id}/refresh")
 async def refresh_order(order_id: OrderId, response: Response, actor: Actor = Depends(_user),
                         session: AsyncSession = Depends(_session)):
     response.headers["Cache-Control"] = "private, no-store"
+    order = await _order(session, order_id, actor.user_id)
+    if order.environment == "free":
+        return _view(order)
     return _view(await _refresh(session, order_id, actor.user_id, "report"))
-
-
-@router.post("/orders/{order_id}/demo-pay")
-async def simulate_payment(order_id: OrderId, _: ConfirmRequest, response: Response, request: Request,
-                           actor: Actor = Depends(_user), session: AsyncSession = Depends(_session)):
-    response.headers["Cache-Control"] = "private, no-store"
-    return _view(await _demo_pay(session, request, order_id, actor.user_id, "report"))
 
 
 @router.post("/alipay/notify", response_class=PlainTextResponse)

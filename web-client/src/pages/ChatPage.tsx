@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Brain, History, ImagePlus, Loader2, MessageCircleHeart, Mic, PenLine, Plus, Search, ShieldCheck, Sparkles } from 'lucide-react'
@@ -9,6 +9,7 @@ import { useAuthStore } from '@/store/authStore'
 import { getEffectiveUserId } from '@/store/authStore'
 import { api, request } from '@/api/client'
 import { alipayCheckoutUrl } from '@/api/cartPayments'
+import { CartPaymentDialog } from '@/components/cart/CartPaymentDialog'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { ConversationHistory } from '@/components/chat/ConversationHistory'
 import { ProductSpotlight } from '@/components/product/ProductSpotlight'
@@ -56,6 +57,8 @@ function statusIconFor(text: string) {
 
 export function ChatPage() {
   const navigate = useNavigate()
+  const [search, setSearch] = useSearchParams()
+  const paymentId = search.get('payment')
   const messages = useChatStore((s) => s.messages)
   const streamingText = useChatStore((s) => s.streamingText)
   const isStreaming = useChatStore((s) => s.isStreaming)
@@ -186,6 +189,11 @@ export function ChatPage() {
       const url = alipayCheckoutUrl(action.checkout_url)
       if (url) window.open(url, '_blank', 'noopener,noreferrer')
       else toast.error('支付链接无效，请从购物车重试')
+      return
+    }
+    const paymentRoute = /^cart\?payment=([a-f0-9]{32})$/.exec(action.route ?? '')
+    if (paymentRoute) {
+      setSearch({ payment: paymentRoute[1] })
       return
     }
     if (action.route) {
@@ -381,6 +389,14 @@ export function ChatPage() {
           />
         </div>
       </Modal>
+      {paymentId && (
+        <CartPaymentDialog key={paymentId} orderId={paymentId} returned={search.get('return') === 'alipay'}
+          onClose={() => setSearch((params) => {
+            params.delete('payment')
+            params.delete('return')
+            return params
+          }, { replace: true })} />
+      )}
     </div>
   )
 }

@@ -8,6 +8,7 @@ export interface CartPayment {
   refunded_fen: number
   mode: 'demo' | 'sandbox' | 'production'
   expired: boolean
+  cancel_requested: boolean
   trade_no: string | null
   checkout_url?: string | null
   items: OrderPreviewPayload['items']
@@ -25,6 +26,7 @@ export const cartPayments = {
   get: (id: string) => request<CartPayment>(path(id)),
   confirm: (id: string) => request<CartPayment>(`${path(id)}/confirm`, confirmed),
   refresh: (id: string) => request<CartPayment>(`${path(id)}/refresh`, { method: 'POST' }),
+  cancel: (id: string) => request<CartPayment>(`${path(id)}/cancel`, confirmed),
   demoPay: (id: string) => request<CartPayment>(`${path(id)}/demo-pay`, confirmed),
 }
 

@@ -81,6 +81,18 @@ def test_checkout_signs_the_frozen_amount_and_order(gateway, rsa_pair, order):
     assert fields.pop("sign") == sign(rsa_pair[0], _signing_text(fields))
 
 
+@pytest.mark.parametrize(("channel", "page"), [("web", "/cart"), ("agent", "/chat")])
+def test_cart_checkout_returns_to_the_entry_point(gateway, rsa_pair, order, channel, page):
+    order.kind = "cart"
+    order.channel = channel
+    url = urlsplit(gateway.checkout_url(order))
+    fields = {key: values[0] for key, values in parse_qs(url.query).items()}
+    returned = urlsplit(fields["return_url"])
+    assert returned.path == page
+    assert parse_qs(returned.query) == {"payment": [order.order_id], "return": ["alipay"]}
+    assert fields.pop("sign") == sign(rsa_pair[0], _signing_text(fields))
+
+
 def test_callback_requires_rsa2_and_rejects_tampering(gateway, rsa_pair, order):
     fields = {**paid_trade(order), "app_id": order.app_id}
     fields.update(sign=sign(rsa_pair[1], _signing_text(fields)), sign_type="RSA2")

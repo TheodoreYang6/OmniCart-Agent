@@ -1,4 +1,4 @@
-"""Orders and immutable delivery snapshots for paid shopping reports."""
+"""Payment orders and immutable shopping report snapshots."""
 
 from datetime import datetime
 
@@ -12,10 +12,13 @@ from app.models import Base
 class ReportOrderModel(Base):
     __tablename__ = "report_orders"
     __table_args__ = (
-        CheckConstraint("amount_fen > 0", name="ck_report_order_amount"),
-        CheckConstraint("status IN ('quoted', 'pending', 'paid', 'closed')", name="ck_report_order_status"),
+        CheckConstraint(
+            "(environment = 'free' AND kind = 'report' AND amount_fen = 0 AND status = 'delivered') OR "
+            "(environment <> 'free' AND amount_fen > 0 AND status IN ('quoted', 'pending', 'paid', 'closed'))",
+            name="ck_report_order_delivery",
+        ),
         Index("ix_cart_payment_pending_user", "user_id", unique=True,
-              postgresql_where=text("kind = 'cart' AND status = 'pending'")),
+              postgresql_where=text("kind = 'cart' AND status = 'pending' AND NOT cancel_requested")),
     )
 
     order_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -29,6 +32,7 @@ class ReportOrderModel(Base):
     app_id: Mapped[str] = mapped_column(String(32))
     seller_id: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16))
+    cancel_requested: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     report: Mapped[dict] = mapped_column(JSONB)
     trade_no: Mapped[str | None] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
