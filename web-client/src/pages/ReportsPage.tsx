@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { ArrowUpRight, FileText, ShieldCheck } from 'lucide-react'
+import { ArrowUpRight, FileText } from 'lucide-react'
 import { reportPayments, type ReportOrder } from '@/api/reportPayments'
 import { useAuthStore } from '@/store/authStore'
 
 const money = (fen: number) => `¥${(fen / 100).toFixed(2)}`
-const statusLabels = { quoted: '待确认', pending: '待付款', paid: '已交付', closed: '已关闭' }
-const modeLabels = { demo: '本地演示 · 无真实扣款', sandbox: '支付宝沙箱 · 无真实扣款' }
+const statusLabels = { quoted: '旧报价', pending: '历史支付待核实', paid: '已交付', closed: '已关闭', delivered: '已生成' }
 
 function ReportContent({ order }: { order: ReportOrder }) {
   if (!order.report) return null
@@ -59,7 +58,7 @@ export function ReportsPage() {
     queryKey: ['report-categories'], queryFn: reportPayments.categories, enabled: service.data?.enabled === true, retry: false,
   })
   const history = useQuery({
-    queryKey: ['report-orders', userId], queryFn: reportPayments.orders, enabled: Boolean(userId && service.data), retry: false,
+    queryKey: ['report-orders', userId], queryFn: reportPayments.orders, enabled: Boolean(userId), retry: false,
   })
   const orderKey = ['report-order', userId, orderId]
   const selected = useQuery({
@@ -67,7 +66,6 @@ export function ReportsPage() {
     queryFn: () => reportPayments.order(orderId),
     enabled: Boolean(userId && orderId),
     retry: false,
-    refetchInterval: (query) => query.state.data?.status === 'pending' ? 5000 : false,
   })
   const order = selected.data
   const chooseOrder = (id: string) => {
@@ -83,35 +81,34 @@ export function ReportsPage() {
     queryClient.setQueryData(['report-order', userId, data.order_id], data)
     void queryClient.invalidateQueries({ queryKey: ['report-orders', userId] })
   }
-  const quote = useMutation({
-    mutationFn: () => reportPayments.quote(category, Math.round(Number(budget) * 100), channel),
-    onSuccess: (data) => { saveOrder(data); chooseOrder(data.order_id) },
-  })
-  const payment = useMutation({
-    mutationFn: ({ operation, id }: { operation: 'confirm' | 'demoPay' | 'refresh'; id: string }) => reportPayments[operation](id),
+  const generate = useMutation({
+    mutationFn: () => reportPayments.generate(category, Math.round(Number(budget) * 100), channel),
     onSuccess: (data) => {
       if (useAuthStore.getState().userId !== userId) return
       saveOrder(data)
-      if (data.checkout_url) window.location.assign(data.checkout_url)
+      chooseOrder(data.order_id)
     },
   })
-  const { mutate: runPayment } = payment
-  const canRefresh = Boolean(order && service.data?.enabled && order.mode !== 'demo'
-    && order.mode === service.data.mode && (order.status === 'pending' || order.status === 'closed'))
+  const refresh = useMutation({
+    mutationFn: reportPayments.refresh,
+    onSuccess: (data) => {
+      if (useAuthStore.getState().userId === userId) saveOrder(data)
+    },
+  })
+  const { mutate: refreshOrder } = refresh
+  const canRefresh = order && (order.mode === 'sandbox' || order.mode === 'production')
+    && (order.status === 'pending' || order.status === 'closed')
   useEffect(() => {
     if (returnedFromAlipay && canRefresh && refreshedOnReturn.current !== orderId) {
       refreshedOnReturn.current = orderId
-      runPayment({ operation: 'refresh', id: orderId })
+      refreshOrder(orderId)
     }
-  }, [canRefresh, orderId, returnedFromAlipay, runPayment])
-  const formError = quote.error ?? categories.error
-  const paymentError = (payment.variables?.id === orderId ? payment.error : null) ?? selected.error
-  const expired = order?.expired === true
-  const currentMode = service.data?.mode
-  const canPay = Boolean(service.data?.enabled && order && order.mode === currentMode && !expired)
+  }, [canRefresh, orderId, returnedFromAlipay, refreshOrder])
+  const formError = generate.error ?? categories.error
+  const historyError = (refresh.variables === orderId ? refresh.error : null) ?? selected.error
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    quote.mutate()
+    generate.mutate()
   }
 
   return (
@@ -121,19 +118,19 @@ export function ReportsPage() {
           <span className="glass grid size-12 shrink-0 place-items-center text-brand-600"><FileText size={23} /></span>
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-ink">欧米选购报告</h1>
-            <p className="mt-2 text-sm text-ink-muted">{service.data?.description ?? '按品类和预算核对商品资料。'}</p>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink-muted">
+              按品类和预算，从欧米商品库筛选 2–3 款候选，整理参考价格、常见问答和评价样本。可免费生成，登录后可在报告记录中重复查看。
+            </p>
+            <Link to="/chat" className="focus-ring mt-2 inline-flex items-center gap-1 text-sm font-semibold text-brand-600">
+              去对话免费获取推荐 <ArrowUpRight size={14} aria-hidden="true" />
+            </Link>
           </div>
         </header>
 
-        {currentMode && currentMode in modeLabels && (
-          <p className="mb-4 flex items-center gap-2 text-sm font-medium text-ink-soft">
-            <ShieldCheck size={17} /> {modeLabels[currentMode as keyof typeof modeLabels]}
-          </p>
-        )}
-        {service.isError && <p role="alert" className="mb-4 text-sm text-ink">暂时无法读取支付服务。</p>}
-        {service.data && !service.data.enabled && <p className="mb-4 text-sm text-ink-muted">报告收款暂未开通，已购报告仍可查看。</p>}
+        {service.isError && <p role="alert" className="mb-4 text-sm text-ink">暂时无法读取报告服务。</p>}
+        {service.data && !service.data.enabled && <p className="mb-4 text-sm text-ink-muted">暂时无法生成新报告。</p>}
         {!userId && service.data?.enabled && (
-          <Link to="/login" state={{ from: location.pathname + location.search }} className="btn-primary inline-flex">登录后获取报价</Link>
+          <Link to="/login" state={{ from: location.pathname + location.search }} className="btn-primary inline-flex">登录后生成报告</Link>
         )}
         {userId && (
           <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -152,55 +149,39 @@ export function ReportsPage() {
                     商品预算上限（元）
                     <input required type="number" min=".01" max="1000000" step=".01" placeholder="例如 500" value={budget} onChange={(event) => setBudget(event.target.value)} className="input-field" />
                   </label>
-                  <button type="submit" className="btn-primary justify-self-start" disabled={quote.isPending || !category}>
-                    {quote.isPending ? '正在报价…' : `获取报价 · 报告服务费 ${money(service.data.amount_fen)}`}
+                  <button type="submit" className="btn-primary justify-self-start" disabled={generate.isPending || !category}>
+                    {generate.isPending ? '正在生成…' : '免费生成报告'}
                   </button>
                   {formError && <p role="alert" className="text-sm text-ink">{formError.message}</p>}
                 </form>
               </section>
             )}
-            <section className="glass p-5 sm:p-6" aria-label="报告订单">
-              <h2 className="text-lg font-semibold text-ink">报告订单</h2>
-              {selected.isLoading && <p role="status" className="mt-3 text-sm text-ink-muted">正在查询订单…</p>}
+            <section className="glass p-5 sm:p-6" aria-label="报告记录">
+              <h2 className="text-lg font-semibold text-ink">报告记录</h2>
+              {selected.isLoading && <p role="status" className="mt-3 text-sm text-ink-muted">正在读取报告…</p>}
               {order && (
                 <div className="mt-3 space-y-3">
                   <p className="font-medium text-ink">{order.category} · {statusLabels[order.status]}</p>
                   <p className="text-sm text-ink-muted">
                     商品预算 {money(order.budget_fen)} · 共 {order.candidate_count} 款候选{order.channel === 'agent' ? ' · Agent 发起' : ''}
                   </p>
-                  <p className="text-xl font-bold text-price">{money(order.amount_fen)}</p>
-                  {order.mode in modeLabels && <p className="text-sm text-ink-muted">{modeLabels[order.mode as keyof typeof modeLabels]}</p>}
-                  {order.status === 'paid' && <p className="break-all text-sm text-ink-muted">交易号 {order.trade_no}</p>}
-                  {expired && order.status !== 'paid' && <p className="text-sm text-ink-muted">报价已过期。已付款时请先查询结果。</p>}
-                  <div className="flex flex-wrap gap-2">
-                    {canPay && (order.status === 'quoted' || (order.status === 'pending' && order.mode !== 'demo')) && (
-                      <button className="btn-primary" disabled={payment.isPending} onClick={() => payment.mutate({ operation: 'confirm', id: orderId })}>
-                        {order.mode === 'demo' ? '确认演示订单' : '确认订单并前往支付宝'}
-                      </button>
-                    )}
-                    {canPay && order.status === 'pending' && order.mode === 'demo' && (
-                      <button className="btn-primary" disabled={payment.isPending} onClick={() => payment.mutate({ operation: 'demoPay', id: orderId })}>
-                        模拟付款成功
-                      </button>
-                    )}
-                    {canRefresh && (
-                      <button className="btn-secondary" disabled={payment.isPending} onClick={() => payment.mutate({ operation: 'refresh', id: orderId })}>
-                        查询支付宝付款结果
-                      </button>
-                    )}
-                  </div>
+                  {order.status === 'paid' && order.trade_no && <p className="break-all text-sm text-ink-muted">历史交易号 {order.trade_no}</p>}
+                  {canRefresh && (
+                    <button className="btn-outline" disabled={refresh.isPending} onClick={() => refreshOrder(orderId)}>
+                      核实历史付款
+                    </button>
+                  )}
                 </div>
               )}
-              {paymentError && <p role="alert" className="mt-3 text-sm text-ink">{paymentError.message}</p>}
-              {history.isError && <p role="alert" className="mt-3 text-sm text-ink">暂时无法读取历史订单。</p>}
-              {!orderId && !history.data?.length && !history.isPending && <p className="mt-3 text-sm text-ink-muted">暂无报告订单。</p>}
+              {historyError && <p role="alert" className="mt-3 text-sm text-ink">{historyError.message}</p>}
+              {history.isError && <p role="alert" className="mt-3 text-sm text-ink">暂时无法读取报告记录。</p>}
+              {!orderId && !history.data?.length && !history.isPending && <p className="mt-3 text-sm text-ink-muted">暂无报告记录。</p>}
               {Boolean(history.data?.length) && (
                 <ul className="mt-4 space-y-2 border-t border-[var(--line)] pt-3">
                   {history.data?.map((item) => (
                     <li key={item.order_id}>
                       <button className="focus-ring flex w-full justify-between gap-3 rounded-md px-2 py-1 text-left text-sm text-ink-soft hover:bg-brand-500/10" aria-current={item.order_id === orderId ? 'true' : undefined} onClick={() => chooseOrder(item.order_id)}>
                         <span>{item.category} · {statusLabels[order?.order_id === item.order_id ? order.status : item.status]}</span>
-                        <span>{money(item.amount_fen)}</span>
                       </button>
                     </li>
                   ))}

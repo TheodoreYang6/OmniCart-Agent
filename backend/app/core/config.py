@@ -128,7 +128,6 @@ class Settings(BaseSettings):
     report_payment_mode: Literal["disabled", "demo", "sandbox", "production"] = Field(
         "disabled", validation_alias="OMNICART_REPORT_PAYMENT_MODE",
     )
-    report_price_fen: int = Field(199, ge=1, le=100000, validation_alias="OMNICART_REPORT_PRICE_FEN")
     cart_allow_live_payment: bool = Field(False, validation_alias="OMNICART_CART_ALLOW_LIVE_PAYMENT")
     report_skillpay_url: str = Field("", validation_alias="OMNICART_REPORT_SKILLPAY_URL")
     alipay_app_id: str = Field("", validation_alias="ALIPAY_APP_ID")

@@ -78,6 +78,7 @@ export function CartPage() {
         navigate(`/cart?payment=${order.order_id}`)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '购物车报价失败')
+        if (error instanceof ApiError && error.status === 409) void activePayment.refetch()
         if (error instanceof ApiError && error.status === 422) navigate('/address')
       } finally {
         setQuoting(false)
@@ -122,9 +123,14 @@ export function CartPage() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:py-6">
           {activePayment.data && (
-            <button className="btn-secondary mb-4" onClick={() => navigate(`/cart?payment=${activePayment.data?.order_id}`)}>
-              查看待支付订单
-            </button>
+            <div className="glass mb-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <p className="text-sm text-ink-muted">
+                上一笔待付款订单 <strong className="text-ink">{formatPrice(activePayment.data.amount_fen / 100, 2)}</strong>
+              </p>
+              <button className="btn-outline text-sm" onClick={() => navigate(`/cart?payment=${activePayment.data?.order_id}`)}>
+                查看订单
+              </button>
+            </div>
           )}
           {isLoading && !hasLoaded ? (
             <LoadingBlock text="加载购物车…" />

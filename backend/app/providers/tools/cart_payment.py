@@ -80,7 +80,7 @@ class CartPaymentQuote(Tool):
             message = f"这笔 ¥{total} 的订单已确认。你可以打开购物车查看支付状态。"
         else:
             message = f"购物车选中商品应付 ¥{total}。请打开支付预览核对商品和地址，再确认。"
-        return ToolResult(message=message, data={"shop_card": card}, actions=[_view_action(order, "打开支付预览")])
+        return ToolResult(message=message, data={"shop_card": card}, actions=[_view_action(order, "支付宝支付")])
 
 
 class CartPaymentConfirm(Tool):
@@ -115,8 +115,8 @@ class CartPaymentOpen(Tool):
                 order = await chat_cart_payment(session, ctx.user_id, ctx.session_id)
         except HTTPException as exc:
             return ToolResult(ok=False, message=str(exc.detail))
-        return ToolResult(message="请在支付页核对商品和金额后确认。",
-                          actions=[_view_action(order, "打开支付确认页")])
+        return ToolResult(message="请在支付弹窗核对商品、地址和金额后确认。",
+                          actions=[_view_action(order, "支付宝支付")])
 
 
 class CartPaymentStatus(Tool):

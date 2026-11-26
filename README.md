@@ -353,7 +353,7 @@ V9 索引构建需要可用的 Embedding 配置，并会写入 Qdrant。真实�
 
 ### 支付宝 AI 付
 
-Web 端的选购报告支持报价、支付宝网站支付和付款后交付。技能包、本地演示和沙箱配置见 [PAYATHON 接入指南](docs/PAYATHON.md)。
+Web 端支持免费生成选购报告，购物车支持支付宝网站支付。技能包、本地演示和沙箱配置见 [PAYATHON 接入指南](docs/PAYATHON.md)。
 
 ### Android 真机联调
 

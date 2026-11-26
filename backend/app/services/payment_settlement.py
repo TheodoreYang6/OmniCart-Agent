@@ -98,8 +98,18 @@ async def _apply_trade(session: AsyncSession, order: ReportOrderModel, trade: di
         await fulfill_cart(session, order)
 
 
-async def _refresh(session: AsyncSession, order_id: str, user_id: str, kind: str):
-    order = await _order(session, order_id, user_id, kind=kind)
+async def _refresh(session: AsyncSession, order_id: str, user_id: str, kind: str, *, cancel: bool = False):
+    order = await _order(session, order_id, user_id, lock=cancel, kind=kind)
+    if cancel:
+        if order.status == "closed":
+            return order
+        if order.status == "quoted" or (order.status == "pending" and order.environment == "demo"):
+            order.cancel_requested = True
+            order.status = "closed"
+            await session.commit()
+            return order
+        if order.status == "paid":
+            return order
     can_recover = order.status == "closed" and order.environment in {"sandbox", "production"}
     if order.status != "pending" and not can_recover:
         return order
@@ -113,15 +123,21 @@ async def _refresh(session: AsyncSession, order_id: str, user_id: str, kind: str
                 await session.commit()
         return order
     expired = _expired(order)
+    if cancel:
+        order.cancel_requested = True
+    should_close = expired or order.cancel_requested
     await session.commit()
     try:
         result = await provider.query(order_id)
-        if (expired and result.get("code") == "10000" and result.get("out_trade_no") == order_id
+        if (should_close and result.get("code") == "10000" and result.get("out_trade_no") == order_id
                 and result.get("trade_status") == "WAIT_BUYER_PAY"):
+            _reconcile(order, result)
             # Re-query even on a failed close: payment may have won the race.
             await provider.close(order_id)
             result = await provider.query(order_id)
     except (ValueError, httpx.HTTPError):
+        if cancel:
+            return await _order(session, order_id, user_id, kind=kind)
         raise HTTPException(502, "暂时无法核实支付宝交易，请稍后查询") from None
     order = await _order(session, order_id, user_id, lock=True, kind=kind)
     if result.get("code") == "40004" and result.get("sub_code") == "ACQ.TRADE_NOT_EXIST":
@@ -130,6 +146,8 @@ async def _refresh(session: AsyncSession, order_id: str, user_id: str, kind: str
             await session.commit()
         return order
     if result.get("code") != "10000":
+        if cancel:
+            return order
         raise HTTPException(502, "支付宝暂未返回可核实的交易状态")
     await _apply_trade(session, order, result)
     try:

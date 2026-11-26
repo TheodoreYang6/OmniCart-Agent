@@ -109,7 +109,11 @@ class AlipayReportGateway:
 
     def checkout_url(self, order: ReportOrderModel) -> str:
         is_cart = order.kind == "cart"
-        result_path = f"/cart?payment={order.order_id}" if is_cart else f"/reports?order={order.order_id}"
+        if is_cart:
+            page = "chat" if order.channel == "agent" else "cart"
+            result_path = f"/{page}?payment={order.order_id}"
+        else:
+            result_path = f"/reports?order={order.order_id}"
         params = self._parameters(
             "alipay.trade.page.pay",
             {

@@ -23,6 +23,7 @@ def _view(order: ReportOrderModel) -> dict:
     return {
         "order_id": order.order_id, "amount_fen": order.amount_fen, "status": fulfillment_status(order), "refunded_fen": refunded,
         "mode": order.environment, "expired": _expired(order),
+        "cancel_requested": order.cancel_requested,
         "items": order.report["items"], "address": order.report["address"],
         "trade_no": order.trade_no if order.status == "paid" else None,
     }
@@ -43,7 +44,11 @@ async def service(response: Response):
 async def active(response: Response, actor: Actor = Depends(_user), session: AsyncSession = Depends(_session)):
     response.headers["Cache-Control"] = "private, no-store"
     order = await pending_cart_payment(session, actor.user_id)
-    return _view(order) if order and not (order.environment == "demo" and _expired(order)) else None
+    if order is None or order.cancel_requested or (
+        order.environment == "demo" and (settings.report_payment_mode != "demo" or _expired(order))
+    ):
+        return None
+    return _view(order)
 
 
 @router.post("/orders", status_code=201)
@@ -71,6 +76,13 @@ async def refresh(order_id: OrderId, response: Response, actor: Actor = Depends(
                   session: AsyncSession = Depends(_session)):
     response.headers["Cache-Control"] = "private, no-store"
     return _view(await _refresh(session, order_id, actor.user_id, "cart"))
+
+
+@router.post("/orders/{order_id}/cancel")
+async def cancel(order_id: OrderId, _: ConfirmRequest, response: Response, actor: Actor = Depends(_user),
+                 session: AsyncSession = Depends(_session)):
+    response.headers["Cache-Control"] = "private, no-store"
+    return _view(await _refresh(session, order_id, actor.user_id, "cart", cancel=True))
 
 
 @router.post("/orders/{order_id}/demo-pay")

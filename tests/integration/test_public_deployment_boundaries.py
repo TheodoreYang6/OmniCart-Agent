@@ -277,6 +277,19 @@ async def test_cart_quote_blocks_stale_confirm_and_demo_lifecycle(monkeypatch):
         fourth = (await client.post("/api/cart-payments/orders", json={"item_ids": []})).json()
         assert fourth["status"] == "quoted" and fourth["order_id"] != third["order_id"]
 
+        # A pending demo order must not be reused after switching to Alipay.
+        from types import SimpleNamespace
+        from app.services import checkout_payment
+
+        demo_id = fourth["order_id"]
+        assert (await client.post(f"/api/cart-payments/orders/{demo_id}/confirm", json={"confirmed": True})).json()["status"] == "pending"
+        monkeypatch.setattr(settings, "report_payment_mode", "sandbox")
+        monkeypatch.setattr(checkout_payment, "cart_provider", lambda: SimpleNamespace(app_id="sandbox", seller_id="merchant"))
+        assert (await client.get("/api/cart-payments/active")).json() is None
+        sandbox = (await client.post("/api/cart-payments/orders", json={"item_ids": []})).json()
+        assert sandbox["mode"] == "sandbox" and sandbox["order_id"] != demo_id
+        assert (await client.get(f"/api/cart-payments/orders/{demo_id}")).json()["status"] == "closed"
+
 
 @pytest.mark.asyncio(loop_scope="module")
 @pytest.mark.parametrize("kind", ["cart", "report"])
@@ -373,6 +386,22 @@ async def test_expired_cart_stays_pending_until_alipay_confirms(monkeypatch, gat
         stale_url = f"{quote_path}/{stale_id}"
         alternative_url = f"{quote_path}/{alternative.json()['order_id']}"
         assert (await client.post(stale_url + "/confirm", json={"confirmed": True})).status_code == 200
+        same_cart = await client.post(quote_path, json={"item_ids": []})
+        assert same_cart.status_code == 201 and same_cart.json()["order_id"] == stale_id
+        extra_id = product_id + "-extra"
+        async with get_session_sync()() as session:
+            session.add(ProductModel(
+                product_id=extra_id, title="QA 新增结算商品", brand="小米",
+                category="数码电子", sub_category="真无线耳机", base_price=2000, skus=[],
+            ))
+            await session.commit()
+        extra = await client.post("/api/cart/items", json={"product_id": extra_id, "quantity": 1})
+        assert extra.status_code == 200
+        mismatch = await client.post(quote_path, json={"item_ids": []})
+        assert mismatch.status_code == 409
+        assert "¥199.90" in mismatch.json()["detail"] and "¥2,199.90" in mismatch.json()["detail"]
+        assert (await client.get(stale_url)).json()["status"] == "pending"
+        assert (await client.delete(f"/api/cart/items/{extra.json()['cart_item_id']}")).is_success
         async with get_session_sync()() as session:
             stale = await session.get(ReportOrderModel, stale_id)
             stale.expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
@@ -476,3 +505,115 @@ async def test_cart_sku_selection_is_atomic_across_chat_and_web(monkeypatch):
         ])
         assert sorted(reply.status_code for reply in clicks) == [200, 409]
         assert len((await client.get("/api/cart")).json()["items"]) == 2
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_generate_and_reopen_a_free_shopping_report(monkeypatch):
+    from app.models.product import ProductModel
+
+    monkeypatch.setattr(settings, "report_payment_mode", "disabled")
+    category = "qa-compare-" + token_hex(6)
+    async with get_session_sync()() as session:
+        for price in (120, 180):
+            session.add(ProductModel(
+                product_id=f"{category}-{price}", title=f"测试耳机 {price}", brand="测试",
+                category="数码电子", sub_category=category, base_price=price, skus=[],
+            ))
+        await session.commit()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://local") as client, httpx.AsyncClient(
+        transport=transport, base_url="http://local",
+    ) as other:
+        await _buyer(client)
+        await _buyer(other)
+        base = "/api/report-payments"
+        service = (await client.get(base + "/service")).json()
+        assert service["enabled"] and service["mode"] == "free" and service["amount_fen"] == 0
+        assert (await client.get("/api/cart-payments/service")).json()["enabled"] is False
+        response = await client.post(service["generate_path"], json={"category": category, "budget_fen": 20000})
+        assert response.status_code == 201
+        report = response.json()
+        assert report["mode"] == "free" and report["status"] == "delivered"
+        assert report["amount_fen"] == 0 and report["trade_no"] is None and not report["expired"]
+        assert len(report["report"]["products"]) == 2
+        order_path = f"{base}/orders/{report['order_id']}"
+        assert (await client.get(order_path)).json()["report"] == report["report"]
+        assert (await client.get(base + "/orders")).json()[0]["order_id"] == report["order_id"]
+        assert (await other.get(order_path)).status_code == 404
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_cancel_cart_payment_allows_checkout_for_unrelated_items(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.models.product import ProductModel
+    from app.services import checkout_payment, payment_settlement
+
+    provider = SimpleNamespace(
+        app_id="qa-app", seller_id="qa-seller", close=AsyncMock(),
+        query=AsyncMock(return_value={"code": "40004", "sub_code": "ACQ.TRADE_NOT_EXIST"}),
+        checkout_url=lambda order: "https://example.invalid/checkout",
+    )
+    monkeypatch.setattr(settings, "report_payment_mode", "sandbox")
+    monkeypatch.setattr(checkout_payment, "_provider", lambda: provider)
+    monkeypatch.setattr(payment_settlement, "_provider", lambda: provider)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://local") as owner, httpx.AsyncClient(
+        transport=transport, base_url="http://local",
+    ) as other:
+        await _buyer(owner)
+        await _buyer(other)
+        products = [token_hex(6), token_hex(6)]
+        async with get_session_sync()() as session:
+            for product_id, price in zip(products, (720, 2000)):
+                session.add(ProductModel(
+                    product_id=product_id, title="QA 购物车取消测试", brand="测试",
+                    category="数码电子", sub_category="真无线耳机", base_price=price, skus=[],
+                ))
+            await session.commit()
+
+        assert (await owner.post("/api/addresses", json={
+            "name": "收货人", "phone": "13800000003", "province": "广东省", "city": "广州市",
+            "district": "天河区", "detail": "测试路3号", "is_default": True,
+        })).status_code == 200
+        lines = []
+        for product_id in products:
+            added = await owner.post("/api/cart/items", json={"product_id": product_id, "quantity": 1})
+            assert added.is_success
+            lines.append(added.json()["cart_item_id"])
+
+        base = "/api/cart-payments/orders"
+        quote = await owner.post(base, json={"item_ids": lines[:1]})
+        assert quote.status_code == 201
+        order_id = quote.json()["order_id"]
+        path = f"{base}/{order_id}"
+        confirmation = {"confirmed": True}
+        assert (await owner.post(path + "/confirm", json=confirmation)).status_code == 200
+
+        assert (await other.post(path + "/cancel", json=confirmation)).status_code == 404
+        requested = await owner.post(path + "/cancel", json=confirmation)
+        assert requested.status_code == 200 and requested.json()["cancel_requested"]
+        assert (await owner.get(path)).json()["status"] == "pending"
+        assert (await owner.get("/api/cart-payments/active")).json() is None
+        assert (await owner.post(path + "/confirm", json=confirmation)).status_code == 409
+        blocked = await owner.post(base, json={"item_ids": lines})
+        assert blocked.status_code == 409 and "正在取消" in blocked.json()["detail"]
+        provider.close.assert_not_awaited()
+
+        unrelated = await owner.post(base, json={"item_ids": lines[1:]})
+        assert unrelated.status_code == 201 and unrelated.json()["amount_fen"] == 200000
+        unrelated_path = f"{base}/{unrelated.json()['order_id']}"
+        assert (await owner.post(unrelated_path + "/confirm", json=confirmation)).status_code == 200
+        assert (await owner.get(path)).json()["status"] == "pending"
+
+        waiting = {
+            "code": "10000", "out_trade_no": order_id, "total_amount": "720.00",
+            "trade_status": "WAIT_BUYER_PAY",
+        }
+        provider.query.side_effect = [waiting, {**waiting, "trade_status": "TRADE_CLOSED"}]
+        cancelled = await owner.post(path + "/cancel", json=confirmation)
+        assert cancelled.status_code == 200 and cancelled.json()["status"] == "closed"
+        assert (await owner.post(path + "/cancel", json=confirmation)).json()["status"] == "closed"
+        provider.close.assert_awaited_once_with(order_id)
