@@ -293,7 +293,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         onEvent: (type, payload) => {
           if (get()._requestId !== requestId || !payload || typeof payload !== 'object') return
           const data = payload as Record<string, unknown>
-          if (type === 'recommendations') {
+          if (type === 'cart_changed') {
+            void import('./cartStore').then(({ useCartStore }) => useCartStore.getState().loadCart())
+          } else if (type === 'recommendations') {
             set({ streamingPreview: data as Partial<RecommendResponse> })
           } else if (type === 'visual_result' || type === 'focus_analysis' || type === 'comparison') {
             set((state) => ({

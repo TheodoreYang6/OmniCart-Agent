@@ -16,6 +16,7 @@ import com.omnicart.agent.core.model.Sku
 import com.omnicart.agent.core.model.RecommendRequest
 import com.omnicart.agent.core.network.AddToCartRequest
 import com.omnicart.agent.core.network.AgentActionRequest
+import com.omnicart.agent.core.network.ShopConfirmationRequest
 import com.omnicart.agent.core.network.ApiClient
 import com.omnicart.agent.core.network.AgentStreamClient
 import com.omnicart.agent.core.network.AddressCreateRequest
@@ -747,6 +748,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onDismissDetail() {
         _uiState.update { it.copy(selectedProductIndex = -1, selectedProductId = null) }
+    }
+
+    fun onConfirmShopAction(confirmation: String) {
+        viewModelScope.launch {
+            try {
+                val result = ApiClient.api.confirmShopAction(ShopConfirmationRequest(confirmation))
+                _uiState.update { it.copy(messages = it.messages + ChatMessage(
+                    role = MessageRole.Assistant, text = result.message,
+                )) }
+            } catch (_: Exception) {
+                _uiState.update { it.copy(errorMessage = "确认失败，请重新核对订单。") }
+            }
+        }
     }
 
     fun onAddToCart(productId: String, productTitle: String,

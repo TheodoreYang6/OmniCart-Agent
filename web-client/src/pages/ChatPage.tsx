@@ -7,7 +7,7 @@ import { useChatStore } from '@/store/chatStore'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
 import { getEffectiveUserId } from '@/store/authStore'
-import { api } from '@/api/client'
+import { api, request } from '@/api/client'
 import { alipayCheckoutUrl } from '@/api/cartPayments'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { ConversationHistory } from '@/components/chat/ConversationHistory'
@@ -162,9 +162,26 @@ export function ChatPage() {
 
   const isEmpty = messages.length === 0
 
+  const shopConfirmations = useRef(new Set<string>())
   const handleAction = async (action: ChatAction) => {
     const type = String(action.type ?? '')
     const label = String(action.label ?? '')
+    if (type === 'confirm_shop_action' && action.confirmation) {
+      const confirmation = action.confirmation
+      if (shopConfirmations.current.has(confirmation)) return
+      shopConfirmations.current.add(confirmation)
+      try {
+        const result = await request<{ ok: boolean; message: string }>('/api/recommend/confirm-shop-action', {
+          method: 'POST', body: { confirmation },
+        })
+        toast[result.ok ? 'success' : 'error'](result.message || '此操作未完成')
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '请求失败，请重新核对订单')
+      } finally {
+        shopConfirmations.current.delete(confirmation)
+      }
+      return
+    }
     if (type === 'cart_payment_handoff') {
       const url = alipayCheckoutUrl(action.checkout_url)
       if (url) window.open(url, '_blank', 'noopener,noreferrer')
@@ -196,9 +213,13 @@ export function ChatPage() {
     } else if (type === 'sku_option' && action.product_id) {
       // 规格按钮带 product_id → 直连加购 API，省掉一轮 LLM 往返
       const skuId = action.sku_id ? String(action.sku_id) : null
-      const ok = await addToCart(String(action.product_id), skuId)
-      if (ok) fireOmi('added-to-cart')   // 欧米眨眼反馈
-      toast[ok ? 'success' : 'error'](ok ? `已加入购物车（${label}）` : '加购失败')
+      const ok = await addToCart(String(action.product_id), skuId, action.quantity ?? 1, action.selection_id ?? 'legacy')
+      if (ok) {
+        fireOmi('added-to-cart')
+        toast.success(`已加入购物车（${label}）`)
+      } else {
+        toast.error(useCartStore.getState().error || '加购失败')
+      }
     } else if (type === 'quick_reply' || type === 'sku_option') {
       send(label)
     }

@@ -124,6 +124,9 @@ interface OmniCartApi {
         @Query("user_id") userId: String,
     ): OrderListResponse
 
+    @POST("api/recommend/confirm-shop-action")
+    suspend fun confirmShopAction(@Body request: ShopConfirmationRequest): ShopConfirmationResponse
+
     // ---- Agent 操作 ----
     @POST("api/agent/action")
     suspend fun agentAction(@Body request: AgentActionRequest): AgentActionResponse
@@ -512,6 +515,9 @@ data class CheckoutResponse(
 )
 
 // ---- Agent Action ----
+
+data class ShopConfirmationRequest(val confirmation: String)
+data class ShopConfirmationResponse(val ok: Boolean, val message: String)
 
 data class AgentActionRequest(
     val action: String,

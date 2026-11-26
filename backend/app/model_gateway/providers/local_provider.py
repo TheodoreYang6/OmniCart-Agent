@@ -87,9 +87,13 @@ class LocalModelProvider:
 
     # ---- 委托 Qwen API：chat / chat_stream / chat_with_tools / vision ----
 
-    async def chat(self, *, model: str, prompt: str, system: str, temperature: float, max_tokens: int) -> str:
+    async def chat(
+        self, *, model: str, prompt: str, system: str, temperature: float, max_tokens: int,
+        json_object: bool = False,
+    ) -> str:
         return await self._qwen_provider().chat(
-            model=model, prompt=prompt, system=system, temperature=temperature, max_tokens=max_tokens
+            model=model, prompt=prompt, system=system, temperature=temperature, max_tokens=max_tokens,
+            json_object=json_object,
         )
 
     async def chat_with_tools(self, *, model: str, messages: list[dict], tools: list[dict],

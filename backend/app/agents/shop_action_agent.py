@@ -15,13 +15,13 @@ import logging
 
 from app.framework.tools.ordinal import OrdinalResolver
 from app.framework.tools.protocols import ToolContext, ToolResult
+from app.services.shopping_intent import is_cart_add_request
 
 logger = logging.getLogger(__name__)
 
 _CONFIRM = ["确认下单", "确认订单", "确认付款"]
 _ORDER = ["下单", "结算", "结账", "买单", "付款"]
 _ADDR = ["修改地址", "改地址", "换地址"]
-_ADD = ["加入购物车", "加到购物车", "加进购物车", "加购", "全部加入"]
 
 # Phase 2b 订单闭环 & 库存
 _ORDER_LIST = ["我的订单", "订单列表", "查看订单", "看订单"]
@@ -122,7 +122,7 @@ class ShopActionAgent:
             )
 
         # 7. 加购
-        if any(k in msg for k in _ADD):
+        if is_cart_add_request(msg):
             return await self._handle_add(registry, ctx, conv, cid, msg, focus, last_products)
 
         # 8. LLM 函数调用兜底（Phase 6-B1）：关键词未命中时让 LLM 从白名单工具选择；
@@ -231,26 +231,30 @@ class ShopActionAgent:
         return res
 
     async def _handle_add(self, registry, ctx, conv, cid, msg, focus, last_products):
-        target = self._focus_target(focus)
-        if not target and last_products:
-            n = OrdinalResolver.parse_ordinal(msg, r"第")
-            if n and 1 <= n <= len(last_products):
-                target = self._product_target(last_products[n - 1])
-            elif not n:
-                if "全部" in msg:
-                    added = 0
-                    for p in last_products[:5]:
-                        r = await registry.invoke("cart.add", {
-                            "product_id": p.get("product_id", ""), "sku_id": "",
-                            "title": p.get("title", ""), "brand": p.get("brand", ""),
-                            "price": p.get("price", 0),
-                        }, ctx)
-                        if r.ok:
-                            added += 1
-                    return ToolResult(message=f"✅ 已把 {added} 件商品加入购物车～")
+        ordinal = OrdinalResolver.parse_ordinal(msg, r"第") if "第" in msg else None
+        if ordinal is not None:
+            if not 1 <= ordinal <= len(last_products):
+                return ToolResult(ok=False, message="刚才的推荐里没有这个序号，请告诉我你想加哪款。")
+            target = self._product_target(last_products[ordinal - 1])
+        else:
+            target = self._focus_target(focus)
+            if not target and last_products and "全部" in msg:
+                added = 0
+                for product in last_products[:5]:
+                    result = await registry.invoke("cart.add", {
+                        "product_id": product.get("product_id", ""), "sku_id": "",
+                        "title": product.get("title", ""), "brand": product.get("brand", ""),
+                        "price": product.get("price", 0),
+                    }, ctx)
+                    if result.ok:
+                        added += 1
+                return ToolResult(message=f"✅ 已把 {added} 件商品加入购物车～")
+            if not target and len(last_products) > 1:
+                return ToolResult(ok=False, message="刚才推荐了多款商品，你想加哪款？可以说「把第 2 款放进购物车」。")
+            if not target and last_products:
                 target = self._product_target(last_products[0])
         if not target:
-            return ToolResult(message="请先说你想买什么，我再帮你加购哦～")
+            return ToolResult(ok=False, message="请先说你想买什么，我再帮你加购哦～")
         res = await registry.invoke("cart.add", {
             "product_id": target["product_id"], "title": target["title"],
             "brand": target["brand"], "price": target["price"],

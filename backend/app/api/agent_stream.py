@@ -6,9 +6,9 @@ from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.workflow.graph import run_workflow
-from app.core.identity import Actor, resolve_public_actor
+from app.core.identity import Actor, require_user, resolve_public_actor
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -55,21 +55,6 @@ def _stage(stage: str) -> str:
     payload = json.dumps({"version": "chat_event_v1", "stage": stage, "text": _STAGE_TEXT[stage]}, ensure_ascii=False)
     # status 保留给 Web 等存量客户端；stage 是 Android 新的结构化事件。
     return _sse("stage", payload) + _sse("status", payload)
-
-
-def _shop_status(message: str) -> str:
-    m = message or ""
-    if any(w in m for w in ("看看购物车", "看购物车", "购物车有什么")):
-        return "正在查看购物车…"
-    if any(w in m for w in ("下单", "结算", "结账", "买单", "付款")):
-        return "正在为你结算…"
-    if any(w in m for w in ("购物车", "加购", "加入", "加到")):
-        return "正在操作购物车…"
-    if any(w in m for w in ("订单", "物流", "支付")):
-        return "正在查看订单…"
-    if any(w in m for w in ("偏好", "记住")):
-        return "正在更新偏好…"
-    return "正在处理…"
 
 
 def _recommendation_sections(state):
@@ -459,6 +444,17 @@ def _focused_comparison_payload(state, target):
 # ============================================================
 
 
+class ConfirmShoppingActionRequest(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/confirm-shop-action")
+async def confirm_shop_action(req: ConfirmShoppingActionRequest, actor: Actor = Depends(resolve_public_actor)):
+    from app.services.shop_action_confirmation import confirm_order_action
+
+    return await confirm_order_action(require_user(actor).user_id, req.confirmation)
+
+
 @router.post("/stream")
 async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Actor = Depends(resolve_public_actor)):
 
@@ -508,199 +504,52 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 except Exception:
                     pass
 
-        if (req.cart_payment and req.mode == "normal_recommend" and not req.image_url
-                and settings.report_payment_mode != "disabled"):
-            from app.framework.tools import ToolContext, ToolResult
-            from app.providers.tools.cart_payment import CONFIRM, cart_payment_tools, payment_intent
+        from app.framework.tools import ToolContext
+        from app.services.chat_shopping_router import run_shopping_turn
 
-            payment_tool = payment_intent(msg)
-            if payment_tool:
-                context = ToolContext(user_id=uid, session_id=req.session_id, conversation_id=cid, args_raw=msg)
-                if actor.is_authenticated:
-                    result = await cart_payment_tools().invoke(
-                        payment_tool, {"_confirmed": True} if payment_tool == CONFIRM else {}, context,
-                    )
-                else:
-                    result = ToolResult(ok=False, message="登录后可以结算购物车。",
-                                        actions=[{"type": "quick_reply", "label": "登录", "route": "login"}])
-                answer = result.message or "暂时无法处理这笔支付，请到购物车核对订单状态。"
-                if can_persist and conv_svc and cid:
-                    try:
-                        await conv_svc.aappend_assistant_message(
-                            conversation_id=cid, user_id=uid, session_id=sid, content=answer,
-                            metadata={"shop_card": result.data.get("shop_card"), "actions": result.actions},
-                        )
-                    except Exception:
-                        pass
-                async for event in _stream_plain_text(answer):
-                    yield event
-                yield _sse("result", json.dumps({
-                    "answer": answer, "products": [], "decision_results": [], "shop_action": True,
-                    "conversation_id": cid, "actions": result.actions, "shop_card": result.data.get("shop_card"),
-                }, ensure_ascii=False))
-                yield _sse("done", '{"finish_reason":"stop"}')
-                return
-
-        if req.mode == "normal_recommend" and not req.image_url and any(
-            term in msg for term in ("选购报告", "付费报告", "比价报告")
-        ):
-            if settings.report_payment_mode == "disabled" or not settings.use_postgres:
-                answer = "欧米选购报告暂未开放收款。你可以在报告页查看已购买的报告。"
-            else:
-                amount = f"{settings.report_price_fen // 100}.{settings.report_price_fen % 100:02}"
-                answer = f"我找到了欧米选购报告，服务费 ¥{amount}。你可以在报告页选择品类和预算，核对报价后再确认付款。"
-            report_actions = [{"type": "open_report", "label": "查看选购报告", "route": "reports?source=agent"}]
-            if can_persist and conv_svc and cid:
+        shopping = await run_shopping_turn(
+            ToolContext(user_id=uid, session_id=sid, conversation_id=cid, args_raw=msg), conv_svc,
+            authenticated=can_persist,
+            payment_available=req.cart_payment and settings.report_payment_mode != "disabled",
+            catalogue_only=bool(req.image_url) or req.mode != "normal_recommend",
+        )
+        shopping_prefix = shopping.message if shopping and shopping.data.get("workflow_after") else ""
+        if shopping and shopping.data.get("cart_changed"):
+            yield _sse("cart_changed", "{}")
+        if shopping is not None and not shopping_prefix:
+            data = shopping.data
+            payload = {
+                "answer": shopping.message, "products": [], "decision_results": [],
+                "shop_action": True, "conversation_id": cid, "session_id": sid,
+                "actions": shopping.actions, "shop_card": data.get("shop_card"),
+            }
+            if data.get("requires_login"):
+                payload["requires_login"] = True
+            if can_persist and conv_svc and cid and shopping.message:
                 try:
                     await conv_svc.aappend_assistant_message(
-                        conversation_id=cid, user_id=uid, session_id=sid, content=answer,
-                        metadata={"actions": report_actions},
+                        conversation_id=cid, user_id=uid, session_id=sid, content=shopping.message,
+                        metadata={"shop_card": data.get("shop_card"), "actions": shopping.actions},
                     )
                 except Exception:
-                    pass
-            async for event in _stream_plain_text(answer):
+                    logger.debug("Could not persist shopping reply")
+            async for event in _stream_plain_text(shopping.message):
                 yield event
-            yield _sse("result", json.dumps({
-                "answer": answer, "products": [], "decision_results": [],
-                "shop_action": True, "conversation_id": cid,
-                "actions": report_actions,
-            }, ensure_ascii=False))
-            yield _sse("done", '{"finish_reason":"stop"}')
+            yield _sse("result", json.dumps(payload, ensure_ascii=False, default=str))
+            yield _sse("done", json.dumps({"finish_reason": "login_required" if data.get("requires_login") else "stop"}))
             return
 
-        # ---- 判断意图: 购物操作关键词（仅门控进入 Tool 链，实际路由在 ShopActionAgent 内） ----
-        order_words = ["下单", "结算", "结账", "买单", "付款"]
-        confirm_words = ["确认下单", "确认订单", "确认付款"]
-        addr_words = ["修改地址", "改地址", "换地址"]
-        clear_words = ["清空购物车"]
-        cart_show_words = ["购物车有什么", "看看购物车", "看购物车"]
-        cart_remove_words = ["删除第", "去掉第", "移除第"]
-        cart_qty_words = ["数量改成", "数量改为", "数量改成第", "数量改为第"]
-        cart_add_words = ["加入购物车", "加到购物车", "加进购物车", "加购", "全部加入"]
-        # Phase 2b: 订单闭环 & 库存（与 ShopActionAgent 关键词表保持一致，否则新工具不可达）
-        order_manage_words = [
-            "我的订单",
-            "订单列表",
-            "查看订单",
-            "看订单",
-            "订单详情",
-            "取消订单",
-            "取消第",
-            "物流",
-            "查物流",
-            "追踪",
-            "支付订单",
-            "去支付",
-            "支付第",
-            "付款第",
-            "有货吗",
-            "库存",
-            "还有货",
-            "缺货吗",
-        ]
-        # Phase 6-B3: 偏好 & 会话（同样与 ShopActionAgent 保持一致）
-        pref_conv_words = [
-            "我的偏好",
-            "偏好列表",
-            "查看偏好",
-            "记住了什么",
-            "删除偏好",
-            "删掉偏好",
-            "记住我",
-            "记一下我",
-            "以后推荐",
-            "以后都",
-            "别再推",
-            "不要推荐",
-            "聊了什么",
-            "刚才说了什么",
-            "对话历史",
-            "聊天记录",
-            "重新开始",
-            "清空上下文",
-            "重置对话",
-            "写个文案",
-            "写文案",
-            "种草文案",
-            "帮我种草",
-        ]
-        all_shop_words = (
-            order_words
-            + confirm_words
-            + addr_words
-            + clear_words
-            + cart_show_words
-            + cart_remove_words
-            + cart_qty_words
-            + cart_add_words
-            + order_manage_words
-            + pref_conv_words
-        )
-        is_shop = any(kw in msg for kw in all_shop_words)
-
-        # The product catalogue is public, but cart, checkout, order and history
-        # are a logged-in shopping context. Return a recoverable action instead
-        # of letting a later repository call become an opaque 401.
-        if is_shop and not actor.is_authenticated:
-            answer = "登录后我就能帮你把商品加入购物车、查看购物车并完成模拟下单。"
-            yield _stage("answering")
-            yield _sse("token", json.dumps({"text": answer}, ensure_ascii=False))
-            yield _sse("result", json.dumps({
-                "session_id": sid, "conversation_id": "", "answer": answer,
-                "products": [], "primary_products": [], "alternative_products": [],
-                "actions": [{"type": "login", "label": "登录后继续", "route": "login"}],
-                "requires_login": True,
-            }, ensure_ascii=False))
-            yield _sse("done", json.dumps({"finish_reason": "login_required"}))
-            return
-
-        # 读取 pending SKU 选择（用户可能正在选规格）
-        _pending_sku = {}
-        try:
-            if conv_svc and cid:
-                snap = await conv_svc.get_context_snapshot(cid, user_id=uid)
-                _pending_sku = (snap or {}).get("pending_sku_product", {}) or {}
-        except Exception:
-            pass
-
-        # P1-3: 复合指令（“看订单然后推荐类似的”）不进购物块——
-        # 交给推荐工作流（动态图/LLM Planner 可编排 tool 步 + 检索），避免关键词门控截胡后半句
-        _is_compound = False
-        if is_shop and not _pending_sku:
-            try:
-                from app.framework.orchestration.planner import _is_complex
-
-                _is_compound = _is_complex(msg)[0]
-            except Exception:
-                _is_compound = False
-
-        # ================================================================
-        # 深度思考模式（spec: docs/specs/omni-harness）：deep_think=true 时 max 档 ReAct 图
-        # 全权接管（跳过购物关键词门控，LLM 自主决策调工具）；
-        # 默认链路仍走 pipeline。极速命令/规格选择不进 Loop；已锁定的单品
-        # 分析也可进入 Loop，由模型调用 dossier，并受同一份 ToolPolicy 约束。
-        # LLM 异常时落回下方既有链路兜底。
-        # ================================================================
         from langgraph.errors import GraphRecursionError
-
         from app.core.config import ENABLE_AGENT_LOOP
 
-        _FAST_COMMANDS = {"看看购物车", "清空购物车", "我的订单", "我的偏好", "重新开始"}
-        if (
-            ENABLE_AGENT_LOOP
-            and req.deep_think
-            and not _pending_sku
-            and not is_shop
-            and req.mode not in {"product_focused_analysis", "same_category_comparison"}
-            and msg.strip() not in _FAST_COMMANDS
-        ):
+        if ENABLE_AGENT_LOOP and req.deep_think and req.mode == "normal_recommend":
             from app.framework.blackboard import Blackboard, reset_current_board, set_current_board
             from app.schemas.workflow import WorkflowState as _WS
 
             # 门控已要求 req.deep_think，故档位固定为 max（Plan-Execute）。
             _loop_state = _WS(
                 session_id=sid, user_id=uid, conversation_id=cid, user_query=msg,
-                image_url=req.image_url, mode="max",
+                image_url=req.image_url, mode="max", allow_tool_writes=False,
             )
             # 深度模式只在 Loop 前做 Router，不做前置泛检索。检索是受控工具，
             # 必须由 ReAct 在拿到 Router Plan 后按需调用；此前“预检索 + Loop 再搜”
@@ -792,6 +641,8 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
 
                 primary, _ = build_recommendation_brief(_loop_state)
                 _answer = finalize_response(_loop_state, candidate, get_response_guard(), cards=primary)
+                if shopping_prefix:
+                    _answer = shopping_prefix + "\n\n" + _answer
                 _payload = _result_with_recommendations(
                     _loop_state,
                     session_id=sid,
@@ -822,130 +673,6 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
             # Loop 失败 → 继续落入下方既有链路（购物门控 / workflow）
 
         # ================================================================
-        # 购物操作流程 (加购 / 购物车管理 / 下单)
-        # ================================================================
-        if (is_shop or _pending_sku) and not _is_compound:
-            if not can_persist:
-                answer = "登录后，欧米才能帮你保存购物车、查看订单和记住你的偏好。先登录，我们再继续吧～"
-                yield _stage("answering")
-                for _i in range(0, len(answer), _STREAM_CHUNK_SIZE):
-                    yield _sse("token", json.dumps({"text": answer[_i : _i + _STREAM_CHUNK_SIZE]}, ensure_ascii=False))
-                    await asyncio.sleep(_STREAM_CHUNK_DELAY_SECONDS)
-                yield _sse(
-                    "result",
-                    json.dumps(
-                        {
-                            "session_id": sid,
-                            "conversation_id": "",
-                            "answer": answer,
-                            "products": [],
-                            "primary_products": [],
-                            "alternative_products": [],
-                            "decision_results": [],
-                            "shop_action": True,
-                            "harness_report": {},
-                        },
-                        ensure_ascii=False,
-                    ),
-                )
-                yield _sse("done", json.dumps({"finish_reason": "stop"}))
-                return
-
-            async def _yield_answer(text: str, actions: list | None = None, shop_card: dict | None = None):
-                """SSE流式: 按块快速回放, 再 result, 最后 done"""
-                for _i in range(0, len(text), _STREAM_CHUNK_SIZE):
-                    yield _sse("token", json.dumps({"text": text[_i : _i + _STREAM_CHUNK_SIZE]}, ensure_ascii=False))
-                    await asyncio.sleep(_STREAM_CHUNK_DELAY_SECONDS)
-                payload = {
-                    "answer": text,
-                    "products": [],
-                    "decision_results": [],
-                    "shop_action": True,
-                    "harness_report": {},
-                    "conversation_id": cid,
-                }
-                if actions:
-                    payload["actions"] = actions
-                if shop_card:
-                    payload["shop_card"] = shop_card
-                yield _sse("result", json.dumps(payload, ensure_ascii=False))
-                yield _sse("done", "{}")
-
-            # ---- Tool 链: 全部购物动作委派给 ShopActionAgent（legacy if/elif 已随灰度收尾删除） ----
-            from app.core.config import ENABLE_TOOL_ROUTER
-
-            if ENABLE_TOOL_ROUTER:
-                import time
-                from app.agents.shop_action_agent import ShopActionAgent
-                from app.framework.tools import ToolContext
-
-                yield _sse("status", json.dumps({"text": _shop_status(msg)}, ensure_ascii=False))
-                _t0 = time.perf_counter()
-
-                _ctx = ToolContext(user_id=uid, session_id=sid, conversation_id=cid, args_raw=msg)
-                _res = await ShopActionAgent().handle(msg, _ctx)
-                _shop_card = (_res.data or {}).get("shop_card")
-                _needs_llm = bool((_res.data or {}).get("needs_llm_summary")) and bool(_shop_card)
-                _final_answer = _res.message
-
-                if _needs_llm:
-                    from app.model_gateway.gateway import get_model_gateway
-                    from app.prompts.api_prompts import build_shop_summary_prompt
-
-                    _answer = ""
-                    try:
-                        _prompt = build_shop_summary_prompt(_shop_card)
-                        async for _token in get_model_gateway().chat_stream("chat_generation", _prompt):
-                            if await raw_request.is_disconnected():
-                                break
-                            _answer += _token
-                            yield _sse("token", json.dumps({"text": _token}, ensure_ascii=False))
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning(f"shop summary LLM failed, using template: {exc}")
-                    if _answer.strip():
-                        _final_answer = _answer
-                    else:
-                        for _i in range(0, len(_res.message), _STREAM_CHUNK_SIZE):
-                            yield _sse("token", json.dumps({"text": _res.message[_i:_i+_STREAM_CHUNK_SIZE]}, ensure_ascii=False))
-                            await asyncio.sleep(_STREAM_CHUNK_DELAY_SECONDS)
-                else:
-                    for _i in range(0, len(_res.message), _STREAM_CHUNK_SIZE):
-                        yield _sse("token", json.dumps({"text": _res.message[_i:_i+_STREAM_CHUNK_SIZE]}, ensure_ascii=False))
-                        await asyncio.sleep(_STREAM_CHUNK_DELAY_SECONDS)
-
-                _elapsed = time.perf_counter() - _t0
-                if _elapsed < 0.7:
-                    await asyncio.sleep(0.7 - _elapsed)
-
-                payload = {
-                    "answer": _final_answer,
-                    "products": [],
-                    "decision_results": [],
-                    "shop_action": True,
-                    "harness_report": {},
-                    "conversation_id": cid,
-                }
-                if _shop_card:
-                    payload["shop_card"] = _shop_card
-                if _res.actions:
-                    payload["actions"] = _res.actions
-                yield _sse("result", json.dumps(payload, ensure_ascii=False))
-                yield _sse("done", json.dumps({"finish_reason": "stop"}))
-
-                # P0-3: shop 回复同样写入会话历史（"聊了什么"可见）
-                if conv_svc and cid and _final_answer:
-                    try:
-                        await conv_svc.aappend_assistant_message(
-                            conversation_id=cid,
-                            user_id=uid,
-                            session_id=sid,
-                            content=_final_answer,
-                        )
-                    except Exception:
-                        pass
-                return
-
-        # ================================================================
         # 以下是原有的推荐/聚焦分析流程 (保持不变)
         # ================================================================
         import time as _time
@@ -962,7 +689,8 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
 
         # P2 + P4: FollowUpEngine + Profile 并行加载
         _t0 = _time.perf_counter()
-        enriched_query = req.message
+        route_query = (shopping.data.get("workflow_query") if shopping_prefix else "") or req.message
+        enriched_query = route_query
         followup_constraints = {}
         context_prompt = ""
 
@@ -981,7 +709,7 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                     _snap = None
                 fu = engine.detect(conversation_id=cid, session_id=sid, current_query=req.message, snapshot=_snap)
                 if fu.get("is_follow_up") and fu.get("context_prompt"):
-                    enriched_query = f"{req.message}\n\n{fu['context_prompt']}"
+                    enriched_query = f"{route_query}\n\n{fu['context_prompt']}"
                 if fu.get("updated_constraints"):
                     followup_constraints = fu["updated_constraints"]
                 return fu
@@ -1007,22 +735,13 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
 
         follow_up, hints_result = await _asyncio.gather(_run_followup(), _run_profile())
         # 合并：FollowUp context_prompt + Profile context_prompt
-        context_prompt = (follow_up.get("context_prompt", "") + "\n" + hints_result["context_prompt"]).strip()
+        context_prompt = "\n".join(filter(None, (
+            follow_up.get("context_prompt", ""), hints_result["context_prompt"], shopping_prefix,
+        )))
         # 如果 FollowUp 改写了 query，保留改写版本；否则用 profile 增强版
         if enriched_query == req.message:
             enriched_query = hints_result["enriched_query"]
         logger.info(f"⏱ followup+profile: {(_time.perf_counter() - _t0) * 1000:.0f}ms (parallel)")
-
-        # 指代接受语（“行/就这个/就它/就买这个”）直接落为加购意图，不再拿
-        # “这个”去跑泛检索导致零召回。
-        _accept_words = ("行", "就这个", "就它", "就买", "买这个", "就要", "就选", "可以就")
-        if (
-            follow_up.get("resolved_product_id")
-            and follow_up.get("follow_up_type") in {"last_ref", "ordinal_ref", "brand_ref", "title_ref"}
-            and any(word in req.message for word in _accept_words)
-        ):
-            follow_up["follow_up_type"] = "cart_intent"
-            follow_up["cart_intent_product_id"] = follow_up["resolved_product_id"]
 
         # 文本指定商品、问欧米之外的图片识别，只有解析器确认“唯一精确商品”才
         # 升级为单品档案；系列、歧义和泛品类仍走原推荐链路，避免过度锁定。
@@ -1041,74 +760,6 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                     is_focused = True
             except Exception as exc:  # noqa: BLE001 -- 身份层/视觉层不可用不能阻断普通推荐
                 logger.debug("pre-ReAct product focus resolution skipped: %s", exc)
-
-        # ⭐ 对话式加购: FollowUpEngine 检测到 cart_intent → 直接加购
-        if follow_up.get("follow_up_type") == "cart_intent":
-            pid = follow_up.get("cart_intent_product_id", "")
-            if pid:
-                import time
-                from app.framework.tools import ToolContext
-                from app.providers.tools import get_tool_registry
-
-                yield _sse("status", json.dumps({"text": "正在操作购物车…"}, ensure_ascii=False))
-                _t0 = time.perf_counter()
-                _ctx = ToolContext(user_id=uid, session_id=sid, conversation_id=cid, args_raw=req.message)
-                _res = await get_tool_registry().invoke("cart.add", {"product_id": pid}, _ctx)
-                _shop_card = (_res.data or {}).get("shop_card")
-                _needs_llm = bool((_res.data or {}).get("needs_llm_summary")) and bool(_shop_card)
-                _final_answer = _res.message
-
-                if _needs_llm:
-                    from app.model_gateway.gateway import get_model_gateway
-                    from app.prompts.api_prompts import build_shop_summary_prompt
-
-                    _answer = ""
-                    try:
-                        _prompt = build_shop_summary_prompt(_shop_card)
-                        async for _token in get_model_gateway().chat_stream("chat_generation", _prompt):
-                            if await raw_request.is_disconnected():
-                                break
-                            _answer += _token
-                            yield _sse("token", json.dumps({"text": _token}, ensure_ascii=False))
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning(f"cart_intent summary LLM failed: {exc}")
-                    if _answer.strip():
-                        _final_answer = _answer
-                    else:
-                        for _i in range(0, len(_res.message), _STREAM_CHUNK_SIZE):
-                            yield _sse("token", json.dumps({"text": _res.message[_i:_i+_STREAM_CHUNK_SIZE]}, ensure_ascii=False))
-                            await asyncio.sleep(_STREAM_CHUNK_DELAY_SECONDS)
-                else:
-                    for _i in range(0, len(_res.message), _STREAM_CHUNK_SIZE):
-                        yield _sse("token", json.dumps({"text": _res.message[_i:_i+_STREAM_CHUNK_SIZE]}, ensure_ascii=False))
-                        await asyncio.sleep(_STREAM_CHUNK_DELAY_SECONDS)
-
-                _elapsed = time.perf_counter() - _t0
-                if _elapsed < 0.7:
-                    await asyncio.sleep(0.7 - _elapsed)
-
-                payload = {
-                    "answer": _final_answer,
-                    "products": [],
-                    "decision_results": [],
-                    "shop_action": True,
-                    "harness_report": {},
-                    "conversation_id": cid,
-                }
-                if _shop_card:
-                    payload["shop_card"] = _shop_card
-                if _res.actions:
-                    payload["actions"] = _res.actions
-                yield _sse("result", json.dumps(payload, ensure_ascii=False))
-                yield _sse("done", json.dumps({"finish_reason": "stop"}))
-                if conv_svc and cid and _final_answer:
-                    try:
-                        await conv_svc.aappend_assistant_message(
-                            conversation_id=cid, user_id=uid, session_id=sid, content=_final_answer,
-                        )
-                    except Exception:
-                        pass
-                return
 
         # P4: 对话提取检查 — 后台执行，不阻塞用户看到回复
         try:
@@ -1234,6 +885,8 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
             if candidate is None:
                 return
             answer = finalize_response(focus_state, candidate, get_response_guard(), cards=cards)
+            if shopping_prefix:
+                answer = shopping_prefix + "\n\n" + answer
             result = _result_with_recommendations(
                 focus_state, session_id=sid, conversation_id=cid, answer=answer,
             )
@@ -1245,17 +898,25 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
                 try:
                     await conv_svc.aappend_assistant_message(
                         conversation_id=cid, user_id=uid, session_id=sid, content=answer,
+                        product_refs=[p["product_id"] for p in result["products"] if p.get("product_id")],
                     )
+                    focus_record = {
+                        "product_id": target.product_id,
+                        "title": target.title,
+                        "brand": target.brand,
+                        "category": target.category,
+                        "sub_category": target.sub_category,
+                        "price": target.base_price,
+                        "locked_at": datetime.now(timezone.utc).isoformat(),
+                    }
                     await conv_svc.aupdate_context_snapshot(cid, {
-                        "focus_product": {
-                            "product_id": target.product_id,
-                            "title": target.title,
-                            "brand": target.brand,
-                            "category": target.category,
-                            "sub_category": target.sub_category,
-                            "price": target.base_price,
-                            "locked_at": datetime.now(timezone.utc).isoformat(),
-                        },
+                        "focus_product": focus_record,
+                        "last_products": [
+                            {key: product.get(key) for key in ("product_id", "title", "brand", "price")}
+                            for product in result["products"] if product.get("product_id")
+                        ] or [focus_record],
+                        "last_products_at": focus_record["locked_at"],
+                        "pending_question": None,
                     }, user_id=uid)
                 except Exception:
                     pass
@@ -1329,6 +990,8 @@ async def recommend_stream(req: StreamRequest, raw_request: Request, actor: Acto
             if candidate is None:
                 return
             answer = finalize_response(state, candidate, get_response_guard(), cards=primary)
+            if shopping_prefix:
+                answer = shopping_prefix + "\n\n" + answer
             state.timing["response_ms"] = round((_time.perf_counter() - _t_resp) * 1000)
             result = _result_with_recommendations(
                 state,

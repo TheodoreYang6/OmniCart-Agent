@@ -201,6 +201,7 @@ class WorkflowState(BaseModel):
     tool_ledger: list[dict] = Field(default_factory=list)
     tool_budget: dict = Field(default_factory=dict)
     tool_runtime_stop_reason: str = ""
+    allow_tool_writes: bool = True
     tool_runtime_mode: str = ""  # "normal" | "deep"，为空时兼容旧调用方
     # 仅在受控 ToolRuntime 的隔离快照中使用；关联 Router 分组与工具结果。
     # 不进入模型上下文或客户端协议。

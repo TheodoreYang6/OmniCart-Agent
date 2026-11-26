@@ -130,14 +130,18 @@ class ModelGateway:
                 system=system,
                 temperature=cfg.get("temperature", 0.7),
                 max_tokens=cfg.get("max_tokens", 2048),
+                **({"json_object": True} if cfg.get("json_object") else {}),
             )
             if provider.is_mock:
                 status = "mock"
         except Exception as e:
             status, error = "error", str(e)[:500]
-        await self._trace("qwen.chat", capability, model, system, prompt, response,
-                          t0, status, error)
-        _audit_call(capability, model, system + " " + prompt, response, round((time.perf_counter() - t0) * 1000), status)
+        trace_content = cfg.get("trace_content", True)
+        await self._trace("qwen.chat", capability, model, system if trace_content else "",
+                          prompt if trace_content else "", response if trace_content else "",
+                          t0, status, error if trace_content else "")
+        _audit_call(capability, model, system + " " + prompt if trace_content else "",
+                    response if trace_content else "", round((time.perf_counter() - t0) * 1000), status)
         if status == "error":
             raise RuntimeError(error)
         return response

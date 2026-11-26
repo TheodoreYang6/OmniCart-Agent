@@ -95,19 +95,26 @@ class RemoveFromCartTool(Tool):
         },
     )
 
-    async def run(self, ctx: ToolContext, ordinal: int | None = None) -> ToolResult:
-        if ordinal is None:
+    async def run(self, ctx: ToolContext, ordinal: int | None = None, cart_item_id: str | None = None) -> ToolResult:
+        if ordinal is None and not cart_item_id:
             return ToolResult(ok=False, message="请说「删除第几个」哦～比如「删除第二个」")
         try:
             from app.repositories.pg_cart_repo import get_cart_repo
 
             repo = get_cart_repo()
             cart = await repo.aget_cart(ctx.user_id)
-            if ordinal < 1 or ordinal > len(cart.items):
-                return ToolResult(ok=False, message=f"购物车只有{len(cart.items)}件商品哦～")
-            item = cart.items[ordinal - 1]
+            if cart_item_id:
+                item = next((row for row in cart.items if row.cart_item_id == cart_item_id), None)
+                if item is None:
+                    return ToolResult(ok=False, message="这件商品已不在购物车，请重新核对。")
+            else:
+                if ordinal is None or ordinal < 1 or ordinal > len(cart.items):
+                    return ToolResult(ok=False, message=f"购物车只有{len(cart.items)}件商品哦～")
+                item = cart.items[ordinal - 1]
             title = (item.brand + " " + item.title)[:60] if item.title else "商品"
-            await repo.aremove_item(item.cart_item_id, ctx.user_id)
+            removed = await repo.aremove_item(item.cart_item_id, ctx.user_id)
+            if cart_item_id and not removed:
+                return ToolResult(ok=False, message="购物车已变化，请重新核对。")
             return ToolResult(message=f"🗑 已删除「{title}」", data={"removed": item.cart_item_id})
         except Exception as e:  # noqa: BLE001
             logger.warning(f"cart.remove error: {e}")
@@ -130,7 +137,10 @@ class UpdateCartQtyTool(Tool):
         },
     )
 
-    async def run(self, ctx: ToolContext, quantity: int | None = None, ordinal: int | None = None) -> ToolResult:
+    async def run(
+        self, ctx: ToolContext, quantity: int | None = None, ordinal: int | None = None,
+        cart_item_id: str | None = None,
+    ) -> ToolResult:
         if quantity is None or quantity < 1:
             return ToolResult(ok=False, message="请说「数量改成N」哦～比如「数量改成2」")
         try:
@@ -141,14 +151,20 @@ class UpdateCartQtyTool(Tool):
             cart = await repo.aget_cart(ctx.user_id)
             if not cart.items:
                 return ToolResult(ok=False, message="购物车还是空的～")
-            if ordinal is not None:
+            if cart_item_id:
+                item = next((row for row in cart.items if row.cart_item_id == cart_item_id), None)
+                if item is None:
+                    return ToolResult(ok=False, message="这件商品已不在购物车，请重新核对。")
+            elif ordinal is not None:
                 if ordinal < 1 or ordinal > len(cart.items):
                     return ToolResult(ok=False, message=f"购物车只有{len(cart.items)}件商品哦～")
                 item = cart.items[ordinal - 1]
             else:
                 item = cart.items[0]
             title = (item.brand + " " + item.title)[:60] if item.title else "商品"
-            await repo.aupdate_item(item.cart_item_id, CartItemUpdate(quantity=quantity), ctx.user_id)
+            updated = await repo.aupdate_item(item.cart_item_id, CartItemUpdate(quantity=quantity), ctx.user_id)
+            if cart_item_id and not updated:
+                return ToolResult(ok=False, message="购物车已变化，请重新核对。")
             return ToolResult(message=f"🔢 「{title}」数量已改为 {quantity}")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"cart.update_qty error: {e}")
@@ -211,6 +227,7 @@ class AddToCartTool(Tool):
         title: str | None = None,
         brand: str | None = None,
         price: float | None = None,
+        pending_selection_id: str | None = None,
     ) -> ToolResult:
         if not product_id:
             return ToolResult(ok=False, message="请先说你想买什么，我再帮你加购哦～")
@@ -238,14 +255,15 @@ class AddToCartTool(Tool):
                     sp = s.price if s.price and s.price > 0 else base
                     label += f" ¥{sp:.0f}"
                     sku_actions.append(
-                        {"type": "sku_option", "label": label, "sku_id": s.sku_id, "product_id": product_id}
+                        {"type": "sku_option", "label": label, "sku_id": s.sku_id, "product_id": product_id, "quantity": quantity}
                     )
-                sku_actions.append({"type": "sku_option", "label": "默认规格", "sku_id": "", "product_id": product_id})
+                sku_actions.append({"type": "sku_option", "label": "默认规格", "sku_id": "", "product_id": product_id, "quantity": quantity})
                 t = (disp_brand + " " + disp_title)[:50]
                 shop_card = {
                     "kind": "sku_picker",
                     "payload": {
                         "product_id": product_id,
+                        "quantity": quantity,
                         "title": disp_title,
                         "brand": disp_brand,
                         "image_url": prod_repo.resolve_image_url(product_id),
@@ -279,12 +297,18 @@ class AddToCartTool(Tool):
             sel = None
             if sku_id:  # 非空字符串 -> 指定规格
                 sel = next((s for s in skus if s.sku_id == sku_id), None)
+                if sel is None:
+                    return ToolResult(ok=False, message="这个规格已不存在，请重新选择。")
             elif sku_id is None and skus:  # 未提供 + 单规格 -> 取第一个
                 sel = skus[0]
             # sku_id == "" -> sel 保持 None（显式无规格）
             sku_label = " · ".join(f"{k}:{v}" for k, v in (sel.properties or {}).items()) if sel else ""
             add_price = sel.price if sel and sel.price > 0 else hint_price
-            await get_cart_repo().aadd_item(
+            selection = (
+                {"pending_sku": (ctx.conversation_id, pending_selection_id)}
+                if pending_selection_id is not None else {}
+            )
+            added = await get_cart_repo().aadd_item(
                 CartItemCreate(product_id=product_id, sku_id=(sel.sku_id if sel else None), quantity=quantity),
                 ctx.user_id,
                 title=disp_title,
@@ -292,9 +316,17 @@ class AddToCartTool(Tool):
                 price=add_price,
                 image_url=prod_repo.resolve_image_url(product_id),
                 sku_label=sku_label,
+                **selection,
             )
+            if added is None:
+                message = ("这张规格卡已处理或已更新，请重新发起加购。"
+                           if selection else "加购失败，请稍后重试。")
+                return ToolResult(ok=False, message=message)
             t = (disp_brand + " " + disp_title)[:60]
-            cart = await get_cart_repo().aget_cart(ctx.user_id)
+            try:
+                cart = await get_cart_repo().aget_cart(ctx.user_id)
+            except Exception:
+                return ToolResult(message=f"已把「{t}」放进购物车～", data={"cart_changed": True})
             cart_total = float(cart.total_price)
             cart_count = cart.total_count
             shop_card = _cart_summary_card(cart)
@@ -304,7 +336,6 @@ class AddToCartTool(Tool):
                     "shop_card": shop_card,
                     "cart_count": cart_count,
                     "cart_total": cart_total,
-                    "needs_llm_summary": True,
                 },
                 actions=[{"type": "quick_reply", "label": "去购物车结算", "route": "cart"}],
             )

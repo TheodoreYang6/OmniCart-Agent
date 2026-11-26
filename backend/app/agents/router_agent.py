@@ -11,6 +11,7 @@ from app.model_gateway.gateway import get_model_gateway
 from app.prompts.agent_prompts import build_router_prompt
 from app.schemas.a2a import AgentCard
 from app.schemas.workflow import Constraints, RetrievalPlan, SubQuery, WorkflowState
+from app.services.shopping_intent import is_cart_add_request
 
 logger = logging.getLogger(__name__)
 
@@ -409,7 +410,7 @@ def _rule_based_parse(query: str) -> dict:
 
     # Intent
     # 购物车操作 (最高优先级，避免被其他意图误判)
-    if any(w in q for w in ["加入购物车", "加到购物车", "加购物车", "下单", "结算", "结账",
+    if is_cart_add_request(q) or any(w in q for w in ["下单", "结算", "结账",
                               "删掉第", "删除第", "去掉第", "移除第", "清空购物车",
                               "地址用默认", "默认地址"]):
         result["intent"] = "shop_action"

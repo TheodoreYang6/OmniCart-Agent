@@ -6,6 +6,7 @@
 """
 
 import logging
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.schemas.cart import CartItemCreate, CartItemUpdate, DEMO_USER_ID
@@ -37,8 +38,11 @@ async def get_cart(user_id: str = DEMO_USER_ID,
 @router.post("/api/cart/items")
 async def add_to_cart(item: CartItemCreate, user_id: str = DEMO_USER_ID,
                       session_id: str = Query(default=""), conversation_id: str = Query(default=""),
-                      actor: Actor = Depends(resolve_actor)):
+                      actor: Actor = Depends(resolve_actor),
+                      selection_id: Annotated[str | None, Query(pattern=r"^(?:[a-f0-9]{32}|legacy)$")] = None):
     user_id = actor_or_legacy(actor, user_id, protected=True).user_id
+    if selection_id and not conversation_id:
+        raise HTTPException(422, "缺少选择规格的会话。")
     from app.repositories.product_repo import get_product_repo
     repo = get_product_repo()
     product = repo.get_by_id(item.product_id)
@@ -61,16 +65,34 @@ async def add_to_cart(item: CartItemCreate, user_id: str = DEMO_USER_ID,
                 break
 
     cart_repo = get_cart_repo()
-    cart_item = cart_repo.add_item(
-        item, user_id,
-        title=product.title,
-        brand=product.brand,
-        price=sku_price,
-        image_url=repo.resolve_image_url(product.product_id),
-        sku_label=sku_label,
-    )
-    if cart_item is None:
-        raise HTTPException(status_code=500, detail="failed to add item")
+    details = {
+        "title": product.title, "brand": product.brand, "price": sku_price,
+        "image_url": repo.resolve_image_url(product.product_id), "sku_label": sku_label,
+    }
+    if selection_id:
+        pending_id = "" if selection_id == "legacy" else selection_id
+        cart_item = await cart_repo.aadd_item(item, user_id, pending_sku=(conversation_id, pending_id), **details)
+        if cart_item is None:
+            raise HTTPException(409, "这张规格卡已处理或已更新，请重新发起加购。")
+    else:
+        cart_item = cart_repo.add_item(item, user_id, **details)
+        if cart_item is None:
+            raise HTTPException(status_code=500, detail="failed to add item")
+
+    if conversation_id:
+        try:
+            from app.services.conversation_service import get_conversation_service
+
+            conv = get_conversation_service()
+            if selection_id:
+                conv.invalidate_context_snapshot(conversation_id, user_id=user_id)
+            else:
+                snapshot = await conv.get_context_snapshot(conversation_id, user_id=user_id)
+                pending = snapshot.get("pending_sku_product") or {}
+                if not pending.get("selection_id") and pending.get("product_id") == item.product_id:
+                    await conv.aupdate_context_snapshot(conversation_id, {"pending_sku_product": None}, user_id=user_id)
+        except Exception:
+            logger.debug("Could not clear completed cart SKU selection")
 
     return cart_item.model_dump()
 

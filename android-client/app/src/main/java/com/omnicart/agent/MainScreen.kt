@@ -147,6 +147,19 @@ fun MainScreen(
                         onAskDouzaiConsumed = { askDouzaiProductId = ""; askDouzaiTitle = "" },
                         onProductClick = { productId -> navController.navigate("product_detail/$productId") },
                         onNavigateToAddress = { navController.navigate("address_select") },
+                        onNavigateForShopAction = { route ->
+                            when (route.substringBefore('?')) {
+                                "cart" -> {
+                                    cartRefreshKey++
+                                    navController.navigate("cart")
+                                }
+                                "orders" -> navController.navigate("orders")
+                                "login" -> navController.navigate("login")
+                                "address" -> navController.navigate("address_select")
+                                "reports" -> android.widget.Toast.makeText(context, "请在网页端打开选购报告", android.widget.Toast.LENGTH_SHORT).show()
+                                else -> Unit
+                            }
+                        },
                     )
                 }
             }

@@ -36,6 +36,8 @@ export function ShopActionCard({ card, onActionClick }: ShopActionCardProps) {
                   type: 'sku_option',
                   product_id: payload.product_id,
                   sku_id: sku.sku_id,
+                  quantity: payload.quantity,
+                  selection_id: payload.selection_id,
                   label: sku.label,
                 })
               }

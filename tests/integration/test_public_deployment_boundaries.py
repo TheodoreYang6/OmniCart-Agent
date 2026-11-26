@@ -402,3 +402,77 @@ async def test_expired_cart_stays_pending_until_alipay_confirms(monkeypatch, gat
             assert retry.json()["status"] == "quoted"
             replacement_url = f"{quote_path}/{retry.json()['order_id']}"
             assert (await client.post(replacement_url + "/confirm", json={"confirmed": True})).status_code == 200
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_cart_sku_selection_is_atomic_across_chat_and_web(monkeypatch):
+    import asyncio
+
+    from app.models.product import ProductModel
+    from app.services.conversation_service import get_conversation_service
+    from app.services.chat_shopping_intent import ShoppingIntent
+    from app.services.chat_shopping_router import run_shopping_turn
+
+    product_id = "qa-sku-" + token_hex(6)
+    selection_id = token_hex(16)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://local") as client:
+        user_id = await _buyer(client)
+        conversation = get_conversation_service()
+        sid = token_hex(8)
+        state = await conversation.aget_or_create(user_id=user_id, session_id=sid)
+        cid = state["conversation_id"]
+        async with get_session_sync()() as session:
+            session.add(ProductModel(
+                product_id=product_id, title="QA 耳机", brand="QA", category="数码电子",
+                base_price=199, skus=[
+                    {"sku_id": "black", "properties": {"颜色": "黑色"}, "price": 199},
+                    {"sku_id": "blue", "properties": {"颜色": "蓝色"}, "price": 199},
+                ],
+            ))
+            await session.commit()
+        await conversation.aupdate_context_snapshot(cid, {
+            "pending_sku_product": {"selection_id": selection_id, "product_id": product_id, "quantity": 2},
+        }, user_id=user_id)
+
+        params = {"conversation_id": cid, "selection_id": selection_id}
+        item = {"product_id": product_id, "sku_id": "black"}
+        wrong_quantity = await client.post("/api/cart/items", params=params, json={**item, "quantity": 1})
+        assert wrong_quantity.status_code == 409
+
+        entered_model = asyncio.Event()
+        release_model = asyncio.Event()
+
+        async def interpret(*_):
+            entered_model.set()
+            await release_model.wait()
+            return ShoppingIntent(action="cart.select_sku", sku="s2")
+
+        monkeypatch.setattr("app.services.chat_shopping_router.understand_shopping_turn", interpret)
+        selecting = asyncio.create_task(run_shopping_turn(
+            ToolContext(user_id=user_id, conversation_id=cid, session_id=sid, args_raw="蓝色"),
+            conversation, authenticated=True, payment_available=False,
+        ))
+        await asyncio.wait_for(entered_model.wait(), timeout=5)
+        release_model.set()
+        clicked, spoken = await asyncio.gather(
+            client.post("/api/cart/items", params=params, json={**item, "quantity": 2}),
+            selecting,
+        )
+        assert (clicked.status_code == 200) != spoken.ok
+        cart = (await client.get("/api/cart")).json()
+        assert len(cart["items"]) == 1 and cart["items"][0]["quantity"] == 2
+        assert cart["items"][0]["sku_id"] == ("black" if clicked.status_code == 200 else "blue")
+        replay = await client.post("/api/cart/items", params=params, json={**item, "quantity": 2})
+        assert replay.status_code == 409
+
+        await conversation.aupdate_context_snapshot(cid, {
+            "pending_sku_product": {"product_id": product_id},
+        }, user_id=user_id)
+        old_card = {"conversation_id": cid, "selection_id": "legacy"}
+        clicks = await asyncio.gather(*[
+            client.post("/api/cart/items", params=old_card, json={**item, "quantity": 1})
+            for _ in range(2)
+        ])
+        assert sorted(reply.status_code for reply in clicks) == [200, 409]
+        assert len((await client.get("/api/cart")).json()["items"]) == 2

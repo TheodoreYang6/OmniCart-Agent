@@ -134,3 +134,15 @@ async def test_llm_failure_degrades_to_rules(monkeypatch):
     state = await RouterAgent().execute(state)
     assert state.intent == "bundle"                    # 规则兜底
     assert state.retrieval_plan.sub_queries == []      # 降级 = 现状单查询行为
+
+
+def test_cart_add_intent_distinguishes_requests_from_mentions():
+    from app.agents.router_agent import _rule_based_parse
+    from app.services.shopping_intent import is_cart_add_request
+
+    message = "帮我加入到购物车吧～"
+    assert is_cart_add_request(message)
+    assert _rule_based_parse(message)["intent"] == "shop_action"
+    for message in ("怎么把这个加入到购物车", "先不要加到购物车", "我不加购", "加入到购物车失败了", "已经加入到购物车了"):
+        assert not is_cart_add_request(message)
+        assert _rule_based_parse(message)["intent"] != "shop_action"

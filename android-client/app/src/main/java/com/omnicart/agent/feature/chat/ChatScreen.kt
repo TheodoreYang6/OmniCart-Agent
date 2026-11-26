@@ -59,6 +59,7 @@ fun ChatScreen(
     onAskDouzaiConsumed: () -> Unit = {},
     onProductClick: (String) -> Unit = {},
     onNavigateToAddress: () -> Unit = {},
+    onNavigateForShopAction: (String) -> Unit = {},
 ) {
     LaunchedEffect(sessionId) {
         if (sessionId.isNotBlank() && viewModel.uiState.value.sessionId != sessionId) {
@@ -445,6 +446,8 @@ fun ChatScreen(
                                             ShopActionButtons(
                                                 actions = message.actions,
                                                 onAddressForm = onNavigateToAddress,
+                                                onConfirm = viewModel::onConfirmShopAction,
+                                                onNavigate = onNavigateForShopAction,
                                                 onQuickReply = { viewModel.onQueryChange(it); viewModel.onSend() },
                                             )
                                         }
@@ -1138,6 +1141,8 @@ fun ClarificationChips(
 @Composable
 fun ShopActionButtons(
     actions: List<Map<String, Any?>>,
+    onConfirm: (String) -> Unit,
+    onNavigate: (String) -> Unit,
     onAddressForm: () -> Unit,
     onQuickReply: (String) -> Unit,
 ) {
@@ -1161,9 +1166,22 @@ fun ShopActionButtons(
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         ) { Text(label, style = MaterialTheme.typography.labelLarge) }
                     }
-                    "quick_reply" -> {
+                    "login" -> {
+                        OutlinedButton(onClick = { onNavigate("login") }) {
+                            Text(label, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                    "confirm_shop_action" -> {
+                        val confirmation = action["confirmation"]?.toString().orEmpty()
                         OutlinedButton(
-                            onClick = { onQuickReply(label) },
+                            onClick = { onConfirm(confirmation) },
+                            enabled = confirmation.isNotBlank(),
+                        ) { Text(label, style = MaterialTheme.typography.labelLarge) }
+                    }
+                    "quick_reply" -> {
+                        val route = action["route"]?.toString().orEmpty()
+                        OutlinedButton(
+                            onClick = { if (route.isBlank()) onQuickReply(label) else onNavigate(route) },
                             shape = RoundedCornerShape(20.dp),
                         ) { Text(label, style = MaterialTheme.typography.labelLarge) }
                     }

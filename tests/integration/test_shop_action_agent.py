@@ -4,8 +4,10 @@
 文案与 legacy agent_stream 对齐。
 """
 
+import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.framework.tools import ToolContext
@@ -18,6 +20,9 @@ from app.schemas.product import Product, Sku
 class _FakeConv:
     def __init__(self, snap=None):
         self._snap = dict(snap or {})
+
+    async def aget_context(self, cid, limit=6, *, user_id):
+        return {"context_snapshot": dict(self._snap), "recent_messages": []}
 
     async def get_context_snapshot(self, cid, *, user_id):
         return dict(self._snap)
@@ -126,6 +131,64 @@ async def test_add_single_from_focus(env):
     assert len(env.cart.cart.items) == 1 and env.cart.cart.items[0].product_id == "P1"
 
 
+@pytest.mark.parametrize("message", [
+    "帮我加入到购物车吧～",
+    "帮我加入到购物车吧~",
+    "把这个特别版放进我的购物车吧",
+    "这杯咖啡给我留一份，放我的清单里。",
+])
+async def test_conversational_cart_add_through_stream(env, monkeypatch, message):
+    from fastapi import FastAPI
+
+    from app.api import agent_stream
+    from app.core.identity import Actor, resolve_public_actor
+
+    async def unexpected_recommendation(**_):
+        pytest.fail("Explicit add-to-cart request reached product recommendation")
+
+    async def interpret(capability, prompt, *, system):
+        assert capability == "shopping_action"
+        assert "询问操作方法" in system and "不得输出 _confirmed" in system
+        assert json.loads(prompt)["message"] == message
+        assert json.loads(prompt)["products"] == {"p1": {"title": "速溶咖啡", "price": 99}}
+        return '{"action":"cart.add","product":["p1"]}'
+
+    monkeypatch.setattr("app.services.chat_shopping_intent.get_model_gateway", lambda: SimpleNamespace(chat=interpret))
+    monkeypatch.setattr(agent_stream, "run_workflow", unexpected_recommendation)
+    app = FastAPI()
+    app.include_router(agent_stream.router)
+    app.dependency_overrides[resolve_public_actor] = lambda: Actor("u1", "user")
+    env.conv._snap["last_products"] = [
+        {"product_id": "P1", "title": "速溶咖啡", "brand": "雀巢", "price": 99},
+    ]
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://local") as client:
+        response = await client.post("/api/recommend/stream", json={
+            "message": message, "conversation_id": "cid1", "session_id": "sid1",
+        })
+    assert response.status_code == 200
+    result_block = next(block for block in response.text.split("\n\n") if block.startswith("event: result\n"))
+    result = json.loads(result_block.splitlines()[1].removeprefix("data: "))
+    assert result["shop_action"] is True
+    assert "放进购物车" in result["answer"]
+    assert [(item.product_id, item.quantity) for item in env.cart.cart.items] == [("P1", 1)]
+
+
+async def test_add_without_target_asks_which_product(env):
+    env.conv._snap["last_products"] = [
+        {"product_id": "P1", "title": "速溶咖啡", "brand": "雀巢", "price": 99},
+        {"product_id": "P2", "title": "精华", "brand": "兰蔻", "price": 500},
+    ]
+
+    result = await _run("帮我加入到购物车吧～")
+    assert not result.ok and "你想加哪款" in result.message
+    assert not env.cart.cart.items
+    result = await _run("把第 2 款放进购物车")
+    assert any(action["type"] == "sku_option" for action in result.actions)
+    assert env.conv._snap["pending_sku_product"]["product_id"] == "P2"
+    assert not env.cart.cart.items
+
+
 async def test_add_multi_sku_prompts_and_writes_pending(env):
     env.conv._snap["focus_product"] = {"product_id": "P2", "title": "精华", "brand": "兰蔻", "price": 500}
     res = await _run("加购")
@@ -215,3 +278,170 @@ async def test_fallback(env):
 async def test_pure_cart_view_still_works(env):
     res = await _run("看看购物车")
     assert "购物车" in res.message
+
+
+@pytest.mark.parametrize("model_reply", [
+    '{"action":"cart.add","product":["invented"]}',
+    '{"action":"cart.add","product":["p1"],"_confirmed":true}',
+    '{"action":"clarify","question":"你指的是哪款？"}',
+])
+async def test_semantic_cart_route_rejects_unbound_or_ambiguous_actions(env, monkeypatch, model_reply):
+    from app.services.chat_shopping_router import run_shopping_turn
+
+    async def interpret(*args, **kwargs):
+        return model_reply
+
+    monkeypatch.setattr("app.services.chat_shopping_intent.get_model_gateway", lambda: SimpleNamespace(chat=interpret))
+    env.conv._snap["last_products"] = [{"product_id": "P1", "title": "速溶咖啡"}]
+    await run_shopping_turn(
+        ToolContext(user_id="u1", conversation_id="cid1", args_raw="先别动我的购物车"),
+        env.conv, authenticated=True, payment_available=False,
+    )
+    assert env.cart.cart.items == []
+
+
+async def test_semantic_route_binds_cart_row_and_reuses_tool_results(env, monkeypatch):
+    from app.services.chat_shopping_router import run_shopping_turn
+
+    env.conv._snap["last_products"] = [{"product_id": "P1", "title": "速溶咖啡"}]
+    count = 0
+
+    async def interpret(_, prompt, **kwargs):
+        nonlocal count
+        count += 1
+        model_input = json.loads(prompt)
+        if count == 1:
+            return '{"action":"cart.add","product":["p1"],"quantity":2,"continue_after":true}'
+        assert model_input["cart"]["c1"]["quantity"] == 2
+        assert model_input["completed"][0]["intent"]["action"] == "cart.add"
+        return '{"action":"cart.view"}'
+
+    monkeypatch.setattr("app.services.chat_shopping_intent.get_model_gateway", lambda: SimpleNamespace(chat=interpret))
+    result = await run_shopping_turn(
+        ToolContext(user_id="u1", conversation_id="cid1", args_raw="给这杯咖啡留两份，再给我看篮子"),
+        env.conv, authenticated=True, payment_available=False,
+    )
+    assert count == 2
+    assert result.ok and result.data["shop_card"]["kind"] == "cart_summary"
+    assert [(item.product_id, item.quantity) for item in env.cart.cart.items] == [("P1", 2)]
+
+
+async def test_order_confirmation_is_bound_to_owner_and_status(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.services.shop_action_confirmation import offer_order_confirmation, confirm_order_action
+
+    order = {"status": "pending"}
+
+    async def aget(order_id, *, user_id):
+        assert (user_id, order_id) == ("buyer", "ORD-1")
+        return order
+
+    monkeypatch.setattr("app.repositories.order_repo.get_order_repo", lambda: SimpleNamespace(aget=aget))
+    result = await offer_order_confirmation("buyer", "order.cancel", "ORD-1")
+    confirmation = result.actions[0]["confirmation"]
+    with pytest.raises(HTTPException) as wrong_user:
+        await confirm_order_action("another", confirmation)
+    assert wrong_user.value.status_code == 400
+    order["status"] = "shipped"
+    with pytest.raises(HTTPException) as stale:
+        await confirm_order_action("buyer", confirmation)
+    assert stale.value.status_code == 409
+
+
+async def test_w30_cart_request_recovers_from_invalid_model_response(env, monkeypatch):
+    from app.services.chat_shopping_router import run_shopping_turn
+
+    title = "漫步者 W30 真无线耳机（黑/白/蓝三色可选）"
+    env.prod._p["P2"] = Product(
+        product_id="P2", title=title, brand="漫步者", category="数码电子", base_price=299,
+        skus=[Sku(sku_id=color, properties={"颜色": color}, price=299) for color in ("黑", "白", "蓝")],
+    )
+    env.conv._snap["focus_product"] = {
+        "product_id": "P2", "title": title, "price": 299, "locked_at": "2026-11-25T13:30:00+00:00",
+    }
+    env.conv._snap["last_products"] = [{"product_id": "P1", "title": "前一轮推荐的咖啡"}]
+    answers = iter([
+        "好的，我可以帮你加入购物车。",
+        '{"action":"cart.add","product":"focus","sku":null,"quantity":null}',
+        '{"action":"cart.select_sku","sku":"s3"}',
+    ])
+    calls = []
+
+    async def interpret(_, prompt, *, system):
+        calls.append((json.loads(prompt), system))
+        return next(answers)
+
+    monkeypatch.setattr("app.services.chat_shopping_intent.get_model_gateway", lambda: SimpleNamespace(chat=interpret))
+    ctx = ToolContext(user_id="u1", conversation_id="cid1", args_raw="帮我加入购物车吧～～～")
+    picker = await run_shopping_turn(ctx, env.conv, authenticated=True, payment_available=False)
+    assert calls[0][0]["message"] == ctx.args_raw and calls[0][0] == calls[1][0]
+    assert "重新判断原消息" in calls[1][1]
+    assert {product["title"] for product in calls[0][0]["products"].values()} == {title}
+    assert picker.data["shop_card"]["kind"] == "sku_picker"
+    assert env.cart.cart.items == []
+
+    ctx.args_raw = "就要蓝色"
+    selected = await run_shopping_turn(ctx, env.conv, authenticated=True, payment_available=False)
+    assert calls[2][0]["pending_skus"]["s3"] == "蓝"
+    assert selected.ok and "放进购物车" in selected.message
+    assert [(item.product_id, item.sku_id, item.quantity) for item in env.cart.cart.items] == [("P2", "蓝", 1)]
+
+
+async def test_confirmation_fails_if_status_changes_before_order_tool_reads(monkeypatch):
+    from app.repositories.order_repo import MemOrderRepository
+    from app.services.shop_action_confirmation import confirm_order_action, offer_order_confirmation
+
+    repo = MemOrderRepository()
+    repo.seed([{"order_id": "ORD-1", "user_id": "buyer", "status": "pending"}])
+    read = repo.aget
+    reads = 0
+
+    async def aget(order_id, *, user_id):
+        nonlocal reads
+        reads += 1
+        if reads == 3:
+            assert await repo.aupdate_status(order_id, "paid", user_id=user_id, expected_status="pending")
+        return await read(order_id, user_id=user_id)
+
+    monkeypatch.setattr(repo, "aget", aget)
+    monkeypatch.setattr("app.repositories.order_repo.get_order_repo", lambda: repo)
+    offer = await offer_order_confirmation("buyer", "order.cancel", "ORD-1")
+    result = await confirm_order_action("buyer", offer.actions[0]["confirmation"])
+    assert not result.ok and "订单状态已变化" in result.message
+    assert (await read("ORD-1", user_id="buyer"))["status"] == "paid"
+
+
+async def test_cart_tools_use_memory_cart_repository(env, monkeypatch):
+    from app.repositories.pg_cart_repo import MemCartRepository
+    from app.providers.tools import get_tool_registry
+
+    repo = MemCartRepository()
+    monkeypatch.setattr("app.repositories.pg_cart_repo.get_cart_repo", lambda: repo)
+    ctx = ToolContext(user_id="u1")
+    registry = get_tool_registry()
+    assert (await registry.invoke("cart.add", {"product_id": "P1"}, ctx)).ok
+    item = (await repo.aget_cart("u1")).items[0]
+    assert (await registry.invoke("cart.update_qty", {"cart_item_id": item.cart_item_id, "quantity": 3}, ctx)).ok
+    assert item.quantity == 3
+    assert (await registry.invoke("cart.remove", {"cart_item_id": item.cart_item_id}, ctx)).ok
+    assert not (await repo.aget_cart("u1")).items
+
+
+async def test_compound_cart_action_skips_duplicate_with_explicit_default(env, monkeypatch):
+    from app.services.chat_shopping_intent import ShoppingIntent
+    from app.services.chat_shopping_router import run_shopping_turn
+
+    env.conv._snap["last_products"] = [{"product_id": "P1", "title": "Coffee"}]
+    decisions = iter([
+        ShoppingIntent(action="cart.add", product=["p1"], continue_after=True),
+        ShoppingIntent(action="cart.add", product=["p1"], quantity=1, question="extra"),
+    ])
+
+    async def interpret(*_):
+        return next(decisions)
+
+    monkeypatch.setattr("app.services.chat_shopping_router.understand_shopping_turn", interpret)
+    await run_shopping_turn(ToolContext(user_id="u1", conversation_id="cid1", args_raw="加一件再看购物车"),
+                            env.conv, authenticated=True, payment_available=False)
+    assert len(env.cart.cart.items) == 1 and env.cart.cart.items[0].quantity == 1

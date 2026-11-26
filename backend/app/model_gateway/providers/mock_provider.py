@@ -12,7 +12,10 @@ class MockModelProvider:
 
     is_mock = True
 
-    async def chat(self, *, model: str, prompt: str, system: str, temperature: float, max_tokens: int) -> str:
+    async def chat(
+        self, *, model: str, prompt: str, system: str, temperature: float, max_tokens: int,
+        json_object: bool = False,
+    ) -> str:
         return MockChat().generate(prompt, system)
 
     async def chat_stream(

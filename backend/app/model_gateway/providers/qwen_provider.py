@@ -31,11 +31,14 @@ class QwenModelProvider:
 
         return await self._breaker.call(lambda: retry_async(_timed, attempts=self._attempts))
 
-    async def chat(self, *, model: str, prompt: str, system: str, temperature: float, max_tokens: int) -> str:
+    async def chat(
+        self, *, model: str, prompt: str, system: str, temperature: float, max_tokens: int,
+        json_object: bool = False,
+    ) -> str:
         from app.model_gateway.qwen_chat import QwenChat
 
         chat = QwenChat(model=model, temperature=temperature, max_tokens=max_tokens)
-        return await self._guard(lambda: chat.generate(prompt, system))
+        return await self._guard(lambda: chat.generate(prompt, system, json_object=json_object))
 
     async def chat_stream(
         self, *, model: str, prompt: str, system: str, temperature: float, max_tokens: int

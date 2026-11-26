@@ -204,7 +204,9 @@ class OrderCancelTool(Tool):
         },
     )
 
-    async def run(self, ctx: ToolContext, order_id: str = "") -> ToolResult:
+    async def run(
+        self, ctx: ToolContext, order_id: str = "", expected_status: str | None = None,
+    ) -> ToolResult:
         if not order_id:
             return ToolResult(ok=False, message="请指定要取消的订单～")
         try:
@@ -218,6 +220,8 @@ class OrderCancelTool(Tool):
         if not order:
             return ToolResult(ok=False, message=f"找不到订单 {order_id}～")
         cur = order.get("status", "")
+        if expected_status is not None and cur != expected_status:
+            return ToolResult(ok=False, message="订单状态已变化，请重新核对。")
         if order.get("payment_environment"):
             return ToolResult(ok=False, message="这笔订单有支付流水，请通过对应的支付渠道处理。")
         if cur == "cancelled":
@@ -302,7 +306,9 @@ class OrderPayTool(Tool):
         },
     )
 
-    async def run(self, ctx: ToolContext, order_id: str = "", method: str = "mock") -> ToolResult:
+    async def run(
+        self, ctx: ToolContext, order_id: str = "", method: str = "mock", expected_status: str | None = None,
+    ) -> ToolResult:
         if not order_id:
             return ToolResult(ok=False, message="请指定要支付的订单～")
         try:
@@ -317,6 +323,10 @@ class OrderPayTool(Tool):
         if not order:
             return ToolResult(ok=False, message=f"找不到订单 {order_id}～")
         cur = order.get("status", "")
+        if expected_status is not None and cur != expected_status:
+            return ToolResult(ok=False, message="订单状态已变化，请重新核对。")
+        if order.get("payment_environment"):
+            return ToolResult(ok=False, message="这笔订单有支付宝流水，请通过对应的支付渠道处理。")
         if cur == "paid":
             return ToolResult(ok=False, message=f"订单 {order_id} 已支付，无需重复～")
         if cur == "cancelled":

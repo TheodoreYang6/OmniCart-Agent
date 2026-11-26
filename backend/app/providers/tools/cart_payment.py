@@ -14,6 +14,7 @@ from app.services.payment_settlement import _expired, _refresh, fulfillment_stat
 QUOTE = "order.cart_payment_quote"
 CONFIRM = "order.cart_payment_confirm"
 STATUS = "order.cart_payment_status"
+OPEN = "order.cart_payment_open"
 
 _SETTLED_MESSAGES = {
     "paid": "已确认付款成功，购物订单已保存。",
@@ -78,7 +79,7 @@ class CartPaymentQuote(Tool):
         elif order.status == "pending":
             message = f"这笔 ¥{total} 的订单已确认。你可以打开购物车查看支付状态。"
         else:
-            message = f"购物车选中商品应付 ¥{total}。核对商品和地址后，在这段对话回复「确认支付」，或打开支付预览确认。"
+            message = f"购物车选中商品应付 ¥{total}。请打开支付预览核对商品和地址，再确认。"
         return ToolResult(message=message, data={"shop_card": card}, actions=[_view_action(order, "打开支付预览")])
 
 
@@ -104,6 +105,20 @@ class CartPaymentConfirm(Tool):
                           actions=[_view_action(order, "打开演示收银台")])
 
 
+class CartPaymentOpen(Tool):
+    spec = ToolSpec(name=OPEN, category="order", llm_exposed=False,
+                    description="打开当前对话的购物车支付确认页")
+
+    async def run(self, ctx: ToolContext) -> ToolResult:
+        try:
+            async with _factory(ctx)() as session:
+                order = await chat_cart_payment(session, ctx.user_id, ctx.session_id)
+        except HTTPException as exc:
+            return ToolResult(ok=False, message=str(exc.detail))
+        return ToolResult(message="请在支付页核对商品和金额后确认。",
+                          actions=[_view_action(order, "打开支付确认页")])
+
+
 class CartPaymentStatus(Tool):
     spec = ToolSpec(name=STATUS, category="order", llm_exposed=False, timeout_ms=12000,
                     description="读取并核验当前对话中的购物车付款结果")
@@ -117,7 +132,7 @@ class CartPaymentStatus(Tool):
             return ToolResult(ok=False, message=str(exc.detail))
         messages = {
             **_SETTLED_MESSAGES,
-            "quoted": "购物车订单等待确认，请核对后回复「确认支付」。",
+            "quoted": "购物车订单等待确认，请打开支付页核对后确认。",
             "pending": "这笔订单还在等待支付宝确认，请查看支付状态。",
             "closed": "这笔支付订单已关闭，可以重新发起购物车结算。",
         }
@@ -130,5 +145,5 @@ class CartPaymentStatus(Tool):
 @lru_cache(maxsize=1)
 def cart_payment_tools() -> ToolRegistry:
     registry = ToolRegistry(kind="tool")
-    registry.register_all([CartPaymentQuote(), CartPaymentConfirm(), CartPaymentStatus()])
+    registry.register_all([CartPaymentQuote(), CartPaymentConfirm(), CartPaymentOpen(), CartPaymentStatus()])
     return registry

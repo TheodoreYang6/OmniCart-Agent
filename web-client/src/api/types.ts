@@ -239,6 +239,8 @@ export interface CartSummaryPayload {
 
 export interface SkuPickerPayload {
   product_id: string
+  quantity?: number
+  selection_id?: string
   title: string
   brand: string
   image_url: string
@@ -609,6 +611,8 @@ export interface ChatAction {
   cart_item_id?: string
   quantity?: number
   checkout_url?: string
+  confirmation?: string
+  selection_id?: string
 }
 
 export interface ClarificationOption {

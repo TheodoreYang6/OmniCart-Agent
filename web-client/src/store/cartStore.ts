@@ -27,7 +27,7 @@ interface CartState {
 
   setContext: (sessionId: string, conversationId: string) => void
   loadCart: () => Promise<void>
-  addToCart: (productId: string, skuId?: string | null, quantity?: number) => Promise<boolean>
+  addToCart: (productId: string, skuId?: string | null, quantity?: number, selectionId?: string) => Promise<boolean>
   toggleItem: (id: string) => Promise<void>
   toggleSelectAll: () => Promise<void>
   setQuantity: (id: string, quantity: number) => Promise<void>
@@ -132,10 +132,11 @@ export const useCartStore = create<CartState>((set, get) => {
       return cartLoadPromise
     },
 
-    addToCart: async (productId, skuId = null, quantity = 1) => {
+    addToCart: async (productId, skuId = null, quantity = 1, selectionId) => {
       if (!requireLogin("加入购物车")) return false
       try {
-        const item = await api.addToCart({ product_id: productId, sku_id: skuId, quantity }, ctx())
+        const context = selectionId ? { ...ctx(), selection_id: selectionId } : ctx()
+        const item = await api.addToCart({ product_id: productId, sku_id: skuId, quantity }, context)
         if (!item || typeof item.cart_item_id !== 'string' || !item.cart_item_id) {
           set({ error: '加购失败' })
           return false

@@ -125,7 +125,7 @@ class QwenChat:
             "Content-Type": "application/json",
         }
 
-    async def generate(self, prompt: str, system: str = "") -> str:
+    async def generate(self, prompt: str, system: str = "", *, json_object: bool = False) -> str:
         client = _get_client()
         resp = await client.post(
             f"{self._base_url}/chat/completions",
@@ -135,6 +135,7 @@ class QwenChat:
                 "messages": self._build_messages(prompt, system),
                 "temperature": self._temperature,
                 "max_tokens": self._max_tokens,
+                **({"response_format": {"type": "json_object"}} if json_object else {}),
                 # 关闭思考模式：qwen3.x 默认带思考链，延迟 6-20s → 关闭后 <1s；老模型忽略该参数
                 **self._no_think_params(),
             },

@@ -266,7 +266,7 @@ class PgProductRepository(BaseProductRepository):
             title=row.title,
             brand=row.brand,
             category=row.category,
-            sub_category=row.sub_category,
+            sub_category=row.sub_category or "",
             image_path=row.image_path or "",
             base_price=float(row.base_price),
             skus=row.skus or [],

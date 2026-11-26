@@ -166,3 +166,22 @@ async def test_shop_agent_flag_off_falls_to_prompt(monkeypatch):
     monkeypatch.setattr("app.core.config.ENABLE_LLM_TOOL_CALLING", False)
     res = await ShopActionAgent().handle("帮我瞅瞅我买过哪些东西", ToolContext(user_id="u1"))
     assert "问欧米" in res.message  # 原兜底文案
+
+
+async def test_chat_can_request_native_json_output(monkeypatch):
+    import json
+    import httpx
+
+    payloads = []
+
+    def reply(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+        monkeypatch.setattr("app.model_gateway.qwen_chat._get_client", lambda: client)
+        chat = QwenChat(model="deepseek-v4-flash")
+        assert await chat.generate("测试", "返回 JSON", json_object=True) == "{}"
+        await chat.generate("普通对话")
+    assert payloads[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in payloads[1]

@@ -29,6 +29,13 @@ capabilities:
     temperature: 0.3
     max_tokens: 1024
 
+  shopping_action:          # 多轮聊天动作理解与参数提取
+    model: deepseek-v4-flash
+    temperature: 0.1
+    max_tokens: 640
+    json_object: true
+    trace_content: false
+
   tool_calling:             # LLM 函数调用（工具选择 + 参数填充，OpenAI tools 协议）
     model: deepseek-v4-flash
     temperature: 0.1

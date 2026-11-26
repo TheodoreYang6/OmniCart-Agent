@@ -18,6 +18,8 @@ import re
 import logging
 from typing import Optional
 
+from app.services.shopping_intent import is_cart_add_request
+
 logger = logging.getLogger(__name__)
 
 # ---- 中文数字映射 ----
@@ -49,7 +51,7 @@ _BUDGET_PATTERN = re.compile(
 )
 
 _CART_PATTERN = re.compile(
-    r"(加入购物车|加购|加进购物车|买了|下单|结算)"
+    r"(买了|下单|结算)"
 )
 
 _COMPARE_PATTERN = re.compile(
@@ -201,7 +203,7 @@ class FollowUpEngine:
         # =========================================
         # Pattern 4: 购物车意图 "加入购物车"
         # =========================================
-        if _CART_PATTERN.search(current_query):
+        if is_cart_add_request(current_query) or _CART_PATTERN.search(current_query):
             if not result["is_follow_up"]:
                 result["is_follow_up"] = True
                 result["follow_up_type"] = "cart_intent"

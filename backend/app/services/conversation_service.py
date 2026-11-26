@@ -177,6 +177,9 @@ class ConversationService:
         self._snapshot_cache[user_id, conversation_id] = snapshot
         return snapshot
 
+    def invalidate_context_snapshot(self, conversation_id: str, *, user_id: str) -> None:
+        self._snapshot_cache.pop((user_id, conversation_id), None)
+
     async def aget_context_projection(self, conversation_id: str, *, user_id: str) -> dict:
         """供 Router/FollowUp 使用的单一会话投影，隐藏 snapshot 的存储细节。"""
         return await self.get_context_snapshot(conversation_id, user_id=user_id)

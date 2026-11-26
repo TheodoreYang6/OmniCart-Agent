@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.database import get_session_sync, run_async
 from app.models.cart_item import CartItemModel
+from app.models.conversation import ConversationModel
 from app.schemas.cart import Cart, CartItem, CartItemCreate, CartItemUpdate, DEMO_USER_ID
 
 logger = logging.getLogger(__name__)
@@ -38,12 +39,28 @@ class PgCartRepository:
 
     async def aadd_item(self, item_create: CartItemCreate, user_id: str = DEMO_USER_ID,
                         title: str = "", brand: str = "", price: float = 0.0,
-                        image_url: str = "", sku_label: str = "") -> Optional[CartItem]:
+                        image_url: str = "", sku_label: str = "", *,
+                        pending_sku: tuple[str, str] | None = None) -> Optional[CartItem]:
         factory = get_session_sync()
         if factory is None:
             return None
-        cart_item_id = str(uuid.uuid4())[:8]
+        cart_item_id = (pending_sku[1] if pending_sku else "") or str(uuid.uuid4())[:8]
         async with factory() as session:
+            if pending_sku is not None:
+                conversation_id, selection_id = pending_sku
+                conversation = await session.scalar(select(ConversationModel).where(
+                    ConversationModel.conversation_id == conversation_id,
+                    ConversationModel.user_id == user_id,
+                ).with_for_update())
+                if conversation is None:
+                    return None
+                snapshot = conversation.context_snapshot or {}
+                pending = snapshot.get("pending_sku_product") or {}
+                if (pending.get("selection_id", "") != selection_id
+                        or pending.get("product_id") != item_create.product_id
+                        or pending.get("quantity", 1) != item_create.quantity):
+                    return None
+                conversation.context_snapshot = {**snapshot, "pending_sku_product": None}
             stmt = pg_insert(CartItemModel).values(
                 cart_item_id=cart_item_id,
                 user_id=user_id,
@@ -56,8 +73,12 @@ class PgCartRepository:
                 image_url=image_url,
                 quantity=item_create.quantity,
             )
-            await session.execute(stmt)
+            if pending_sku is not None:
+                stmt = stmt.on_conflict_do_nothing(index_elements=[CartItemModel.cart_item_id])
+            inserted = await session.execute(stmt)
             await session.commit()
+            if inserted.rowcount != 1:
+                return None
 
         item = CartItem(
             cart_item_id=cart_item_id,
@@ -230,6 +251,25 @@ class MemCartRepository:
 
     def __init__(self):
         self._carts: dict[str, Cart] = {}
+
+    async def aget_cart(self, user_id: str = DEMO_USER_ID) -> Cart:
+        return self.get_cart(user_id)
+
+    async def aadd_item(self, item_create: CartItemCreate, user_id: str = DEMO_USER_ID, *,
+                        pending_sku: tuple[str, str] | None = None, **details) -> CartItem | None:
+        if pending_sku is not None:
+            return None
+        return self.add_item(item_create, user_id, **details)
+
+    async def aupdate_item(self, cart_item_id: str, update_data: CartItemUpdate,
+                           user_id: str = DEMO_USER_ID) -> CartItem | None:
+        return self.update_item(cart_item_id, update_data, user_id)
+
+    async def aremove_item(self, cart_item_id: str, user_id: str = DEMO_USER_ID) -> bool:
+        return self.remove_item(cart_item_id, user_id)
+
+    async def aclear_cart(self, user_id: str = DEMO_USER_ID) -> bool:
+        return self.clear_cart(user_id)
 
     def _get_or_create(self, user_id: str) -> Cart:
         if user_id not in self._carts:

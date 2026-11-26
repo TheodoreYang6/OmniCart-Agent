@@ -180,6 +180,9 @@ class ToolPolicy:
         if tool is None:
             return _PreparedCall(call, None, signature, group_id, "未知工具")
 
+        if not state.allow_tool_writes and (tool.spec.permission != "read" or args.get("_confirmed")):
+            return _PreparedCall(call, tool, signature, group_id, "本轮仅允许读取和推荐")
+
         required = (getattr(tool.spec, "parameters", None) or {}).get("required") or []
         missing = [key for key in required if args.get(key) in (None, "", [])]
         if missing:

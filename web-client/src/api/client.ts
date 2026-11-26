@@ -209,7 +209,7 @@ export const api = {
 
   addToCart: (
     item: AddToCartRequest,
-    ctx: { user_id?: string; session_id?: string; conversation_id?: string } = {},
+    ctx: { user_id?: string; session_id?: string; conversation_id?: string; selection_id?: string } = {},
   ) => request<CartResponse['items'][number]>('/api/cart/items', { method: 'POST', body: item, query: ctx }),
 
   updateCartItem: (
